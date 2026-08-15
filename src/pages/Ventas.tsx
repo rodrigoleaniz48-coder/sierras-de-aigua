@@ -220,7 +220,7 @@ function NuevaVentaDialog({
       supabase.from('productos').select('id,nombre'),
       supabase.from('presentaciones').select('id,producto_id,nombre,volumen_ml,precio_minorista,precio_mayorista,iva_pct,activo').eq('activo', true),
       supabase.from('stock').select('id,lote_id,presentacion_id,unidades').gt('unidades', 0),
-      supabase.from('lotes').select('id,producto_id,campaña,edicion,variedad'),
+      supabase.from('lotes').select('*'),
     ]).then(([p, pr, s, l]) => {
       setProductos((p.data as Producto[]) ?? [])
       setPresentaciones((pr.data as Presentacion[]) ?? [])
