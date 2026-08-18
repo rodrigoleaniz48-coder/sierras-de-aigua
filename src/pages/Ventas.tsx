@@ -19,7 +19,7 @@ interface Venta {
   id: number; fecha: string; cliente_id: number | null; socio_id: string
   canal: string | null; estado: string; forma_pago: string | null
   con_factura: boolean; subtotal: number; descuento: number; iva: number; total: number
-  envio: boolean; costo_envio: number
+  envio: boolean; costo_envio: number; horario_entrega: string | null
   notas: string | null; creado_en: string
 }
 
@@ -38,6 +38,7 @@ export function Ventas() {
   const [cargando, setCargando] = useState(true)
   const [nueva, setNueva] = useState(false)
   const [ventaDetalle, setVentaDetalle] = useState<Venta | null>(null)
+  const [cadeteAbierto, setCadeteAbierto] = useState(false)
 
   const [filtroSocio, setFiltroSocio] = useState<string>('todos')
   const [soloEnvio, setSoloEnvio] = useState(false)
@@ -84,9 +85,12 @@ export function Ventas() {
             Cada venta descuenta stock automáticamente. El IVA se calcula solo si marcás <b>Con factura</b>.
           </p>
         </div>
-        {puedeEscribir && (
-          <button className="btn-primary" onClick={() => setNueva(true)}>+ Nueva venta</button>
-        )}
+        <div className="flex gap-2 flex-wrap">
+          <button className="btn-secondary" onClick={() => setCadeteAbierto(true)}>🛵 Lista para cadete</button>
+          {puedeEscribir && (
+            <button className="btn-primary" onClick={() => setNueva(true)}>+ Nueva venta</button>
+          )}
+        </div>
       </div>
 
       <div className="card p-3 grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
@@ -180,6 +184,15 @@ export function Ventas() {
         onCerrar={() => setVentaDetalle(null)}
         onCambio={() => { setVentaDetalle(null); cargar() }}
       />
+
+      <ListaCadeteDialog
+        abierto={cadeteAbierto}
+        ventas={ventas}
+        clientes={clientes}
+        desde={filtroDesde}
+        hasta={filtroHasta}
+        onCerrar={() => setCadeteAbierto(false)}
+      />
     </div>
   )
 }
@@ -228,6 +241,7 @@ function NuevaVentaDialog({
   const [conFactura, setConFactura] = useState(false)
   const [envio, setEnvio] = useState(false)
   const [costoEnvio, setCostoEnvio] = useState<string>('190')
+  const [horarioEntrega, setHorarioEntrega] = useState('')
   const [estado, setEstado] = useState<string>('cobrado')
   const [notas, setNotas] = useState('')
   const [items, setItems] = useState<Item[]>([nuevoItem()])
@@ -246,7 +260,7 @@ function NuevaVentaDialog({
     if (!abierto) return
     setFecha(new Date().toISOString().slice(0, 10))
     setClienteId(''); setCanal('directa'); setFormaPago('efectivo'); setConFactura(false)
-    setEnvio(false); setCostoEnvio('190')
+    setEnvio(false); setCostoEnvio('190'); setHorarioEntrega('')
     setEstado('cobrado'); setNotas(''); setItems([nuevoItem()]); setError(null)
 
     setDatosCargados(false)
@@ -384,6 +398,7 @@ function NuevaVentaDialog({
       canal, estado, forma_pago: formaPago,
       con_factura: conFactura,
       envio, costo_envio: cEnvio,
+      horario_entrega: envio ? (horarioEntrega.trim() || null) : null,
       subtotal, descuento: 0, iva, total,
       notas: notas.trim() || null,
     }).select('id').single()
@@ -466,7 +481,7 @@ function NuevaVentaDialog({
               <label htmlFor="env" className="text-sm text-oliva-800">🛵 Envío por cadete</label>
             </div>
             {envio && (
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="label">Costo del envío</label>
                   <input className="input tabular-nums" type="number" min="0" step="1" value={costoEnvio} onChange={(e) => setCostoEnvio(e.target.value)} />
@@ -475,6 +490,10 @@ function NuevaVentaDialog({
                 <div>
                   <label className="label">Se suma al total</label>
                   <div className="input tabular-nums">{money(Number(costoEnvio) || 0)}</div>
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="label">🕐 Horario de entrega (opcional)</label>
+                  <input className="input" value={horarioEntrega} onChange={(e) => setHorarioEntrega(e.target.value)} placeholder="ej: después de las 18h · solo mañana · sábados a la tarde" />
                 </div>
               </div>
             )}
@@ -693,6 +712,7 @@ function VentaDetalleDialog({
   const [formaPago, setFormaPago] = useState('')
   const [estado, setEstado] = useState('')
   const [notas, setNotas] = useState('')
+  const [horarioEntrega, setHorarioEntrega] = useState('')
 
   useEffect(() => {
     if (!venta) return
@@ -701,6 +721,7 @@ function VentaDetalleDialog({
     setFormaPago(venta.forma_pago ?? 'efectivo')
     setEstado(venta.estado)
     setNotas(venta.notas ?? '')
+    setHorarioEntrega(venta.horario_entrega ?? '')
     setError(null); setConfirmAnular(false)
 
     setCargando(true)
@@ -726,6 +747,7 @@ function VentaDetalleDialog({
     const patch: Record<string, unknown> = {
       cliente_id: clienteId ? Number(clienteId) : null,
       canal, forma_pago: formaPago, notas: notas.trim() || null,
+      horario_entrega: venta!.envio ? (horarioEntrega.trim() || null) : null,
     }
     if (nuevoEstado) patch.estado = nuevoEstado
     const { error } = await supabase.from('ventas').update(patch).eq('id', venta!.id)
@@ -829,6 +851,13 @@ function VentaDetalleDialog({
             <div className="input">{socio?.nombre ?? '—'}</div>
           </div>
         </div>
+
+        {venta.envio && (
+          <div>
+            <label className="label">🕐 Horario de entrega</label>
+            <input className="input" value={horarioEntrega} onChange={(e) => setHorarioEntrega(e.target.value)} disabled={!puedeEditar || anulada} placeholder="ej: después de las 18h" />
+          </div>
+        )}
 
         <div>
           <label className="label">Notas</label>
@@ -938,6 +967,216 @@ function VentaDetalleDialog({
           <div className="flex justify-end pt-2">
             <button className="btn-secondary" onClick={onCerrar}>Cerrar</button>
           </div>
+        )}
+      </div>
+    </Dialog>
+  )
+}
+
+// ---------- Diálogo Lista para cadete ----------
+
+function ListaCadeteDialog({
+  abierto, ventas, clientes, desde, hasta, onCerrar,
+}: {
+  abierto: boolean
+  ventas: Venta[]
+  clientes: Cliente[]
+  desde: string
+  hasta: string
+  onCerrar: () => void
+}) {
+  const [items, setItems] = useState<ItemVenta[]>([])
+  const [presMap, setPresMap] = useState<Map<number, PresentacionInfo>>(new Map())
+  const [prodMap, setProdMap] = useState<Map<number, ProdInfo>>(new Map())
+  const [seleccion, setSeleccion] = useState<Set<number>>(new Set())
+  const [cargando, setCargando] = useState(false)
+  const [copiado, setCopiado] = useState(false)
+
+  // Filtro de las ventas: en el rango del listado, con envío, no canceladas
+  const enviosDelRango = useMemo(() => {
+    return ventas
+      .filter((v) => v.envio && v.estado !== 'cancelado')
+      .filter((v) => !desde || v.fecha >= desde)
+      .filter((v) => !hasta || v.fecha <= hasta)
+      .sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : a.id - b.id))
+  }, [ventas, desde, hasta])
+
+  // Numeración estable por mes: cada envío tiene el índice + 1 dentro de las ventas con envío del mismo mes
+  const numeroPedido = useMemo(() => {
+    const porMes = new Map<string, Venta[]>()
+    for (const v of ventas) {
+      if (!v.envio) continue
+      const mes = v.fecha.slice(0, 7) // yyyy-mm
+      if (!porMes.has(mes)) porMes.set(mes, [])
+      porMes.get(mes)!.push(v)
+    }
+    const map = new Map<number, number>()
+    for (const [, arr] of porMes) {
+      arr.sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : a.id - b.id))
+      arr.forEach((v, idx) => map.set(v.id, idx + 1))
+    }
+    return map
+  }, [ventas])
+
+  useEffect(() => {
+    if (!abierto) return
+    setSeleccion(new Set(enviosDelRango.map((v) => v.id)))
+    setCopiado(false)
+    if (enviosDelRango.length === 0) { setItems([]); return }
+    setCargando(true)
+    const ids = enviosDelRango.map((v) => v.id)
+    Promise.all([
+      supabase.from('items_venta').select('*').in('venta_id', ids),
+      supabase.from('presentaciones').select('id,nombre,producto_id,es_pack'),
+      supabase.from('productos').select('id,nombre'),
+    ]).then(([i, p, pr]) => {
+      setItems((i.data as ItemVenta[]) ?? [])
+      setPresMap(new Map(((p.data as PresentacionInfo[]) ?? []).map((x) => [x.id, x])))
+      setProdMap(new Map(((pr.data as ProdInfo[]) ?? []).map((x) => [x.id, x])))
+      setCargando(false)
+    })
+  }, [abierto, enviosDelRango])
+
+  const clientePorId = useMemo(() => new Map(clientes.map((c) => [c.id, c])), [clientes])
+  const itemsPorVenta = useMemo(() => {
+    const m = new Map<number, ItemVenta[]>()
+    for (const it of items) {
+      const arr = m.get(it.venta_id) ?? []
+      arr.push(it)
+      m.set(it.venta_id, arr)
+    }
+    return m
+  }, [items])
+
+  function resumenItems(ventaId: number): string {
+    const arr = itemsPorVenta.get(ventaId) ?? []
+    return arr.map((it) => {
+      const p = presMap.get(it.presentacion_id)
+      const prod = p ? prodMap.get(p.producto_id) : null
+      return `${it.unidades}× ${prod?.nombre ?? ''} ${p?.nombre ?? ''}`.trim()
+    }).join(', ')
+  }
+
+  function toggleUno(id: number) {
+    setSeleccion((prev) => {
+      const s = new Set(prev)
+      if (s.has(id)) s.delete(id); else s.add(id)
+      return s
+    })
+  }
+  function toggleTodos() {
+    if (seleccion.size === enviosDelRango.length) setSeleccion(new Set())
+    else setSeleccion(new Set(enviosDelRango.map((v) => v.id)))
+  }
+
+  function armarTexto(): string {
+    const fechaLabel = desde && hasta && desde === hasta
+      ? desde
+      : `${desde || '—'} → ${hasta || 'hoy'}`
+    const bloques = enviosDelRango
+      .filter((v) => seleccion.has(v.id))
+      .map((v) => {
+        const c = v.cliente_id ? clientePorId.get(v.cliente_id) : null
+        const partes: string[] = []
+        partes.push(`Pedido #${numeroPedido.get(v.id) ?? '?'}`)
+        partes.push(c?.nombre ?? 'Sin cliente')
+        partes.push(resumenItems(v.id) || '(sin ítems)')
+        if (c?.telefono || c?.whatsapp) partes.push(`📞 ${c.whatsapp ?? c.telefono}`)
+        if (c?.direccion) partes.push(`📍 ${c.direccion}${c.localidad ? ', ' + c.localidad : ''}`)
+        if (v.horario_entrega) partes.push(`🕐 ${v.horario_entrega}`)
+        return partes.join('\n')
+      })
+    const encabezado = `🛵 Pedidos Sierras de Aiguá — ${fechaLabel}`
+    return [encabezado, ...bloques].join('\n\n')
+  }
+
+  async function copiar() {
+    try {
+      await navigator.clipboard.writeText(armarTexto())
+      setCopiado(true)
+      setTimeout(() => setCopiado(false), 2500)
+    } catch {
+      setCopiado(false)
+      alert('No se pudo copiar. Seleccioná el texto y copialo a mano.')
+    }
+  }
+
+  function abrirWhatsapp() {
+    const url = 'https://wa.me/?text=' + encodeURIComponent(armarTexto())
+    window.open(url, '_blank')
+  }
+
+  return (
+    <Dialog abierto={abierto} onCerrar={onCerrar} titulo="🛵 Pedidos para el cadete" ancho="lg">
+      <div className="space-y-4">
+        <div className="text-xs text-oliva-600">
+          Rango: <b>{desde || '—'}</b> a <b>{hasta || 'hoy'}</b>. Cambiá los filtros de fecha en el listado principal si necesitás otro período.
+        </div>
+
+        {cargando ? (
+          <div className="text-sm text-oliva-700">Cargando pedidos…</div>
+        ) : enviosDelRango.length === 0 ? (
+          <div className="card p-4 text-sm text-oliva-700">
+            No hay ventas con envío en este período. Cargá una nueva venta con el checkbox 🛵 Envío.
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center justify-between text-xs text-oliva-700">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-oliva-700"
+                  checked={seleccion.size === enviosDelRango.length}
+                  onChange={toggleTodos}
+                />
+                Marcar/desmarcar todos ({seleccion.size}/{enviosDelRango.length})
+              </label>
+            </div>
+
+            <div className="space-y-2 max-h-[45vh] overflow-y-auto">
+              {enviosDelRango.map((v) => {
+                const c = v.cliente_id ? clientePorId.get(v.cliente_id) : null
+                const num = numeroPedido.get(v.id)
+                const marcado = seleccion.has(v.id)
+                return (
+                  <label key={v.id} className={`flex gap-3 items-start p-3 rounded-lg border cursor-pointer ${marcado ? 'bg-oliva-50 border-oliva-200' : 'bg-white border-oliva-100'}`}>
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 mt-1 accent-oliva-700"
+                      checked={marcado}
+                      onChange={() => toggleUno(v.id)}
+                    />
+                    <div className="flex-1 text-sm">
+                      <div className="font-medium text-oliva-900">
+                        Pedido #{num} · {c?.nombre ?? <span className="italic text-oliva-500">sin cliente</span>}
+                      </div>
+                      <div className="text-oliva-700 text-xs mt-0.5">{resumenItems(v.id) || <em>sin ítems</em>}</div>
+                      <div className="text-oliva-600 text-xs mt-1 space-y-0.5">
+                        {(c?.whatsapp || c?.telefono) && <div>📞 {c?.whatsapp ?? c?.telefono}</div>}
+                        {c?.direccion && <div>📍 {c.direccion}{c.localidad ? `, ${c.localidad}` : ''}</div>}
+                        {v.horario_entrega && <div>🕐 {v.horario_entrega}</div>}
+                      </div>
+                    </div>
+                  </label>
+                )
+              })}
+            </div>
+
+            <details className="rounded-lg border border-oliva-100 p-3 bg-oliva-50/50">
+              <summary className="text-xs text-oliva-700 cursor-pointer">Ver texto que se va a enviar</summary>
+              <pre className="text-xs text-oliva-800 whitespace-pre-wrap mt-2 font-mono">{armarTexto()}</pre>
+            </details>
+
+            <div className="flex flex-wrap gap-2 justify-end pt-2">
+              <button className="btn-secondary" onClick={onCerrar}>Cerrar</button>
+              <button className="btn-secondary" onClick={copiar} disabled={seleccion.size === 0}>
+                {copiado ? '✓ Copiado' : 'Copiar al portapapeles'}
+              </button>
+              <button className="btn-primary" onClick={abrirWhatsapp} disabled={seleccion.size === 0}>
+                Abrir WhatsApp
+              </button>
+            </div>
+          </>
         )}
       </div>
     </Dialog>
