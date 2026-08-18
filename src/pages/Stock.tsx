@@ -5,73 +5,68 @@ import { Dialog } from '../components/Dialog'
 import { num } from '../lib/format'
 
 interface Producto { id: number; nombre: string; categoria: string }
-interface Presentacion { id: number; producto_id: number; nombre: string; volumen_ml: number | null; stock_minimo: number; activo: boolean }
-interface Lote {
-  id: number
-  producto_id: number
-  campaña: number
-  edicion: string | null
-  variedad: string | null
-  fecha_elaboracion: string
-  litros_producidos: number
-  litros_disponibles: number
-  acidez_pct: number | null
-  notas: string | null
+interface Presentacion {
+  id: number; producto_id: number; nombre: string; volumen_ml: number | null
+  stock_minimo: number; activo: boolean
 }
-interface StockRow {
-  id: number
-  lote_id: number
-  presentacion_id: number
-  unidades: number
+interface Tanque {
+  id: number; nombre: string; capacidad_litros: number
+  producto_id: number | null; variedad_libre: string | null
+  campaña: number | null; litros_actuales: number; notas: string | null; activo: boolean
 }
-interface Movimiento {
-  id: number
-  stock_id: number
-  tipo: string
-  unidades: number
-  venta_id: number | null
-  nota: string | null
-  fecha: string
+interface StockRow { id: number; tanque_id: number | null; presentacion_id: number; unidades: number }
+interface MovStock { id: number; stock_id: number; tipo: string; unidades: number; venta_id: number | null; nota: string | null; fecha: string }
+interface MovGranel {
+  id: number; fecha: string; tipo: string
+  tanque_origen_id: number | null; tanque_destino_id: number | null
+  litros: number; nota: string | null; stock_id: number | null
 }
 
-type Tab = 'actual' | 'lotes' | 'movimientos'
+type Tab = 'tanques' | 'envasado' | 'movimientos'
 
 export function Stock() {
   const { puede } = useAuth()
   const puedeEscribir = puede(['admin', 'ventas'])
 
-  const [tab, setTab] = useState<Tab>('actual')
+  const [tab, setTab] = useState<Tab>('tanques')
   const [productos, setProductos] = useState<Producto[]>([])
   const [presentaciones, setPresentaciones] = useState<Presentacion[]>([])
-  const [lotes, setLotes] = useState<Lote[]>([])
+  const [tanques, setTanques] = useState<Tanque[]>([])
   const [stock, setStock] = useState<StockRow[]>([])
-  const [movs, setMovs] = useState<Movimiento[]>([])
+  const [movsStock, setMovsStock] = useState<MovStock[]>([])
+  const [movsGranel, setMovsGranel] = useState<MovGranel[]>([])
   const [cargando, setCargando] = useState(true)
 
-  const [nuevoLote, setNuevoLote] = useState(false)
   const [envasar, setEnvasar] = useState(false)
+  const [ajusteEnv, setAjusteEnv] = useState(false)
+  const [trasegar, setTrasegar] = useState(false)
+  const [cargarCosecha, setCargarCosecha] = useState(false)
+  const [mermaMuestra, setMermaMuestra] = useState(false)
+  const [tanqueEdit, setTanqueEdit] = useState<Tanque | null>(null)
 
   async function cargar() {
     setCargando(true)
-    const [p, pr, l, s, m] = await Promise.all([
+    const [p, pr, t, s, mS, mG] = await Promise.all([
       supabase.from('productos').select('id,nombre,categoria').order('nombre'),
       supabase.from('presentaciones').select('id,producto_id,nombre,volumen_ml,stock_minimo,activo'),
-      supabase.from('lotes').select('*').order('campaña', { ascending: false }).order('id', { ascending: false }),
+      supabase.from('tanques').select('*').order('id'),
       supabase.from('stock').select('*'),
-      supabase.from('movimientos_stock').select('*').order('fecha', { ascending: false }).limit(200),
+      supabase.from('movimientos_stock').select('*').order('fecha', { ascending: false }).limit(100),
+      supabase.from('movimientos_granel').select('*').order('fecha', { ascending: false }).limit(100),
     ])
     setProductos((p.data as Producto[]) ?? [])
     setPresentaciones((pr.data as Presentacion[]) ?? [])
-    setLotes((l.data as Lote[]) ?? [])
+    setTanques((t.data as Tanque[]) ?? [])
     setStock((s.data as StockRow[]) ?? [])
-    setMovs((m.data as Movimiento[]) ?? [])
+    setMovsStock((mS.data as MovStock[]) ?? [])
+    setMovsGranel((mG.data as MovGranel[]) ?? [])
     setCargando(false)
   }
   useEffect(() => { cargar() }, [])
 
   const prodPorId = useMemo(() => new Map(productos.map((x) => [x.id, x])), [productos])
   const presPorId = useMemo(() => new Map(presentaciones.map((x) => [x.id, x])), [presentaciones])
-  const lotePorId = useMemo(() => new Map(lotes.map((x) => [x.id, x])), [lotes])
+  const tanquePorId = useMemo(() => new Map(tanques.map((x) => [x.id, x])), [tanques])
 
   return (
     <div className="space-y-6">
@@ -79,181 +74,358 @@ export function Stock() {
         <div>
           <h1 className="text-2xl font-semibold text-oliva-900">Stock</h1>
           <p className="text-sm text-oliva-700 mt-1">
-            Lotes, envasado y stock actual. Cada venta descuenta unidades automáticamente.
+            Tanques de granel y stock envasado. Cada venta descuenta unidades automáticamente.
           </p>
         </div>
         {puedeEscribir && (
           <div className="flex gap-2 flex-wrap">
-            <button className="btn-secondary" onClick={() => setNuevoLote(true)}>+ Nuevo lote</button>
+            <button className="btn-secondary" onClick={() => setCargarCosecha(true)}>+ Cargar cosecha</button>
+            <button className="btn-secondary" onClick={() => setTrasegar(true)}>Trasegar / blend</button>
+            <button className="btn-secondary" onClick={() => setMermaMuestra(true)}>Merma / muestra</button>
+            <button className="btn-secondary" onClick={() => setAjusteEnv(true)}>Ajuste envasado</button>
             <button className="btn-primary" onClick={() => setEnvasar(true)}>Envasar</button>
           </div>
         )}
       </div>
 
-      <div className="flex gap-1 border-b border-oliva-100">
-        {(['actual', 'lotes', 'movimientos'] as Tab[]).map((t) => (
+      <div className="flex gap-1 border-b border-oliva-100 overflow-x-auto">
+        {(['tanques', 'envasado', 'movimientos'] as Tab[]).map((t) => (
           <button
             key={t}
-            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition ${
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition ${
               tab === t ? 'border-oliva-700 text-oliva-900' : 'border-transparent text-oliva-600 hover:text-oliva-900'
             }`}
             onClick={() => setTab(t)}
           >
-            {t === 'actual' ? 'Stock actual' : t === 'lotes' ? 'Lotes' : 'Movimientos'}
+            {t === 'tanques' ? 'Tanques (granel)' : t === 'envasado' ? 'Stock envasado' : 'Movimientos'}
           </button>
         ))}
       </div>
 
       {cargando && <div className="card p-6 text-sm text-oliva-700">Cargando…</div>}
 
-      {!cargando && tab === 'actual' && (
-        <StockActual productos={productos} presentaciones={presentaciones} lotes={lotes} stock={stock} />
+      {!cargando && tab === 'tanques' && (
+        <TanquesGrid tanques={tanques} prodPorId={prodPorId} onEditar={setTanqueEdit} puedeEditar={puedeEscribir} />
       )}
 
-      {!cargando && tab === 'lotes' && (
-        <LotesTab lotes={lotes} prodPorId={prodPorId} />
+      {!cargando && tab === 'envasado' && (
+        <EnvasadoView productos={productos} presentaciones={presentaciones} stock={stock} tanquePorId={tanquePorId} />
       )}
 
       {!cargando && tab === 'movimientos' && (
-        <MovimientosTab movs={movs} stock={stock} presPorId={presPorId} lotePorId={lotePorId} prodPorId={prodPorId} />
+        <MovimientosView
+          movsStock={movsStock}
+          movsGranel={movsGranel}
+          stock={stock}
+          presPorId={presPorId}
+          prodPorId={prodPorId}
+          tanquePorId={tanquePorId}
+        />
       )}
-
-      <NuevoLoteDialog
-        abierto={nuevoLote}
-        productos={productos.filter((p) => p.categoria === 'aceite')}
-        onCerrar={() => setNuevoLote(false)}
-        onOk={() => { setNuevoLote(false); cargar() }}
-      />
 
       <EnvasarDialog
         abierto={envasar}
-        lotes={lotes}
-        presentaciones={presentaciones.filter((x) => x.activo)}
+        tanques={tanques.filter((t) => t.activo && Number(t.litros_actuales) > 0)}
+        presentaciones={presentaciones.filter((x) => x.activo && x.volumen_ml)}
         prodPorId={prodPorId}
         onCerrar={() => setEnvasar(false)}
         onOk={() => { setEnvasar(false); cargar() }}
+      />
+
+      <AjusteEnvasadoDialog
+        abierto={ajusteEnv}
+        presentaciones={presentaciones.filter((x) => x.activo)}
+        prodPorId={prodPorId}
+        stock={stock}
+        tanques={tanques}
+        onCerrar={() => setAjusteEnv(false)}
+        onOk={() => { setAjusteEnv(false); cargar() }}
+      />
+
+      <TrasegarDialog
+        abierto={trasegar}
+        tanques={tanques.filter((t) => t.activo)}
+        prodPorId={prodPorId}
+        onCerrar={() => setTrasegar(false)}
+        onOk={() => { setTrasegar(false); cargar() }}
+      />
+
+      <CargarCosechaDialog
+        abierto={cargarCosecha}
+        tanques={tanques.filter((t) => t.activo)}
+        productos={productos.filter((p) => p.categoria === 'aceite')}
+        prodPorId={prodPorId}
+        onCerrar={() => setCargarCosecha(false)}
+        onOk={() => { setCargarCosecha(false); cargar() }}
+      />
+
+      <MermaMuestraDialog
+        abierto={mermaMuestra}
+        tanques={tanques.filter((t) => t.activo && Number(t.litros_actuales) > 0)}
+        prodPorId={prodPorId}
+        onCerrar={() => setMermaMuestra(false)}
+        onOk={() => { setMermaMuestra(false); cargar() }}
+      />
+
+      <TanqueEditDialog
+        abierto={tanqueEdit !== null}
+        tanque={tanqueEdit}
+        productos={productos.filter((p) => p.categoria === 'aceite')}
+        onCerrar={() => setTanqueEdit(null)}
+        onOk={() => { setTanqueEdit(null); cargar() }}
       />
     </div>
   )
 }
 
-// ---------- Vistas ----------
+// ============================================================
+// Vistas
+// ============================================================
 
-function StockActual({ productos, presentaciones, lotes, stock }: {
-  productos: Producto[]; presentaciones: Presentacion[]; lotes: Lote[]; stock: StockRow[]
+function contenidoDe(t: Tanque, prodPorId: Map<number, Producto>) {
+  if (t.producto_id) return prodPorId.get(t.producto_id)?.nombre ?? '—'
+  if (t.variedad_libre) return t.variedad_libre
+  return 'Vacío'
+}
+
+function TanquesGrid({
+  tanques, prodPorId, onEditar, puedeEditar,
+}: {
+  tanques: Tanque[]
+  prodPorId: Map<number, Producto>
+  onEditar: (t: Tanque) => void
+  puedeEditar: boolean
+}) {
+  if (tanques.length === 0) {
+    return <div className="card p-6 text-sm text-oliva-700">No hay tanques cargados.</div>
+  }
+  const totalCap = tanques.reduce((s, t) => s + Number(t.capacidad_litros), 0)
+  const totalActual = tanques.reduce((s, t) => s + Number(t.litros_actuales), 0)
+
+  return (
+    <div className="space-y-4">
+      <div className="card p-4 flex flex-wrap gap-6">
+        <div>
+          <div className="text-xs uppercase tracking-wide text-oliva-600">Total granel</div>
+          <div className="text-2xl font-semibold text-oliva-900 tabular-nums">{num(totalActual)} L</div>
+        </div>
+        <div>
+          <div className="text-xs uppercase tracking-wide text-oliva-600">Capacidad</div>
+          <div className="text-2xl font-semibold text-oliva-900 tabular-nums">{num(totalCap)} L</div>
+        </div>
+        <div>
+          <div className="text-xs uppercase tracking-wide text-oliva-600">Ocupación</div>
+          <div className="text-2xl font-semibold text-oliva-900 tabular-nums">
+            {totalCap ? Math.round((totalActual / totalCap) * 100) : 0}%
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {tanques.map((t) => (
+          <TanqueCard key={t.id} tanque={t} prodPorId={prodPorId} onEditar={() => onEditar(t)} puedeEditar={puedeEditar} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function TanqueCard({
+  tanque, prodPorId, onEditar, puedeEditar,
+}: {
+  tanque: Tanque
+  prodPorId: Map<number, Producto>
+  onEditar: () => void
+  puedeEditar: boolean
+}) {
+  const cap = Number(tanque.capacidad_litros) || 1
+  const actual = Number(tanque.litros_actuales)
+  const pct = Math.min(100, Math.round((actual / cap) * 100))
+  const contenido = contenidoDe(tanque, prodPorId)
+  const vacio = actual === 0
+
+  return (
+    <div className={`card p-4 flex flex-col gap-3 ${!tanque.activo ? 'opacity-60' : ''}`}>
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <div className="text-lg font-semibold text-oliva-900">{tanque.nombre}</div>
+          <div className={`text-sm ${vacio ? 'italic text-oliva-500' : 'text-oliva-800'}`}>{contenido}</div>
+          {tanque.campaña && !vacio && (
+            <div className="text-xs text-oliva-600 mt-0.5">Campaña {tanque.campaña}</div>
+          )}
+        </div>
+        {puedeEditar && (
+          <button
+            className="text-xs text-oliva-700 hover:text-oliva-900 underline"
+            onClick={onEditar}
+          >
+            Editar
+          </button>
+        )}
+      </div>
+
+      {/* Barra visual tipo "tanque" */}
+      <div className="relative h-24 rounded-lg border-2 border-oliva-200 overflow-hidden bg-oliva-50">
+        <div
+          className={`absolute bottom-0 left-0 right-0 transition-all ${vacio ? '' : 'bg-gradient-to-t from-aceite-500 to-aceite-500/70'}`}
+          style={{ height: `${pct}%` }}
+        />
+        <div className="absolute inset-0 flex items-end justify-center pb-1">
+          <div className="text-xs font-medium text-oliva-900 bg-white/80 rounded px-2 py-0.5 tabular-nums">
+            {num(actual)} L
+          </div>
+        </div>
+      </div>
+
+      <div className="flex justify-between text-xs text-oliva-600 tabular-nums">
+        <span>{pct}% ocupación</span>
+        <span>Cap. {num(cap)} L</span>
+      </div>
+
+      {tanque.notas && (
+        <div className="text-xs text-oliva-600 italic">{tanque.notas}</div>
+      )}
+    </div>
+  )
+}
+
+function EnvasadoView({
+  productos, presentaciones, stock, tanquePorId,
+}: {
+  productos: Producto[]
+  presentaciones: Presentacion[]
+  stock: StockRow[]
+  tanquePorId: Map<number, Tanque>
 }) {
   const filas = useMemo(() => {
-    // Agrupar stock por presentación (sumando lotes) y anexar meta
-    const porPres = new Map<number, { unidades: number; lotes: { lote_id: number; unidades: number }[] }>()
+    const porPres = new Map<number, { unidades: number; detalle: { tanque_id: number | null; unidades: number }[] }>()
     for (const s of stock) {
-      const g = porPres.get(s.presentacion_id) ?? { unidades: 0, lotes: [] }
+      const g = porPres.get(s.presentacion_id) ?? { unidades: 0, detalle: [] }
       g.unidades += s.unidades
-      g.lotes.push({ lote_id: s.lote_id, unidades: s.unidades })
+      g.detalle.push({ tanque_id: s.tanque_id, unidades: s.unidades })
       porPres.set(s.presentacion_id, g)
     }
     return presentaciones
       .map((p) => {
         const prod = productos.find((x) => x.id === p.producto_id)
-        const g = porPres.get(p.id) ?? { unidades: 0, lotes: [] }
-        return { pres: p, prod, unidades: g.unidades, lotes: g.lotes }
+        const g = porPres.get(p.id) ?? { unidades: 0, detalle: [] }
+        return { pres: p, prod, unidades: g.unidades, detalle: g.detalle }
       })
       .filter((r) => r.prod)
-      .sort((a, b) =>
-        (a.prod!.nombre + a.pres.nombre).localeCompare(b.prod!.nombre + b.pres.nombre)
-      )
+      .sort((a, b) => (a.prod!.nombre + a.pres.nombre).localeCompare(b.prod!.nombre + b.pres.nombre))
   }, [productos, presentaciones, stock])
 
-  const litrosGranel = useMemo(() => {
-    const m = new Map<number, number>()
-    for (const l of lotes) m.set(l.producto_id, (m.get(l.producto_id) ?? 0) + Number(l.litros_disponibles))
-    return m
-  }, [lotes])
-
   return (
-    <div className="space-y-4">
-      <div className="card p-4">
-        <div className="text-xs uppercase tracking-wide text-oliva-600 mb-2">Granel disponible (litros sin envasar)</div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-          {productos
-            .filter((p) => (litrosGranel.get(p.id) ?? 0) > 0)
-            .map((p) => (
-              <div key={p.id} className="rounded-lg bg-oliva-50 border border-oliva-100 p-3">
-                <div className="text-xs text-oliva-600">{p.nombre}</div>
-                <div className="text-lg font-semibold text-oliva-900 tabular-nums">{num(litrosGranel.get(p.id) ?? 0)} L</div>
-              </div>
-            ))}
-          {[...litrosGranel.values()].every((v) => v === 0) && (
-            <div className="text-sm text-oliva-600">Sin granel disponible. Cargá un lote.</div>
+    <div className="card p-0 overflow-x-auto">
+      <table className="w-full text-sm min-w-[720px]">
+        <thead>
+          <tr className="text-left text-xs uppercase tracking-wide text-oliva-600 border-b border-oliva-100 bg-oliva-50">
+            <th className="py-2 px-4">Producto</th>
+            <th className="py-2 px-4">Presentación</th>
+            <th className="py-2 px-4 text-right">Unidades</th>
+            <th className="py-2 px-4 text-right">Mínimo</th>
+            <th className="py-2 px-4">Proviene de</th>
+            <th className="py-2 px-4"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {filas.map((r) => {
+            const bajo = r.unidades <= r.pres.stock_minimo && r.pres.stock_minimo > 0
+            const origenes = r.detalle
+              .filter((d) => d.unidades > 0)
+              .map((d) => (d.tanque_id ? tanquePorId.get(d.tanque_id)?.nombre ?? `T${d.tanque_id}` : 'directo'))
+            return (
+              <tr key={r.pres.id} className="border-b border-oliva-100/70 last:border-0">
+                <td className="py-2 px-4 text-oliva-800">{r.prod?.nombre}</td>
+                <td className="py-2 px-4 text-oliva-800">{r.pres.nombre}</td>
+                <td className={`py-2 px-4 text-right tabular-nums font-medium ${r.unidades === 0 ? 'text-oliva-400' : 'text-oliva-900'}`}>{r.unidades}</td>
+                <td className="py-2 px-4 text-right tabular-nums text-oliva-600">{r.pres.stock_minimo || '—'}</td>
+                <td className="py-2 px-4 text-oliva-600 text-xs">{origenes.length ? Array.from(new Set(origenes)).join(', ') : '—'}</td>
+                <td className="py-2 px-4 text-right">
+                  {bajo && <span className="text-[11px] rounded-full bg-red-100 text-red-800 px-2 py-[1px] uppercase tracking-wide">Bajo</span>}
+                </td>
+              </tr>
+            )
+          })}
+          {filas.length === 0 && (
+            <tr><td colSpan={6} className="py-6 text-center text-sm text-oliva-600">Sin presentaciones cargadas.</td></tr>
           )}
-        </div>
-      </div>
-
-      <div className="card p-0 overflow-x-auto">
-        <table className="w-full text-sm min-w-[640px]">
-          <thead>
-            <tr className="text-left text-xs uppercase tracking-wide text-oliva-600 border-b border-oliva-100 bg-oliva-50">
-              <th className="py-2 px-4">Producto</th>
-              <th className="py-2 px-4">Presentación</th>
-              <th className="py-2 px-4 text-right">Unidades</th>
-              <th className="py-2 px-4 text-right">Mínimo</th>
-              <th className="py-2 px-4"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {filas.map((r) => {
-              const bajo = r.unidades <= r.pres.stock_minimo && r.pres.stock_minimo > 0
-              return (
-                <tr key={r.pres.id} className="border-b border-oliva-100/70 last:border-0">
-                  <td className="py-2 px-4 text-oliva-800">{r.prod?.nombre}</td>
-                  <td className="py-2 px-4 text-oliva-800">{r.pres.nombre}</td>
-                  <td className={`py-2 px-4 text-right tabular-nums font-medium ${r.unidades === 0 ? 'text-oliva-400' : 'text-oliva-900'}`}>{r.unidades}</td>
-                  <td className="py-2 px-4 text-right tabular-nums text-oliva-600">{r.pres.stock_minimo || '—'}</td>
-                  <td className="py-2 px-4 text-right">
-                    {bajo && <span className="text-[11px] rounded-full bg-red-100 text-red-800 px-2 py-[1px] uppercase tracking-wide">Bajo</span>}
-                  </td>
-                </tr>
-              )
-            })}
-            {filas.length === 0 && (
-              <tr><td colSpan={5} className="py-6 text-center text-sm text-oliva-600">Sin presentaciones cargadas.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+        </tbody>
+      </table>
     </div>
   )
 }
 
-function LotesTab({ lotes, prodPorId }: { lotes: Lote[]; prodPorId: Map<number, Producto> }) {
-  if (lotes.length === 0) {
-    return <div className="card p-6 text-sm text-oliva-700">Todavía no hay lotes. Cargá el primero con <b>+ Nuevo lote</b>.</div>
+function MovimientosView({
+  movsStock, movsGranel, stock, presPorId, prodPorId, tanquePorId,
+}: {
+  movsStock: MovStock[]
+  movsGranel: MovGranel[]
+  stock: StockRow[]
+  presPorId: Map<number, Presentacion>
+  prodPorId: Map<number, Producto>
+  tanquePorId: Map<number, Tanque>
+}) {
+  const stockPorId = useMemo(() => new Map(stock.map((s) => [s.id, s])), [stock])
+
+  type Row = {
+    key: string; fecha: string; tipo: string; que: string
+    detalle: string; cantidad: string; nota: string | null; scope: 'granel' | 'envasado'
   }
+
+  const filas: Row[] = useMemo(() => {
+    const gr: Row[] = movsGranel.map((m) => {
+      const org = m.tanque_origen_id ? tanquePorId.get(m.tanque_origen_id)?.nombre : null
+      const dest = m.tanque_destino_id ? tanquePorId.get(m.tanque_destino_id)?.nombre : null
+      const detalle = m.tipo === 'trasegar' ? `${org} → ${dest}`
+        : m.tipo === 'cargar'   ? `→ ${dest}`
+        : m.tipo === 'envasar'  ? `${org} → envasado`
+        : `${org ?? dest ?? '—'}`
+      return {
+        key: `g${m.id}`, fecha: m.fecha, tipo: m.tipo, que: 'granel',
+        detalle, cantidad: `${Number(m.litros).toString()} L`, nota: m.nota, scope: 'granel',
+      }
+    })
+    const st: Row[] = movsStock.map((m) => {
+      const s = stockPorId.get(m.stock_id)
+      const pres = s ? presPorId.get(s.presentacion_id) : undefined
+      const prod = pres ? prodPorId.get(pres.producto_id) : undefined
+      return {
+        key: `s${m.id}`, fecha: m.fecha, tipo: m.tipo, que: 'envasado',
+        detalle: `${prod?.nombre ?? '—'} · ${pres?.nombre ?? '—'}`,
+        cantidad: `${m.unidades > 0 ? '+' : ''}${m.unidades} u`,
+        nota: m.nota, scope: 'envasado',
+      }
+    })
+    return [...gr, ...st].sort((a, b) => (a.fecha < b.fecha ? 1 : -1))
+  }, [movsStock, movsGranel, stock, presPorId, prodPorId, tanquePorId, stockPorId])
+
+  if (filas.length === 0) return <div className="card p-6 text-sm text-oliva-700">Sin movimientos todavía.</div>
+
   return (
     <div className="card p-0 overflow-x-auto">
-      <table className="w-full text-sm min-w-[780px]">
+      <table className="w-full text-sm min-w-[720px]">
         <thead>
           <tr className="text-left text-xs uppercase tracking-wide text-oliva-600 border-b border-oliva-100 bg-oliva-50">
-            <th className="py-2 px-4">Producto</th>
-            <th className="py-2 px-4">Campaña</th>
-            <th className="py-2 px-4">Edición</th>
-            <th className="py-2 px-4">Variedad</th>
             <th className="py-2 px-4">Fecha</th>
-            <th className="py-2 px-4 text-right">Producidos (L)</th>
-            <th className="py-2 px-4 text-right">Granel (L)</th>
-            <th className="py-2 px-4 text-right">Acidez %</th>
+            <th className="py-2 px-4">Capa</th>
+            <th className="py-2 px-4">Tipo</th>
+            <th className="py-2 px-4">Detalle</th>
+            <th className="py-2 px-4 text-right">Cantidad</th>
+            <th className="py-2 px-4">Nota</th>
           </tr>
         </thead>
         <tbody>
-          {lotes.map((l) => (
-            <tr key={l.id} className="border-b border-oliva-100/70 last:border-0">
-              <td className="py-2 px-4 text-oliva-800">{prodPorId.get(l.producto_id)?.nombre ?? '—'}</td>
-              <td className="py-2 px-4 tabular-nums">{l.campaña}</td>
-              <td className="py-2 px-4 text-oliva-700">{l.edicion ?? '—'}</td>
-              <td className="py-2 px-4 text-oliva-700">{l.variedad ?? '—'}</td>
-              <td className="py-2 px-4 tabular-nums text-oliva-600">{l.fecha_elaboracion}</td>
-              <td className="py-2 px-4 text-right tabular-nums">{num(l.litros_producidos)}</td>
-              <td className={`py-2 px-4 text-right tabular-nums font-medium ${Number(l.litros_disponibles) === 0 ? 'text-oliva-400' : 'text-oliva-900'}`}>{num(l.litros_disponibles)}</td>
-              <td className="py-2 px-4 text-right tabular-nums text-oliva-600">{l.acidez_pct ? Number(l.acidez_pct) : '—'}</td>
+          {filas.map((r) => (
+            <tr key={r.key} className="border-b border-oliva-100/70 last:border-0">
+              <td className="py-2 px-4 tabular-nums text-oliva-600 whitespace-nowrap">{new Date(r.fecha).toLocaleString('es-UY')}</td>
+              <td className="py-2 px-4 text-xs text-oliva-600 uppercase">{r.scope}</td>
+              <td className="py-2 px-4">
+                <span className={`text-[11px] uppercase tracking-wide rounded-full px-2 py-[1px] ${badgeTipo(r.tipo)}`}>{r.tipo}</span>
+              </td>
+              <td className="py-2 px-4 text-oliva-800">{r.detalle}</td>
+              <td className={`py-2 px-4 text-right tabular-nums font-medium ${r.cantidad.startsWith('-') ? 'text-red-700' : 'text-oliva-900'}`}>{r.cantidad}</td>
+              <td className="py-2 px-4 text-oliva-600 truncate max-w-[240px]">{r.nota ?? ''}</td>
             </tr>
           ))}
         </tbody>
@@ -262,189 +434,35 @@ function LotesTab({ lotes, prodPorId }: { lotes: Lote[]; prodPorId: Map<number, 
   )
 }
 
-function MovimientosTab({
-  movs, stock, presPorId, lotePorId, prodPorId,
-}: {
-  movs: Movimiento[]
-  stock: StockRow[]
-  presPorId: Map<number, Presentacion>
-  lotePorId: Map<number, Lote>
-  prodPorId: Map<number, Producto>
-}) {
-  const stockPorId = useMemo(() => new Map(stock.map((s) => [s.id, s])), [stock])
-
-  if (movs.length === 0) return <div className="card p-6 text-sm text-oliva-700">Sin movimientos todavía.</div>
-
-  return (
-    <div className="card p-0 overflow-x-auto">
-      <table className="w-full text-sm min-w-[720px]">
-        <thead>
-          <tr className="text-left text-xs uppercase tracking-wide text-oliva-600 border-b border-oliva-100 bg-oliva-50">
-            <th className="py-2 px-4">Fecha</th>
-            <th className="py-2 px-4">Tipo</th>
-            <th className="py-2 px-4">Producto</th>
-            <th className="py-2 px-4">Presentación</th>
-            <th className="py-2 px-4">Lote</th>
-            <th className="py-2 px-4 text-right">Unidades</th>
-            <th className="py-2 px-4">Nota</th>
-          </tr>
-        </thead>
-        <tbody>
-          {movs.map((m) => {
-            const s = stockPorId.get(m.stock_id)
-            const pres = s ? presPorId.get(s.presentacion_id) : undefined
-            const lote = s ? lotePorId.get(s.lote_id) : undefined
-            const prod = pres ? prodPorId.get(pres.producto_id) : undefined
-            return (
-              <tr key={m.id} className="border-b border-oliva-100/70 last:border-0">
-                <td className="py-2 px-4 tabular-nums text-oliva-600">{new Date(m.fecha).toLocaleString('es-UY')}</td>
-                <td className="py-2 px-4">
-                  <span className={`text-[11px] uppercase tracking-wide rounded-full px-2 py-[1px] ${badgeTipo(m.tipo)}`}>{m.tipo}</span>
-                </td>
-                <td className="py-2 px-4 text-oliva-800">{prod?.nombre ?? '—'}</td>
-                <td className="py-2 px-4 text-oliva-800">{pres?.nombre ?? '—'}</td>
-                <td className="py-2 px-4 text-oliva-700">#{lote?.id ?? '—'}{lote?.edicion ? ` · ${lote.edicion}` : lote ? ` · ${lote.campaña}` : ''}</td>
-                <td className={`py-2 px-4 text-right tabular-nums font-medium ${m.unidades < 0 ? 'text-red-700' : 'text-oliva-900'}`}>{m.unidades > 0 ? '+' : ''}{m.unidades}</td>
-                <td className="py-2 px-4 text-oliva-600 truncate max-w-[240px]">{m.nota ?? ''}</td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
 function badgeTipo(t: string) {
   switch (t) {
-    case 'envasado': return 'bg-oliva-100 text-oliva-800'
-    case 'venta': return 'bg-aceite-500/10 text-aceite-600'
-    case 'merma': return 'bg-red-100 text-red-800'
-    case 'ajuste': return 'bg-tierra-100 text-tierra-800'
-    case 'devolucion': return 'bg-oliva-200 text-oliva-800'
-    default: return 'bg-oliva-100 text-oliva-700'
+    case 'envasado':
+    case 'envasar':   return 'bg-oliva-100 text-oliva-800'
+    case 'cargar':    return 'bg-aceite-500/15 text-aceite-600'
+    case 'trasegar':  return 'bg-tierra-100 text-tierra-800'
+    case 'venta':     return 'bg-aceite-500/10 text-aceite-600'
+    case 'merma':     return 'bg-red-100 text-red-800'
+    case 'muestra':   return 'bg-oliva-200 text-oliva-800'
+    case 'ajuste':    return 'bg-tierra-100 text-tierra-800'
+    default:          return 'bg-oliva-100 text-oliva-700'
   }
 }
 
-// ---------- Dialogs ----------
-
-const VARIEDADES = ['arbequina', 'coratina', 'picual', 'frantoio', 'mezcla'] as const
-
-function NuevoLoteDialog({
-  abierto, productos, onCerrar, onOk,
-}: { abierto: boolean; productos: Producto[]; onCerrar: () => void; onOk: () => void }) {
-  const anio = new Date().getFullYear()
-  const [productoId, setProductoId] = useState<string>('')
-  const [campana, setCampana] = useState<string>(String(anio))
-  const [edicion, setEdicion] = useState('')
-  const [variedad, setVariedad] = useState<string>('mezcla')
-  const [fecha, setFecha] = useState(() => new Date().toISOString().slice(0, 10))
-  const [litros, setLitros] = useState<string>('')
-  const [acidez, setAcidez] = useState<string>('')
-  const [notas, setNotas] = useState('')
-  const [guardando, setGuardando] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!abierto) return
-    setProductoId(productos[0]?.id?.toString() ?? '')
-    setCampana(String(anio)); setEdicion(''); setVariedad('mezcla')
-    setFecha(new Date().toISOString().slice(0, 10)); setLitros('')
-    setAcidez(''); setNotas(''); setError(null)
-  }, [abierto, productos, anio])
-
-  const productoSel = productos.find((p) => p.id === Number(productoId))
-  const esPremiado = productoSel?.nombre.toLowerCase().includes('premiado')
-
-  async function guardar(e: React.FormEvent) {
-    e.preventDefault()
-    if (!productoId) return
-    setGuardando(true); setError(null)
-    const L = Number(litros) || 0
-    const { data: { user } } = await supabase.auth.getUser()
-    const { error } = await supabase.from('lotes').insert({
-      producto_id: Number(productoId),
-      campaña: Number(campana),
-      edicion: esPremiado ? (edicion.trim() || `Premiado ${campana}`) : (edicion.trim() || null),
-      variedad,
-      fecha_elaboracion: fecha,
-      litros_producidos: L,
-      litros_disponibles: L,
-      acidez_pct: acidez ? Number(acidez) : null,
-      notas: notas.trim() || null,
-      creado_por: user?.id ?? null,
-    })
-    setGuardando(false)
-    if (error) setError(error.message)
-    else onOk()
-  }
-
-  return (
-    <Dialog abierto={abierto} onCerrar={onCerrar} titulo="Nuevo lote / partida" ancho="lg">
-      <form onSubmit={guardar} className="space-y-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="sm:col-span-2">
-            <label className="label">Producto</label>
-            <select className="input" value={productoId} onChange={(e) => setProductoId(e.target.value)} required>
-              <option value="">— Elegir —</option>
-              {productos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="label">Campaña (año)</label>
-            <input className="input" type="number" min="2000" max="2100" value={campana} onChange={(e) => setCampana(e.target.value)} required />
-          </div>
-          <div>
-            <label className="label">Variedad</label>
-            <select className="input" value={variedad} onChange={(e) => setVariedad(e.target.value)}>
-              {VARIEDADES.map((v) => <option key={v} value={v}>{v}</option>)}
-            </select>
-          </div>
-          {esPremiado && (
-            <div className="sm:col-span-2">
-              <label className="label">Edición (Premiado — receta del año)</label>
-              <input className="input" placeholder={`Premiado ${campana}`} value={edicion} onChange={(e) => setEdicion(e.target.value)} />
-              <p className="text-xs text-oliva-600 mt-1">Si lo dejás vacío usa “Premiado {campana}”.</p>
-            </div>
-          )}
-          <div>
-            <label className="label">Fecha de elaboración</label>
-            <input className="input" type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} required />
-          </div>
-          <div>
-            <label className="label">Litros producidos</label>
-            <input className="input" type="number" min="0" step="0.01" value={litros} onChange={(e) => setLitros(e.target.value)} required />
-          </div>
-          <div>
-            <label className="label">Acidez % (opcional)</label>
-            <input className="input" type="number" min="0" step="0.001" value={acidez} onChange={(e) => setAcidez(e.target.value)} />
-          </div>
-          <div className="sm:col-span-2">
-            <label className="label">Notas</label>
-            <textarea className="input min-h-[70px]" value={notas} onChange={(e) => setNotas(e.target.value)} />
-          </div>
-        </div>
-        {error && <div className="text-sm text-red-700">{error}</div>}
-        <div className="flex justify-end gap-2 pt-2">
-          <button type="button" className="btn-secondary" onClick={onCerrar}>Cancelar</button>
-          <button type="submit" className="btn-primary" disabled={guardando}>{guardando ? 'Guardando…' : 'Guardar'}</button>
-        </div>
-      </form>
-    </Dialog>
-  )
-}
+// ============================================================
+// Dialogs
+// ============================================================
 
 function EnvasarDialog({
-  abierto, lotes, presentaciones, prodPorId, onCerrar, onOk,
+  abierto, tanques, presentaciones, prodPorId, onCerrar, onOk,
 }: {
   abierto: boolean
-  lotes: Lote[]
+  tanques: Tanque[]
   presentaciones: Presentacion[]
   prodPorId: Map<number, Producto>
   onCerrar: () => void
   onOk: () => void
 }) {
-  const [loteId, setLoteId] = useState<string>('')
+  const [tanqueId, setTanqueId] = useState<string>('')
   const [presentacionId, setPresentacionId] = useState<string>('')
   const [unidades, setUnidades] = useState<string>('')
   const [nota, setNota] = useState('')
@@ -453,35 +471,36 @@ function EnvasarDialog({
 
   useEffect(() => {
     if (!abierto) return
-    setLoteId(''); setPresentacionId(''); setUnidades(''); setNota(''); setError(null)
+    setTanqueId(''); setPresentacionId(''); setUnidades(''); setNota(''); setError(null)
   }, [abierto])
 
-  const lote = lotes.find((l) => l.id === Number(loteId))
-  const presDelProducto = lote ? presentaciones.filter((p) => p.producto_id === lote.producto_id && p.volumen_ml) : []
-  const pres = presDelProducto.find((p) => p.id === Number(presentacionId))
-
+  const tanque = tanques.find((t) => t.id === Number(tanqueId))
+  const presDelTanque = tanque?.producto_id
+    ? presentaciones.filter((p) => p.producto_id === tanque.producto_id && p.volumen_ml)
+    : []
+  const pres = presDelTanque.find((p) => p.id === Number(presentacionId))
   const litrosNecesarios = pres && unidades ? (Number(unidades) * (pres.volumen_ml ?? 0)) / 1000 : 0
-  const litrosOk = lote ? litrosNecesarios <= Number(lote.litros_disponibles) + 0.0001 : false
+  const litrosOk = tanque ? litrosNecesarios <= Number(tanque.litros_actuales) + 0.0001 : false
 
   async function guardar(e: React.FormEvent) {
     e.preventDefault()
-    if (!lote || !pres) return
+    if (!tanque || !pres) return
     const n = Number(unidades)
-    if (!n || n <= 0) { setError('Ingresá unidades > 0'); return }
-    if (!litrosOk) { setError(`Faltan litros de granel. Necesarios: ${litrosNecesarios} L, disponibles: ${lote.litros_disponibles} L.`); return }
+    if (!n || n <= 0) { setError('Unidades > 0'); return }
+    if (!litrosOk) { setError(`Faltan litros. Necesarios: ${litrosNecesarios} L; disponibles: ${tanque.litros_actuales} L.`); return }
 
     setGuardando(true); setError(null)
+    const { data: { user } } = await supabase.auth.getUser()
 
-    // 1) Descontar litros del lote
-    const nuevosLitros = Number(lote.litros_disponibles) - litrosNecesarios
-    const { error: e1 } = await supabase.from('lotes').update({ litros_disponibles: nuevosLitros }).eq('id', lote.id)
+    // 1) Descontar del tanque
+    const { error: e1 } = await supabase.from('tanques')
+      .update({ litros_actuales: Number(tanque.litros_actuales) - litrosNecesarios, actualizado_en: new Date().toISOString() })
+      .eq('id', tanque.id)
     if (e1) { setError(e1.message); setGuardando(false); return }
 
-    // 2) Upsert en stock (buscar existente o insertar)
-    const { data: existente } = await supabase
-      .from('stock').select('id,unidades')
-      .eq('lote_id', lote.id).eq('presentacion_id', pres.id).maybeSingle()
-
+    // 2) Upsert en stock
+    const { data: existente } = await supabase.from('stock')
+      .select('id,unidades').eq('tanque_id', tanque.id).eq('presentacion_id', pres.id).maybeSingle()
     let stockId: number
     if (existente) {
       const { error: e2 } = await supabase.from('stock')
@@ -491,60 +510,67 @@ function EnvasarDialog({
       stockId = existente.id
     } else {
       const { data: creado, error: e2 } = await supabase.from('stock')
-        .insert({ lote_id: lote.id, presentacion_id: pres.id, unidades: n }).select('id').single()
+        .insert({ tanque_id: tanque.id, presentacion_id: pres.id, unidades: n }).select('id').single()
       if (e2 || !creado) { setError(e2?.message ?? 'error'); setGuardando(false); return }
       stockId = creado.id
     }
 
-    // 3) Registrar movimiento
-    const { data: { user } } = await supabase.auth.getUser()
-    const { error: e3 } = await supabase.from('movimientos_stock').insert({
-      stock_id: stockId,
-      tipo: 'envasado',
-      unidades: n,
-      usuario_id: user?.id ?? null,
-      nota: nota.trim() || `Envasado desde lote #${lote.id}`,
+    // 3) Movimiento de granel
+    const { error: e3 } = await supabase.from('movimientos_granel').insert({
+      tipo: 'envasar', tanque_origen_id: tanque.id, litros: litrosNecesarios,
+      stock_id: stockId, usuario_id: user?.id ?? null, nota: nota.trim() || null,
     })
     if (e3) { setError(e3.message); setGuardando(false); return }
+
+    // 4) Movimiento de stock (unidades +)
+    await supabase.from('movimientos_stock').insert({
+      stock_id: stockId, tipo: 'envasado', unidades: n,
+      usuario_id: user?.id ?? null, nota: nota.trim() || `Envasado desde ${tanque.nombre}`,
+    })
 
     setGuardando(false)
     onOk()
   }
 
+  const tanquesConProd = tanques.filter((t) => t.producto_id)
+
   return (
     <Dialog abierto={abierto} onCerrar={onCerrar} titulo="Envasar (granel → unidades)" ancho="lg">
       <form onSubmit={guardar} className="space-y-4">
         <div>
-          <label className="label">Lote de granel</label>
-          <select className="input" value={loteId} onChange={(e) => { setLoteId(e.target.value); setPresentacionId('') }} required>
-            <option value="">— Elegir lote —</option>
-            {lotes.filter((l) => Number(l.litros_disponibles) > 0).map((l) => {
-              const prod = prodPorId.get(l.producto_id)
+          <label className="label">Tanque</label>
+          <select className="input" value={tanqueId} onChange={(e) => { setTanqueId(e.target.value); setPresentacionId('') }} required>
+            <option value="">— Elegir tanque —</option>
+            {tanquesConProd.map((t) => {
+              const prod = t.producto_id ? prodPorId.get(t.producto_id) : null
               return (
-                <option key={l.id} value={l.id}>
-                  #{l.id} · {prod?.nombre} · {l.edicion ?? `campaña ${l.campaña}`} · {num(l.litros_disponibles)} L disponibles
+                <option key={t.id} value={t.id}>
+                  {t.nombre} · {prod?.nombre} {t.campaña ? `· ${t.campaña}` : ''} · {num(t.litros_actuales)} L
                 </option>
               )
             })}
           </select>
+          {tanquesConProd.length === 0 && (
+            <p className="text-xs text-red-700 mt-1">Ningún tanque activo mapea a un producto vendible.</p>
+          )}
         </div>
 
-        {lote && (
+        {tanque && (
           <>
             <div>
               <label className="label">Presentación</label>
               <select className="input" value={presentacionId} onChange={(e) => setPresentacionId(e.target.value)} required>
                 <option value="">— Elegir presentación —</option>
-                {presDelProducto.map((p) => (
+                {presDelTanque.map((p) => (
                   <option key={p.id} value={p.id}>{p.nombre} ({p.volumen_ml} ml)</option>
                 ))}
               </select>
-              {presDelProducto.length === 0 && (
-                <p className="text-xs text-red-700 mt-1">Este producto no tiene presentaciones con volumen definido. Cargalas desde Administración.</p>
+              {presDelTanque.length === 0 && (
+                <p className="text-xs text-red-700 mt-1">Sin presentaciones con volumen para este producto.</p>
               )}
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="label">Unidades a envasar</label>
                 <input className="input" type="number" min="1" step="1" value={unidades} onChange={(e) => setUnidades(e.target.value)} required />
@@ -553,7 +579,7 @@ function EnvasarDialog({
                 <label className="label">Litros que se consumen</label>
                 <div className={`input flex items-center tabular-nums ${!litrosOk && unidades ? 'text-red-700' : ''}`}>
                   {num(litrosNecesarios)} L
-                  <span className="ml-auto text-xs text-oliva-600">disp: {num(lote.litros_disponibles)} L</span>
+                  <span className="ml-auto text-xs text-oliva-600">disp: {num(tanque.litros_actuales)}</span>
                 </div>
               </div>
             </div>
@@ -568,7 +594,543 @@ function EnvasarDialog({
         {error && <div className="text-sm text-red-700">{error}</div>}
         <div className="flex justify-end gap-2 pt-2">
           <button type="button" className="btn-secondary" onClick={onCerrar}>Cancelar</button>
-          <button type="submit" className="btn-primary" disabled={guardando || !lote || !pres}>{guardando ? 'Guardando…' : 'Envasar'}</button>
+          <button type="submit" className="btn-primary" disabled={guardando || !tanque || !pres}>{guardando ? 'Guardando…' : 'Envasar'}</button>
+        </div>
+      </form>
+    </Dialog>
+  )
+}
+
+function AjusteEnvasadoDialog({
+  abierto, presentaciones, prodPorId, stock, tanques, onCerrar, onOk,
+}: {
+  abierto: boolean
+  presentaciones: Presentacion[]
+  prodPorId: Map<number, Producto>
+  stock: StockRow[]
+  tanques: Tanque[]
+  onCerrar: () => void
+  onOk: () => void
+}) {
+  const [presentacionId, setPresentacionId] = useState<string>('')
+  const [tanqueId, setTanqueId] = useState<string>('')  // opcional
+  const [delta, setDelta] = useState<string>('')
+  const [nota, setNota] = useState('')
+  const [guardando, setGuardando] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!abierto) return
+    setPresentacionId(''); setTanqueId(''); setDelta(''); setNota(''); setError(null)
+  }, [abierto])
+
+  async function guardar(e: React.FormEvent) {
+    e.preventDefault()
+    const pres = presentaciones.find((p) => p.id === Number(presentacionId))
+    if (!pres) return
+    const d = Number(delta)
+    if (!d) { setError('Ingresá una cantidad distinta de 0'); return }
+
+    setGuardando(true); setError(null)
+    const { data: { user } } = await supabase.auth.getUser()
+
+    const tanqueNum = tanqueId ? Number(tanqueId) : null
+    const existente = stock.find((s) => s.presentacion_id === pres.id && (s.tanque_id ?? null) === tanqueNum)
+    let stockId: number
+    if (existente) {
+      const nueva = existente.unidades + d
+      if (nueva < 0) { setError(`Quedaría stock negativo (${nueva}).`); setGuardando(false); return }
+      const { error: e2 } = await supabase.from('stock')
+        .update({ unidades: nueva, actualizado_en: new Date().toISOString() }).eq('id', existente.id)
+      if (e2) { setError(e2.message); setGuardando(false); return }
+      stockId = existente.id
+    } else {
+      if (d < 0) { setError('No hay stock previo para ajustar negativo.'); setGuardando(false); return }
+      const { data: creado, error: e2 } = await supabase.from('stock')
+        .insert({ tanque_id: tanqueNum, presentacion_id: pres.id, unidades: d }).select('id').single()
+      if (e2 || !creado) { setError(e2?.message ?? 'error'); setGuardando(false); return }
+      stockId = creado.id
+    }
+
+    await supabase.from('movimientos_stock').insert({
+      stock_id: stockId, tipo: 'ajuste', unidades: d,
+      usuario_id: user?.id ?? null, nota: nota.trim() || 'Ajuste manual',
+    })
+
+    setGuardando(false); onOk()
+  }
+
+  return (
+    <Dialog abierto={abierto} onCerrar={onCerrar} titulo="Ajuste manual de stock envasado" ancho="lg">
+      <form onSubmit={guardar} className="space-y-4">
+        <p className="text-xs text-oliva-600">
+          Usalo para carga inicial (producto ya envasado antes de la app), correcciones de conteo, o mermas
+          de envasado (rotura de botellas, etc.). Poné cantidades negativas para restar.
+        </p>
+
+        <div>
+          <label className="label">Presentación</label>
+          <select className="input" value={presentacionId} onChange={(e) => setPresentacionId(e.target.value)} required>
+            <option value="">— Elegir —</option>
+            {presentaciones.map((p) => {
+              const prod = prodPorId.get(p.producto_id)
+              return (
+                <option key={p.id} value={p.id}>{prod?.nombre} · {p.nombre}</option>
+              )
+            })}
+          </select>
+        </div>
+
+        <div>
+          <label className="label">Tanque de origen (opcional)</label>
+          <select className="input" value={tanqueId} onChange={(e) => setTanqueId(e.target.value)}>
+            <option value="">— sin asociar (carga externa) —</option>
+            {tanques.map((t) => <option key={t.id} value={t.id}>{t.nombre}</option>)}
+          </select>
+          <p className="text-xs text-oliva-600 mt-1">
+            Solo si querés dejar registrado de qué tanque proviene ese stock ya envasado.
+          </p>
+        </div>
+
+        <div>
+          <label className="label">Cantidad (+ para sumar, − para restar)</label>
+          <input className="input" type="number" step="1" value={delta} onChange={(e) => setDelta(e.target.value)} required />
+        </div>
+
+        <div>
+          <label className="label">Motivo / nota</label>
+          <input className="input" value={nota} onChange={(e) => setNota(e.target.value)} placeholder="ej: Carga inicial Picual" />
+        </div>
+
+        {error && <div className="text-sm text-red-700">{error}</div>}
+        <div className="flex justify-end gap-2 pt-2">
+          <button type="button" className="btn-secondary" onClick={onCerrar}>Cancelar</button>
+          <button type="submit" className="btn-primary" disabled={guardando}>{guardando ? 'Guardando…' : 'Aplicar ajuste'}</button>
+        </div>
+      </form>
+    </Dialog>
+  )
+}
+
+function TrasegarDialog({
+  abierto, tanques, prodPorId, onCerrar, onOk,
+}: {
+  abierto: boolean
+  tanques: Tanque[]
+  prodPorId: Map<number, Producto>
+  onCerrar: () => void
+  onOk: () => void
+}) {
+  const [origenId, setOrigenId] = useState<string>('')
+  const [destinoId, setDestinoId] = useState<string>('')
+  const [litros, setLitros] = useState<string>('')
+  const [nota, setNota] = useState('')
+  const [guardando, setGuardando] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!abierto) return
+    setOrigenId(''); setDestinoId(''); setLitros(''); setNota(''); setError(null)
+  }, [abierto])
+
+  const origen = tanques.find((t) => t.id === Number(origenId))
+  const destino = tanques.find((t) => t.id === Number(destinoId))
+  const L = Number(litros) || 0
+  const espacioDest = destino ? Number(destino.capacidad_litros) - Number(destino.litros_actuales) : Infinity
+  const okOrigen = origen ? L <= Number(origen.litros_actuales) : false
+  const okDestino = destino ? L <= espacioDest : true
+
+  async function guardar(e: React.FormEvent) {
+    e.preventDefault()
+    if (!origen || !destino) return
+    if (origen.id === destino.id) { setError('Origen y destino deben ser distintos.'); return }
+    if (!L || L <= 0) { setError('Litros > 0'); return }
+    if (!okOrigen) { setError(`El tanque origen solo tiene ${origen.litros_actuales} L.`); return }
+    if (!okDestino) { setError(`En el destino solo entran ${espacioDest} L más.`); return }
+
+    setGuardando(true); setError(null)
+    const { data: { user } } = await supabase.auth.getUser()
+
+    const { error: e1 } = await supabase.from('tanques')
+      .update({ litros_actuales: Number(origen.litros_actuales) - L, actualizado_en: new Date().toISOString() })
+      .eq('id', origen.id)
+    if (e1) { setError(e1.message); setGuardando(false); return }
+
+    // Si destino estaba vacío, hereda contenido/campaña del origen
+    const patch: Partial<Tanque> = { litros_actuales: Number(destino.litros_actuales) + L, actualizado_en: new Date().toISOString() as unknown as string }
+    if (Number(destino.litros_actuales) === 0) {
+      patch.producto_id = origen.producto_id
+      patch.variedad_libre = origen.variedad_libre
+      patch.campaña = origen.campaña
+    }
+    const { error: e2 } = await supabase.from('tanques').update(patch).eq('id', destino.id)
+    if (e2) { setError(e2.message); setGuardando(false); return }
+
+    const { error: e3 } = await supabase.from('movimientos_granel').insert({
+      tipo: 'trasegar', tanque_origen_id: origen.id, tanque_destino_id: destino.id,
+      litros: L, usuario_id: user?.id ?? null, nota: nota.trim() || null,
+    })
+    if (e3) { setError(e3.message); setGuardando(false); return }
+
+    setGuardando(false); onOk()
+  }
+
+  return (
+    <Dialog abierto={abierto} onCerrar={onCerrar} titulo="Trasegar / armar blend" ancho="lg">
+      <form onSubmit={guardar} className="space-y-4">
+        <p className="text-xs text-oliva-600">
+          Movés litros de un tanque a otro. Si el destino está vacío, hereda el contenido y campaña
+          del origen. Para armar un blend con varios orígenes, hacé un trasiego por cada tanque origen.
+        </p>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="label">Origen</label>
+            <select className="input" value={origenId} onChange={(e) => setOrigenId(e.target.value)} required>
+              <option value="">— Elegir —</option>
+              {tanques.filter((t) => Number(t.litros_actuales) > 0).map((t) => (
+                <option key={t.id} value={t.id}>{t.nombre} · {contenidoDe(t, prodPorId)} · {num(t.litros_actuales)} L</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="label">Destino</label>
+            <select className="input" value={destinoId} onChange={(e) => setDestinoId(e.target.value)} required>
+              <option value="">— Elegir —</option>
+              {tanques.map((t) => (
+                <option key={t.id} value={t.id}>{t.nombre} · {contenidoDe(t, prodPorId)} · {num(t.litros_actuales)}/{num(t.capacidad_litros)} L</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="label">Litros a mover</label>
+            <input className="input" type="number" min="0.01" step="0.01" value={litros} onChange={(e) => setLitros(e.target.value)} required />
+          </div>
+          <div>
+            <label className="label">Nota</label>
+            <input className="input" value={nota} onChange={(e) => setNota(e.target.value)} placeholder="ej: Armado blend intenso" />
+          </div>
+        </div>
+
+        {error && <div className="text-sm text-red-700">{error}</div>}
+        <div className="flex justify-end gap-2 pt-2">
+          <button type="button" className="btn-secondary" onClick={onCerrar}>Cancelar</button>
+          <button type="submit" className="btn-primary" disabled={guardando}>{guardando ? 'Guardando…' : 'Trasegar'}</button>
+        </div>
+      </form>
+    </Dialog>
+  )
+}
+
+function CargarCosechaDialog({
+  abierto, tanques, productos, prodPorId, onCerrar, onOk,
+}: {
+  abierto: boolean
+  tanques: Tanque[]
+  productos: Producto[]
+  prodPorId: Map<number, Producto>
+  onCerrar: () => void
+  onOk: () => void
+}) {
+  const anio = new Date().getFullYear()
+  const [tanqueId, setTanqueId] = useState<string>('')
+  const [litros, setLitros] = useState<string>('')
+  const [productoId, setProductoId] = useState<string>('')
+  const [variedadLibre, setVariedadLibre] = useState<string>('')
+  const [campana, setCampana] = useState<string>(String(anio))
+  const [nota, setNota] = useState('')
+  const [guardando, setGuardando] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!abierto) return
+    setTanqueId(''); setLitros(''); setProductoId(''); setVariedadLibre('')
+    setCampana(String(anio)); setNota(''); setError(null)
+  }, [abierto, anio])
+
+  const tanque = tanques.find((t) => t.id === Number(tanqueId))
+  const vacio = tanque && Number(tanque.litros_actuales) === 0
+  const L = Number(litros) || 0
+  const espacio = tanque ? Number(tanque.capacidad_litros) - Number(tanque.litros_actuales) : 0
+  const okEspacio = tanque ? L <= espacio : true
+
+  async function guardar(e: React.FormEvent) {
+    e.preventDefault()
+    if (!tanque) return
+    if (!L || L <= 0) { setError('Litros > 0'); return }
+    if (!okEspacio) { setError(`No entra: capacidad libre ${espacio} L.`); return }
+
+    setGuardando(true); setError(null)
+    const { data: { user } } = await supabase.auth.getUser()
+
+    const patch: Partial<Tanque> = {
+      litros_actuales: Number(tanque.litros_actuales) + L,
+      actualizado_en: new Date().toISOString() as unknown as string,
+    }
+    // Si el tanque estaba vacío, tomamos contenido nuevo del formulario
+    if (vacio) {
+      patch.producto_id = productoId ? Number(productoId) : null
+      patch.variedad_libre = productoId ? null : (variedadLibre.trim() || null)
+      patch.campaña = Number(campana)
+    }
+    const { error: e1 } = await supabase.from('tanques').update(patch).eq('id', tanque.id)
+    if (e1) { setError(e1.message); setGuardando(false); return }
+
+    const { error: e2 } = await supabase.from('movimientos_granel').insert({
+      tipo: 'cargar', tanque_destino_id: tanque.id, litros: L,
+      usuario_id: user?.id ?? null, nota: nota.trim() || null,
+    })
+    if (e2) { setError(e2.message); setGuardando(false); return }
+
+    setGuardando(false); onOk()
+  }
+
+  return (
+    <Dialog abierto={abierto} onCerrar={onCerrar} titulo="Cargar cosecha en tanque" ancho="lg">
+      <form onSubmit={guardar} className="space-y-4">
+        <div>
+          <label className="label">Tanque destino</label>
+          <select className="input" value={tanqueId} onChange={(e) => setTanqueId(e.target.value)} required>
+            <option value="">— Elegir —</option>
+            {tanques.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.nombre} · {contenidoDe(t, prodPorId)} · {num(t.litros_actuales)}/{num(t.capacidad_litros)} L
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {tanque && (
+          <>
+            <div>
+              <label className="label">Litros a cargar</label>
+              <input className="input" type="number" min="0.01" step="0.01" value={litros} onChange={(e) => setLitros(e.target.value)} required />
+              <p className={`text-xs mt-1 ${okEspacio ? 'text-oliva-600' : 'text-red-700'}`}>
+                Espacio libre: {num(espacio)} L
+              </p>
+            </div>
+
+            {vacio && (
+              <div className="rounded-lg border border-oliva-100 p-3 bg-oliva-50/60 space-y-3">
+                <div className="text-xs text-oliva-700 font-medium">Tanque vacío — definí el contenido nuevo:</div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="label">Producto vendible</label>
+                    <select className="input" value={productoId} onChange={(e) => setProductoId(e.target.value)}>
+                      <option value="">— ninguno (materia prima) —</option>
+                      {productos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="label">Variedad libre (si no es vendible)</label>
+                    <input className="input" value={variedadLibre} onChange={(e) => setVariedadLibre(e.target.value)} disabled={!!productoId} placeholder="ej: Coratina pura" />
+                  </div>
+                  <div>
+                    <label className="label">Campaña</label>
+                    <input className="input" type="number" min="2000" max="2100" value={campana} onChange={(e) => setCampana(e.target.value)} required />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div>
+              <label className="label">Nota</label>
+              <input className="input" value={nota} onChange={(e) => setNota(e.target.value)} placeholder="ej: Cosecha 2026 primer día" />
+            </div>
+          </>
+        )}
+
+        {error && <div className="text-sm text-red-700">{error}</div>}
+        <div className="flex justify-end gap-2 pt-2">
+          <button type="button" className="btn-secondary" onClick={onCerrar}>Cancelar</button>
+          <button type="submit" className="btn-primary" disabled={guardando || !tanque}>{guardando ? 'Guardando…' : 'Cargar'}</button>
+        </div>
+      </form>
+    </Dialog>
+  )
+}
+
+function MermaMuestraDialog({
+  abierto, tanques, prodPorId, onCerrar, onOk,
+}: {
+  abierto: boolean
+  tanques: Tanque[]
+  prodPorId: Map<number, Producto>
+  onCerrar: () => void
+  onOk: () => void
+}) {
+  const [tanqueId, setTanqueId] = useState<string>('')
+  const [tipo, setTipo] = useState<'merma' | 'muestra'>('merma')
+  const [litros, setLitros] = useState<string>('')
+  const [nota, setNota] = useState('')
+  const [guardando, setGuardando] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!abierto) return
+    setTanqueId(''); setTipo('merma'); setLitros(''); setNota(''); setError(null)
+  }, [abierto])
+
+  const tanque = tanques.find((t) => t.id === Number(tanqueId))
+  const L = Number(litros) || 0
+  const ok = tanque ? L <= Number(tanque.litros_actuales) : false
+
+  async function guardar(e: React.FormEvent) {
+    e.preventDefault()
+    if (!tanque) return
+    if (!L || L <= 0) { setError('Litros > 0'); return }
+    if (!ok) { setError(`Solo hay ${tanque.litros_actuales} L en el tanque.`); return }
+
+    setGuardando(true); setError(null)
+    const { data: { user } } = await supabase.auth.getUser()
+
+    const { error: e1 } = await supabase.from('tanques')
+      .update({ litros_actuales: Number(tanque.litros_actuales) - L, actualizado_en: new Date().toISOString() })
+      .eq('id', tanque.id)
+    if (e1) { setError(e1.message); setGuardando(false); return }
+
+    const { error: e2 } = await supabase.from('movimientos_granel').insert({
+      tipo, tanque_origen_id: tanque.id, litros: L,
+      usuario_id: user?.id ?? null, nota: nota.trim() || null,
+    })
+    if (e2) { setError(e2.message); setGuardando(false); return }
+
+    setGuardando(false); onOk()
+  }
+
+  return (
+    <Dialog abierto={abierto} onCerrar={onCerrar} titulo="Merma o muestra de granel">
+      <form onSubmit={guardar} className="space-y-4">
+        <div>
+          <label className="label">Tipo</label>
+          <select className="input" value={tipo} onChange={(e) => setTipo(e.target.value as 'merma' | 'muestra')}>
+            <option value="merma">Merma (pérdida)</option>
+            <option value="muestra">Muestra / análisis / degustación</option>
+          </select>
+        </div>
+        <div>
+          <label className="label">Tanque</label>
+          <select className="input" value={tanqueId} onChange={(e) => setTanqueId(e.target.value)} required>
+            <option value="">— Elegir —</option>
+            {tanques.map((t) => (
+              <option key={t.id} value={t.id}>{t.nombre} · {contenidoDe(t, prodPorId)} · {num(t.litros_actuales)} L</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="label">Litros</label>
+          <input className="input" type="number" min="0.01" step="0.01" value={litros} onChange={(e) => setLitros(e.target.value)} required />
+        </div>
+        <div>
+          <label className="label">Nota</label>
+          <input className="input" value={nota} onChange={(e) => setNota(e.target.value)} />
+        </div>
+
+        {error && <div className="text-sm text-red-700">{error}</div>}
+        <div className="flex justify-end gap-2 pt-2">
+          <button type="button" className="btn-secondary" onClick={onCerrar}>Cancelar</button>
+          <button type="submit" className="btn-primary" disabled={guardando}>{guardando ? 'Guardando…' : 'Registrar'}</button>
+        </div>
+      </form>
+    </Dialog>
+  )
+}
+
+function TanqueEditDialog({
+  abierto, tanque, productos, onCerrar, onOk,
+}: {
+  abierto: boolean
+  tanque: Tanque | null
+  productos: Producto[]
+  onCerrar: () => void
+  onOk: () => void
+}) {
+  const [nombre, setNombre] = useState('')
+  const [cap, setCap] = useState('')
+  const [productoId, setProductoId] = useState<string>('')
+  const [variedadLibre, setVariedadLibre] = useState('')
+  const [campana, setCampana] = useState('')
+  const [notas, setNotas] = useState('')
+  const [activo, setActivo] = useState(true)
+  const [guardando, setGuardando] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!abierto || !tanque) return
+    setNombre(tanque.nombre)
+    setCap(String(tanque.capacidad_litros))
+    setProductoId(tanque.producto_id ? String(tanque.producto_id) : '')
+    setVariedadLibre(tanque.variedad_libre ?? '')
+    setCampana(tanque.campaña ? String(tanque.campaña) : '')
+    setNotas(tanque.notas ?? '')
+    setActivo(tanque.activo)
+    setError(null)
+  }, [abierto, tanque])
+
+  async function guardar(e: React.FormEvent) {
+    e.preventDefault()
+    if (!tanque) return
+    setGuardando(true); setError(null)
+    const { error } = await supabase.from('tanques').update({
+      nombre: nombre.trim(),
+      capacidad_litros: Number(cap) || tanque.capacidad_litros,
+      producto_id: productoId ? Number(productoId) : null,
+      variedad_libre: productoId ? null : (variedadLibre.trim() || null),
+      campaña: campana ? Number(campana) : null,
+      notas: notas.trim() || null,
+      activo,
+      actualizado_en: new Date().toISOString(),
+    }).eq('id', tanque.id)
+    setGuardando(false)
+    if (error) setError(error.message); else onOk()
+  }
+
+  if (!tanque) return null
+
+  return (
+    <Dialog abierto={abierto} onCerrar={onCerrar} titulo={`Editar ${tanque.nombre}`} ancho="lg">
+      <form onSubmit={guardar} className="space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="label">Nombre</label>
+            <input className="input" value={nombre} onChange={(e) => setNombre(e.target.value)} required />
+          </div>
+          <div>
+            <label className="label">Capacidad (L)</label>
+            <input className="input" type="number" min="1" step="1" value={cap} onChange={(e) => setCap(e.target.value)} required />
+          </div>
+          <div>
+            <label className="label">Producto vendible</label>
+            <select className="input" value={productoId} onChange={(e) => setProductoId(e.target.value)}>
+              <option value="">— ninguno —</option>
+              {productos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="label">Variedad libre</label>
+            <input className="input" value={variedadLibre} onChange={(e) => setVariedadLibre(e.target.value)} disabled={!!productoId} />
+          </div>
+          <div>
+            <label className="label">Campaña</label>
+            <input className="input" type="number" min="2000" max="2100" value={campana} onChange={(e) => setCampana(e.target.value)} />
+          </div>
+          <div className="flex items-end gap-2">
+            <input id="tk-act" type="checkbox" className="h-4 w-4 accent-oliva-700" checked={activo} onChange={(e) => setActivo(e.target.checked)} />
+            <label htmlFor="tk-act" className="text-sm text-oliva-800">Activo</label>
+          </div>
+          <div className="sm:col-span-2">
+            <label className="label">Notas</label>
+            <textarea className="input min-h-[60px]" value={notas} onChange={(e) => setNotas(e.target.value)} />
+          </div>
+        </div>
+        <p className="text-xs text-oliva-600">
+          Los litros actuales solo se cambian con acciones (cargar/envasar/trasegar/merma).
+          Si necesitás corregirlos, usá "Merma / muestra" para bajar o "Cargar cosecha" para subir.
+        </p>
+        {error && <div className="text-sm text-red-700">{error}</div>}
+        <div className="flex justify-end gap-2 pt-2">
+          <button type="button" className="btn-secondary" onClick={onCerrar}>Cancelar</button>
+          <button type="submit" className="btn-primary" disabled={guardando}>{guardando ? 'Guardando…' : 'Guardar'}</button>
         </div>
       </form>
     </Dialog>

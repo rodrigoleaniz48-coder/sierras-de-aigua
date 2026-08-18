@@ -55,7 +55,7 @@ export function Dashboard() {
         <div className="text-sm text-oliva-700">
           Este es el esqueleto inicial. En las próximas fases sumamos:
           <ul className="list-disc pl-5 mt-2 space-y-1">
-            <li>Módulo <b>Stock</b> con lotes, envasado y trazabilidad.</li>
+            <li>Módulo <b>Stock</b> con tanques de granel, envasado y trazabilidad.</li>
             <li>Módulo <b>Ventas + CRM</b> con carga rápida desde celular.</li>
             <li>Módulo <b>Gastos</b> personales y contabilidad general (admins).</li>
             <li>Importación del histórico desde tus planillas.</li>

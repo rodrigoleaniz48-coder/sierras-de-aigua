@@ -10,8 +10,8 @@ interface Presentacion {
   id: number; producto_id: number; nombre: string; volumen_ml: number | null
   precio_minorista: number; precio_mayorista: number; iva_pct: number; activo: boolean
 }
-interface StockRow { id: number; lote_id: number; presentacion_id: number; unidades: number }
-interface Lote { id: number; producto_id: number; campaña: number; edicion: string | null; variedad: string | null }
+interface StockRow { id: number; tanque_id: number | null; presentacion_id: number; unidades: number }
+interface Tanque { id: number; nombre: string; producto_id: number | null; variedad_libre: string | null; campaña: number | null }
 interface Cliente { id: number; nombre: string; tipo: 'minorista' | 'mayorista' | 'feria' | 'envio' | 'otro' }
 interface Socio { id: string; nombre: string }
 interface Venta {
@@ -203,7 +203,7 @@ function NuevaVentaDialog({
   const [productos, setProductos] = useState<Producto[]>([])
   const [presentaciones, setPresentaciones] = useState<Presentacion[]>([])
   const [stock, setStock] = useState<StockRow[]>([])
-  const [lotes, setLotes] = useState<Lote[]>([])
+  const [tanques, setTanques] = useState<Tanque[]>([])
   const [datosCargados, setDatosCargados] = useState(false)
 
   const [guardando, setGuardando] = useState(false)
@@ -219,13 +219,13 @@ function NuevaVentaDialog({
     Promise.all([
       supabase.from('productos').select('id,nombre'),
       supabase.from('presentaciones').select('id,producto_id,nombre,volumen_ml,precio_minorista,precio_mayorista,iva_pct,activo').eq('activo', true),
-      supabase.from('stock').select('id,lote_id,presentacion_id,unidades').gt('unidades', 0),
-      supabase.from('lotes').select('*'),
-    ]).then(([p, pr, s, l]) => {
+      supabase.from('stock').select('id,tanque_id,presentacion_id,unidades').gt('unidades', 0),
+      supabase.from('tanques').select('*'),
+    ]).then(([p, pr, s, t]) => {
       setProductos((p.data as Producto[]) ?? [])
       setPresentaciones((pr.data as Presentacion[]) ?? [])
       setStock((s.data as StockRow[]) ?? [])
-      setLotes((l.data as Lote[]) ?? [])
+      setTanques((t.data as Tanque[]) ?? [])
       setDatosCargados(true)
     })
   }, [abierto])
@@ -234,7 +234,7 @@ function NuevaVentaDialog({
   const esMayorista = cliente?.tipo === 'mayorista'
   const presPorId = useMemo(() => new Map(presentaciones.map((p) => [p.id, p])), [presentaciones])
   const stockPorId = useMemo(() => new Map(stock.map((s) => [s.id, s])), [stock])
-  const lotePorId = useMemo(() => new Map(lotes.map((l) => [l.id, l])), [lotes])
+  const tanquePorId = useMemo(() => new Map(tanques.map((t) => [t.id, t])), [tanques])
   const prodPorId = useMemo(() => new Map(productos.map((p) => [p.id, p])), [productos])
 
   // Al cambiar tipo cliente, re-defaultea precios de items que están en su precio de lista
@@ -261,10 +261,10 @@ function NuevaVentaDialog({
   function elegirPresentacion(key: string, presId: number | null) {
     if (!presId) return actualizarItem(key, { presentacion_id: null, stock_id: null, precio_unitario: 0 })
     const p = presPorId.get(presId)
-    // Auto-elegir el lote más viejo con stock (FIFO) para esta presentación
+    // Auto-elegir el stock más viejo (FIFO por id) para esta presentación
     const stocksPres = stock
       .filter((s) => s.presentacion_id === presId)
-      .sort((a, b) => a.lote_id - b.lote_id)
+      .sort((a, b) => a.id - b.id)
     const stockElegido = stocksPres[0]
     const precio = p ? (esMayorista && Number(p.precio_mayorista) ? Number(p.precio_mayorista) : Number(p.precio_minorista)) : 0
     actualizarItem(key, {
@@ -290,8 +290,11 @@ function NuevaVentaDialog({
   function stocksParaPresentacion(presId: number) {
     return stock
       .filter((s) => s.presentacion_id === presId)
-      .sort((a, b) => a.lote_id - b.lote_id)
-      .map((s) => ({ s, lote: lotePorId.get(s.lote_id), prod: prodPorId.get(lotePorId.get(s.lote_id)?.producto_id ?? 0) }))
+      .sort((a, b) => a.id - b.id)
+      .map((s) => {
+        const tanque = s.tanque_id ? tanquePorId.get(s.tanque_id) : null
+        return { s, tanque, prod: tanque?.producto_id ? prodPorId.get(tanque.producto_id) : null }
+      })
   }
 
   async function guardar(e: React.FormEvent) {
@@ -301,11 +304,10 @@ function NuevaVentaDialog({
     if (items.length === 0) { setError('Agregá al menos un ítem.'); return }
     for (const f of filas) {
       if (!f.it.presentacion_id) { setError('Todos los ítems necesitan una presentación.'); return }
-      if (!f.it.stock_id) { setError('Todos los ítems necesitan un lote con stock.'); return }
+      if (!f.it.stock_id) { setError('Todos los ítems necesitan un stock disponible.'); return }
       if (f.it.unidades <= 0) { setError('Las unidades deben ser mayores a 0.'); return }
       if (f.it.unidades > f.disponible) {
-        const prod = f.st ? prodPorId.get(lotePorId.get(f.st.lote_id)?.producto_id ?? 0) : null
-        setError(`No hay stock suficiente para "${prod?.nombre ?? ''} ${f.p?.nombre ?? ''}": pedís ${f.it.unidades}, disponibles ${f.disponible}.`)
+        setError(`No hay stock suficiente para "${f.p?.nombre ?? ''}": pedís ${f.it.unidades}, disponibles ${f.disponible}.`)
         return
       }
     }
@@ -424,7 +426,7 @@ function NuevaVentaDialog({
                         </select>
                       </div>
                       <div>
-                        <label className="label">Lote</label>
+                        <label className="label">Origen del stock</label>
                         <select
                           className="input"
                           value={f.it.stock_id ?? ''}
@@ -432,15 +434,20 @@ function NuevaVentaDialog({
                           disabled={!f.it.presentacion_id}
                           required
                         >
-                          <option value="">— elegir lote —</option>
-                          {opcionesStock.map(({ s, lote }) => (
-                            <option key={s.id} value={s.id}>
-                              #{lote?.id} · {lote?.edicion ?? `campaña ${lote?.campaña}`} · {s.unidades} u
-                            </option>
-                          ))}
+                          <option value="">— elegir origen —</option>
+                          {opcionesStock.map(({ s, tanque }) => {
+                            const origen = tanque
+                              ? `${tanque.nombre}${tanque.campaña ? ` · ${tanque.campaña}` : ''}`
+                              : 'directo (sin tanque)'
+                            return (
+                              <option key={s.id} value={s.id}>
+                                {origen} · {s.unidades} u
+                              </option>
+                            )
+                          })}
                         </select>
                         {f.it.presentacion_id && opcionesStock.length === 0 && (
-                          <p className="text-xs text-red-700 mt-1">Sin stock envasado. Ir a Stock → Envasar.</p>
+                          <p className="text-xs text-red-700 mt-1">Sin stock envasado. Ir a Stock → Envasar o Ajuste envasado.</p>
                         )}
                       </div>
                     </div>
