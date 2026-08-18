@@ -12,7 +12,7 @@ interface Presentacion {
 interface Tanque {
   id: number; nombre: string; capacidad_litros: number
   producto_id: number | null; variedad_libre: string | null
-  campaña: number | null; litros_actuales: number; notas: string | null; activo: boolean
+  campana: number | null; litros_actuales: number; notas: string | null; activo: boolean
 }
 interface StockRow { id: number; tanque_id: number | null; presentacion_id: number; unidades: number }
 interface MovStock { id: number; stock_id: number; tipo: string; unidades: number; venta_id: number | null; nota: string | null; fecha: string }
@@ -250,8 +250,8 @@ function TanqueCard({
         <div>
           <div className="text-lg font-semibold text-oliva-900">{tanque.nombre}</div>
           <div className={`text-sm ${vacio ? 'italic text-oliva-500' : 'text-oliva-800'}`}>{contenido}</div>
-          {tanque.campaña && !vacio && (
-            <div className="text-xs text-oliva-600 mt-0.5">Campaña {tanque.campaña}</div>
+          {tanque.campana && !vacio && (
+            <div className="text-xs text-oliva-600 mt-0.5">Campaña {tanque.campana}</div>
           )}
         </div>
         {puedeEditar && (
@@ -545,7 +545,7 @@ function EnvasarDialog({
               const prod = t.producto_id ? prodPorId.get(t.producto_id) : null
               return (
                 <option key={t.id} value={t.id}>
-                  {t.nombre} · {prod?.nombre} {t.campaña ? `· ${t.campaña}` : ''} · {num(t.litros_actuales)} L
+                  {t.nombre} · {prod?.nombre} {t.campana ? `· ${t.campana}` : ''} · {num(t.litros_actuales)} L
                 </option>
               )
             })}
@@ -756,12 +756,12 @@ function TrasegarDialog({
       .eq('id', origen.id)
     if (e1) { setError(e1.message); setGuardando(false); return }
 
-    // Si destino estaba vacío, hereda contenido/campaña del origen
+    // Si destino estaba vacío, hereda contenido/campana del origen
     const patch: Partial<Tanque> = { litros_actuales: Number(destino.litros_actuales) + L, actualizado_en: new Date().toISOString() as unknown as string }
     if (Number(destino.litros_actuales) === 0) {
       patch.producto_id = origen.producto_id
       patch.variedad_libre = origen.variedad_libre
-      patch.campaña = origen.campaña
+      patch.campana = origen.campana
     }
     const { error: e2 } = await supabase.from('tanques').update(patch).eq('id', destino.id)
     if (e2) { setError(e2.message); setGuardando(false); return }
@@ -779,7 +779,7 @@ function TrasegarDialog({
     <Dialog abierto={abierto} onCerrar={onCerrar} titulo="Trasegar / armar blend" ancho="lg">
       <form onSubmit={guardar} className="space-y-4">
         <p className="text-xs text-oliva-600">
-          Movés litros de un tanque a otro. Si el destino está vacío, hereda el contenido y campaña
+          Movés litros de un tanque a otro. Si el destino está vacío, hereda el contenido y campana
           del origen. Para armar un blend con varios orígenes, hacé un trasiego por cada tanque origen.
         </p>
 
@@ -871,7 +871,7 @@ function CargarCosechaDialog({
     if (vacio) {
       patch.producto_id = productoId ? Number(productoId) : null
       patch.variedad_libre = productoId ? null : (variedadLibre.trim() || null)
-      patch.campaña = Number(campana)
+      patch.campana = Number(campana)
     }
     const { error: e1 } = await supabase.from('tanques').update(patch).eq('id', tanque.id)
     if (e1) { setError(e1.message); setGuardando(false); return }
@@ -1061,7 +1061,7 @@ function TanqueEditDialog({
     setCap(String(tanque.capacidad_litros))
     setProductoId(tanque.producto_id ? String(tanque.producto_id) : '')
     setVariedadLibre(tanque.variedad_libre ?? '')
-    setCampana(tanque.campaña ? String(tanque.campaña) : '')
+    setCampana(tanque.campana ? String(tanque.campana) : '')
     setNotas(tanque.notas ?? '')
     setActivo(tanque.activo)
     setError(null)
@@ -1076,7 +1076,7 @@ function TanqueEditDialog({
       capacidad_litros: Number(cap) || tanque.capacidad_litros,
       producto_id: productoId ? Number(productoId) : null,
       variedad_libre: productoId ? null : (variedadLibre.trim() || null),
-      campaña: campana ? Number(campana) : null,
+      campana: campana ? Number(campana) : null,
       notas: notas.trim() || null,
       activo,
       actualizado_en: new Date().toISOString(),

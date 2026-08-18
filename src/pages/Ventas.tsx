@@ -11,7 +11,7 @@ interface Presentacion {
   precio_minorista: number; precio_mayorista: number; iva_pct: number; activo: boolean
 }
 interface StockRow { id: number; tanque_id: number | null; presentacion_id: number; unidades: number }
-interface Tanque { id: number; nombre: string; producto_id: number | null; variedad_libre: string | null; campaña: number | null }
+interface Tanque { id: number; nombre: string; producto_id: number | null; variedad_libre: string | null; campana: number | null }
 interface Cliente { id: number; nombre: string; tipo: 'minorista' | 'mayorista' | 'feria' | 'envio' | 'otro' }
 interface Socio { id: string; nombre: string }
 interface Venta {
@@ -437,7 +437,7 @@ function NuevaVentaDialog({
                           <option value="">— elegir origen —</option>
                           {opcionesStock.map(({ s, tanque }) => {
                             const origen = tanque
-                              ? `${tanque.nombre}${tanque.campaña ? ` · ${tanque.campaña}` : ''}`
+                              ? `${tanque.nombre}${tanque.campana ? ` · ${tanque.campana}` : ''}`
                               : 'directo (sin tanque)'
                             return (
                               <option key={s.id} value={s.id}>
