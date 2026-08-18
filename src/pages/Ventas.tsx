@@ -242,6 +242,8 @@ function NuevaVentaDialog({
   const [envio, setEnvio] = useState(false)
   const [costoEnvio, setCostoEnvio] = useState<string>('190')
   const [horarioEntrega, setHorarioEntrega] = useState('')
+  const [direccionEnvio, setDireccionEnvio] = useState('')
+  const [telefonoEnvio, setTelefonoEnvio] = useState('')
   const [estado, setEstado] = useState<string>('cobrado')
   const [notas, setNotas] = useState('')
   const [items, setItems] = useState<Item[]>([nuevoItem()])
@@ -261,6 +263,7 @@ function NuevaVentaDialog({
     setFecha(new Date().toISOString().slice(0, 10))
     setClienteId(''); setCanal('directa'); setFormaPago('efectivo'); setConFactura(false)
     setEnvio(false); setCostoEnvio('190'); setHorarioEntrega('')
+    setDireccionEnvio(''); setTelefonoEnvio('')
     setEstado('cobrado'); setNotas(''); setItems([nuevoItem()]); setError(null)
 
     setDatosCargados(false)
@@ -282,6 +285,13 @@ function NuevaVentaDialog({
 
   const cliente = clientes.find((c) => c.id === Number(clienteId))
   const esMayorista = cliente?.tipo === 'mayorista'
+
+  // Al cambiar el cliente, precarga la dirección y teléfono en los campos de envío
+  useEffect(() => {
+    if (!cliente) { setDireccionEnvio(''); setTelefonoEnvio(''); return }
+    setDireccionEnvio(cliente.direccion ?? '')
+    setTelefonoEnvio(cliente.whatsapp ?? cliente.telefono ?? '')
+  }, [clienteId])
   const presPorId = useMemo(() => new Map(presentaciones.map((p) => [p.id, p])), [presentaciones])
   const stockPorId = useMemo(() => new Map(stock.map((s) => [s.id, s])), [stock])
   const tanquePorId = useMemo(() => new Map(tanques.map((t) => [t.id, t])), [tanques])
@@ -357,6 +367,14 @@ function NuevaVentaDialog({
 
     // Validaciones
     if (items.length === 0) { setError('Agregá al menos un ítem.'); return }
+    if (envio && !clienteId) {
+      setError('Para envío por cadete es necesario seleccionar un cliente (o crearlo con "+ nuevo cliente"). Así queda registrada la dirección/teléfono para el cadete y para próximas ventas.')
+      return
+    }
+    if (envio && !direccionEnvio.trim()) {
+      setError('Ingresá una dirección de entrega para el envío.')
+      return
+    }
     // Preacumular stock necesitado por presentación (para validar packs contra sus componentes)
     const necesidad = new Map<number, number>()
     for (const f of filas) {
@@ -389,6 +407,27 @@ function NuevaVentaDialog({
     }
 
     setGuardando(true); setError(null)
+
+    // 0) Si es envío con cliente, y cambiaron direccion o telefono/whatsapp respecto al cliente, actualizar la ficha
+    if (envio && cliente) {
+      const patch: Record<string, unknown> = {}
+      const dirNueva = direccionEnvio.trim()
+      const telNuevo = telefonoEnvio.trim()
+      if (dirNueva && dirNueva !== (cliente.direccion ?? '')) patch.direccion = dirNueva
+      if (telNuevo && telNuevo !== (cliente.whatsapp ?? '') && telNuevo !== (cliente.telefono ?? '')) {
+        // Guardar en whatsapp si el cliente no tiene, si no en telefono
+        if (!cliente.whatsapp) patch.whatsapp = telNuevo
+        else if (!cliente.telefono) patch.telefono = telNuevo
+        else patch.whatsapp = telNuevo // reemplaza whatsapp por defecto
+      }
+      if (Object.keys(patch).length > 0) {
+        patch.actualizado_en = new Date().toISOString()
+        const { error: eC, data: cActualizado } = await supabase.from('clientes')
+          .update(patch).eq('id', cliente.id).select('*').single()
+        if (eC) { setError('Error actualizando cliente: ' + eC.message); setGuardando(false); return }
+        if (cActualizado) onClienteCreado(cActualizado as Cliente)
+      }
+    }
 
     // 1) Insert venta
     const { data: venta, error: eV } = await supabase.from('ventas').insert({
@@ -492,9 +531,27 @@ function NuevaVentaDialog({
                   <div className="input tabular-nums">{money(Number(costoEnvio) || 0)}</div>
                 </div>
                 <div className="sm:col-span-2">
-                  <label className="label">🕐 Horario de entrega (opcional)</label>
-                  <input className="input" value={horarioEntrega} onChange={(e) => setHorarioEntrega(e.target.value)} placeholder="ej: después de las 18h · solo mañana · sábados a la tarde" />
+                  <label className="label">📍 Dirección de entrega</label>
+                  <input className="input" value={direccionEnvio} onChange={(e) => setDireccionEnvio(e.target.value)} placeholder="calle y número, apartamento, referencia…" />
                 </div>
+                <div>
+                  <label className="label">📞 Teléfono / WhatsApp</label>
+                  <input className="input" value={telefonoEnvio} onChange={(e) => setTelefonoEnvio(e.target.value)} placeholder="ej: 099 123 456" />
+                </div>
+                <div>
+                  <label className="label">🕐 Horario de entrega (opcional)</label>
+                  <input className="input" value={horarioEntrega} onChange={(e) => setHorarioEntrega(e.target.value)} placeholder="ej: después de las 18h" />
+                </div>
+                {cliente && (
+                  <p className="sm:col-span-2 text-[11px] text-oliva-600">
+                    Los datos de dirección y teléfono se guardan también en la ficha de <b>{cliente.nombre}</b> para las próximas ventas.
+                  </p>
+                )}
+                {!cliente && (
+                  <p className="sm:col-span-2 text-[11px] text-red-700">
+                    ⚠ Sin cliente seleccionado, la dirección y teléfono solo quedan registrados en esta venta (para el mensaje al cadete). Recomendado: usar <b>+ nuevo cliente</b> arriba así queda registrado para futuras ventas.
+                  </p>
+                )}
               </div>
             )}
           </div>
