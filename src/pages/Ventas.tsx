@@ -19,6 +19,7 @@ interface Venta {
   id: number; fecha: string; cliente_id: number | null; socio_id: string
   canal: string | null; estado: string; forma_pago: string | null
   con_factura: boolean; subtotal: number; descuento: number; iva: number; total: number
+  envio: boolean; costo_envio: number
   notas: string | null; creado_en: string
 }
 
@@ -36,8 +37,10 @@ export function Ventas() {
   const [socios, setSocios] = useState<Socio[]>([])
   const [cargando, setCargando] = useState(true)
   const [nueva, setNueva] = useState(false)
+  const [ventaDetalle, setVentaDetalle] = useState<Venta | null>(null)
 
   const [filtroSocio, setFiltroSocio] = useState<string>('todos')
+  const [soloEnvio, setSoloEnvio] = useState(false)
   const [filtroDesde, setFiltroDesde] = useState<string>(() => {
     const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10)
   })
@@ -65,9 +68,10 @@ export function Ventas() {
       if (filtroSocio !== 'todos' && v.socio_id !== filtroSocio) return false
       if (filtroDesde && v.fecha < filtroDesde) return false
       if (filtroHasta && v.fecha > filtroHasta) return false
+      if (soloEnvio && !v.envio) return false
       return true
     })
-  }, [ventas, filtroSocio, filtroDesde, filtroHasta])
+  }, [ventas, filtroSocio, filtroDesde, filtroHasta, soloEnvio])
 
   const totalPeriodo = useMemo(() => filtradas.reduce((s, v) => s + Number(v.total ?? 0), 0), [filtradas])
 
@@ -100,6 +104,10 @@ export function Ventas() {
             <option value="todos">Todos</option>
             {socios.map((s) => <option key={s.id} value={s.id}>{s.nombre}</option>)}
           </select>
+          <label className="flex items-center gap-1 mt-2 text-xs text-oliva-700">
+            <input type="checkbox" className="h-3 w-3 accent-oliva-700" checked={soloEnvio} onChange={(e) => setSoloEnvio(e.target.checked)} />
+            🛵 solo con envío
+          </label>
         </div>
         <div className="rounded-lg bg-oliva-100 border border-oliva-200 p-3 text-right">
           <div className="text-[11px] uppercase tracking-wide text-oliva-700">Total del período</div>
@@ -130,11 +138,18 @@ export function Ventas() {
             </thead>
             <tbody>
               {filtradas.map((v) => (
-                <tr key={v.id} className="border-b border-oliva-100/70 last:border-0 hover:bg-oliva-50/60">
+                <tr
+                  key={v.id}
+                  className="border-b border-oliva-100/70 last:border-0 hover:bg-oliva-50/60 cursor-pointer"
+                  onClick={() => setVentaDetalle(v)}
+                >
                   <td className="py-2 px-4 tabular-nums text-oliva-700">{v.fecha}</td>
                   <td className="py-2 px-4 text-oliva-900">{clientePorId.get(v.cliente_id ?? 0)?.nombre ?? <span className="italic text-oliva-500">sin cliente</span>}</td>
                   <td className="py-2 px-4 text-oliva-700 text-xs">{socioPorId.get(v.socio_id)?.nombre ?? '—'}</td>
-                  <td className="py-2 px-4 text-oliva-700 text-xs">{v.canal ?? '—'}</td>
+                  <td className="py-2 px-4 text-oliva-700 text-xs">
+                    {v.canal ?? '—'}
+                    {v.envio && <span title="Envío por cadete" className="ml-1">🛵</span>}
+                  </td>
                   <td className="py-2 px-4">
                     <span className={`text-[11px] uppercase tracking-wide rounded-full px-2 py-[1px] ${badgeEstado(v.estado)}`}>{v.estado}</span>
                   </td>
@@ -155,6 +170,15 @@ export function Ventas() {
         onClienteCreado={(c) => setClientes((prev) => [...prev, c].sort((a, b) => a.nombre.localeCompare(b.nombre)))}
         onCerrar={() => setNueva(false)}
         onOk={() => { setNueva(false); cargar() }}
+      />
+
+      <VentaDetalleDialog
+        venta={ventaDetalle}
+        clientes={clientes}
+        socios={socios}
+        puedeEditar={puedeEscribir}
+        onCerrar={() => setVentaDetalle(null)}
+        onCambio={() => { setVentaDetalle(null); cargar() }}
       />
     </div>
   )
@@ -202,6 +226,8 @@ function NuevaVentaDialog({
   const [canal, setCanal] = useState<string>('directa')
   const [formaPago, setFormaPago] = useState<string>('efectivo')
   const [conFactura, setConFactura] = useState(false)
+  const [envio, setEnvio] = useState(false)
+  const [costoEnvio, setCostoEnvio] = useState<string>('190')
   const [estado, setEstado] = useState<string>('cobrado')
   const [notas, setNotas] = useState('')
   const [items, setItems] = useState<Item[]>([nuevoItem()])
@@ -220,6 +246,7 @@ function NuevaVentaDialog({
     if (!abierto) return
     setFecha(new Date().toISOString().slice(0, 10))
     setClienteId(''); setCanal('directa'); setFormaPago('efectivo'); setConFactura(false)
+    setEnvio(false); setCostoEnvio('190')
     setEstado('cobrado'); setNotas(''); setItems([nuevoItem()]); setError(null)
 
     setDatosCargados(false)
@@ -298,7 +325,8 @@ function NuevaVentaDialog({
   })
   const subtotal = filas.reduce((s, f) => s + f.subtotal, 0)
   const iva = filas.reduce((s, f) => s + f.ivaLinea, 0)
-  const total = subtotal + iva
+  const cEnvio = envio ? (Number(costoEnvio) || 0) : 0
+  const total = subtotal + iva + cEnvio
 
   function stocksParaPresentacion(presId: number) {
     return stock
@@ -355,6 +383,7 @@ function NuevaVentaDialog({
       socio_id: socioId,
       canal, estado, forma_pago: formaPago,
       con_factura: conFactura,
+      envio, costo_envio: cEnvio,
       subtotal, descuento: 0, iva, total,
       notas: notas.trim() || null,
     }).select('id').single()
@@ -429,6 +458,26 @@ function NuevaVentaDialog({
           <div className="sm:col-span-3 flex items-center gap-2">
             <input id="cf" type="checkbox" checked={conFactura} onChange={(e) => setConFactura(e.target.checked)} className="h-4 w-4 accent-oliva-700" />
             <label htmlFor="cf" className="text-sm text-oliva-800">Con factura (agrega IVA)</label>
+          </div>
+
+          <div className="sm:col-span-3 rounded-xl border border-oliva-100 bg-oliva-50/60 p-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <input id="env" type="checkbox" checked={envio} onChange={(e) => setEnvio(e.target.checked)} className="h-4 w-4 accent-oliva-700" />
+              <label htmlFor="env" className="text-sm text-oliva-800">🛵 Envío por cadete</label>
+            </div>
+            {envio && (
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Costo del envío</label>
+                  <input className="input tabular-nums" type="number" min="0" step="1" value={costoEnvio} onChange={(e) => setCostoEnvio(e.target.value)} />
+                  <p className="text-[11px] text-oliva-600 mt-1">Se le cobra al cliente. No entra en el IVA/factura.</p>
+                </div>
+                <div>
+                  <label className="label">Se suma al total</label>
+                  <div className="input tabular-nums">{money(Number(costoEnvio) || 0)}</div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -558,7 +607,7 @@ function NuevaVentaDialog({
         </div>
 
         {/* Totales */}
-        <div className="card p-4 grid grid-cols-3 gap-3 text-sm">
+        <div className="card p-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
           <div>
             <div className="text-xs uppercase tracking-wide text-oliva-600">Subtotal</div>
             <div className="tabular-nums font-medium text-oliva-900">{money(subtotal)}</div>
@@ -566,6 +615,10 @@ function NuevaVentaDialog({
           <div>
             <div className="text-xs uppercase tracking-wide text-oliva-600">IVA</div>
             <div className="tabular-nums font-medium text-oliva-900">{conFactura ? money(iva) : <span className="text-oliva-400">—</span>}</div>
+          </div>
+          <div>
+            <div className="text-xs uppercase tracking-wide text-oliva-600">Envío</div>
+            <div className="tabular-nums font-medium text-oliva-900">{envio ? money(cEnvio) : <span className="text-oliva-400">—</span>}</div>
           </div>
           <div>
             <div className="text-xs uppercase tracking-wide text-oliva-600">Total</div>
@@ -596,6 +649,297 @@ function NuevaVentaDialog({
           setNuevoClienteAbierto(false)
         }}
       />
+    </Dialog>
+  )
+}
+
+// ---------- Diálogo Detalle / edición de venta existente ----------
+
+interface ItemVenta {
+  id: number
+  venta_id: number
+  stock_id: number | null
+  presentacion_id: number
+  unidades: number
+  precio_unitario: number
+  descuento_unitario: number
+  subtotal: number
+}
+
+interface PresentacionInfo { id: number; nombre: string; producto_id: number; es_pack: boolean }
+interface ProdInfo { id: number; nombre: string }
+
+function VentaDetalleDialog({
+  venta, clientes, socios, puedeEditar, onCerrar, onCambio,
+}: {
+  venta: Venta | null
+  clientes: Cliente[]
+  socios: Socio[]
+  puedeEditar: boolean
+  onCerrar: () => void
+  onCambio: () => void
+}) {
+  const [items, setItems] = useState<ItemVenta[]>([])
+  const [presMap, setPresMap] = useState<Map<number, PresentacionInfo>>(new Map())
+  const [prodMap, setProdMap] = useState<Map<number, ProdInfo>>(new Map())
+  const [cargando, setCargando] = useState(false)
+  const [guardando, setGuardando] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [confirmAnular, setConfirmAnular] = useState(false)
+
+  // Campos editables (cabecera)
+  const [clienteId, setClienteId] = useState<string>('')
+  const [canal, setCanal] = useState('')
+  const [formaPago, setFormaPago] = useState('')
+  const [estado, setEstado] = useState('')
+  const [notas, setNotas] = useState('')
+
+  useEffect(() => {
+    if (!venta) return
+    setClienteId(venta.cliente_id ? String(venta.cliente_id) : '')
+    setCanal(venta.canal ?? 'directa')
+    setFormaPago(venta.forma_pago ?? 'efectivo')
+    setEstado(venta.estado)
+    setNotas(venta.notas ?? '')
+    setError(null); setConfirmAnular(false)
+
+    setCargando(true)
+    Promise.all([
+      supabase.from('items_venta').select('*').eq('venta_id', venta.id).order('id'),
+      supabase.from('presentaciones').select('id,nombre,producto_id,es_pack'),
+      supabase.from('productos').select('id,nombre'),
+    ]).then(([i, p, pr]) => {
+      setItems((i.data as ItemVenta[]) ?? [])
+      setPresMap(new Map(((p.data as PresentacionInfo[]) ?? []).map((x) => [x.id, x])))
+      setProdMap(new Map(((pr.data as ProdInfo[]) ?? []).map((x) => [x.id, x])))
+      setCargando(false)
+    })
+  }, [venta])
+
+  if (!venta) return null
+
+  const anulada = estado === 'cancelado' || venta.estado === 'cancelado'
+  const socio = socios.find((s) => s.id === venta.socio_id)
+
+  async function guardarCambios(nuevoEstado?: string) {
+    setGuardando(true); setError(null)
+    const patch: Record<string, unknown> = {
+      cliente_id: clienteId ? Number(clienteId) : null,
+      canal, forma_pago: formaPago, notas: notas.trim() || null,
+    }
+    if (nuevoEstado) patch.estado = nuevoEstado
+    const { error } = await supabase.from('ventas').update(patch).eq('id', venta!.id)
+    setGuardando(false)
+    if (error) { setError(error.message); return }
+    if (nuevoEstado) setEstado(nuevoEstado)
+    onCambio()
+  }
+
+  async function cambiarEstado(nuevo: string) {
+    if (nuevo === estado) return
+    setGuardando(true); setError(null)
+    const { error } = await supabase.from('ventas').update({ estado: nuevo }).eq('id', venta!.id)
+    setGuardando(false)
+    if (error) { setError(error.message); return }
+    setEstado(nuevo)
+    onCambio()
+  }
+
+  async function anular() {
+    setGuardando(true); setError(null)
+    // 1) Obtener todos los movimientos_stock originados por esta venta
+    const { data: movs, error: e1 } = await supabase
+      .from('movimientos_stock').select('*').eq('venta_id', venta!.id)
+    if (e1) { setError(e1.message); setGuardando(false); return }
+
+    // 2) Reversar cada movimiento: sumar unidades al stock (mov.unidades es negativo → resta un negativo = suma)
+    const { data: { user } } = await supabase.auth.getUser()
+    for (const m of (movs ?? [])) {
+      const { data: s } = await supabase.from('stock').select('unidades').eq('id', m.stock_id).maybeSingle()
+      if (!s) continue
+      const nuevas = Number(s.unidades) - Number(m.unidades)
+      await supabase.from('stock').update({ unidades: nuevas, actualizado_en: new Date().toISOString() }).eq('id', m.stock_id)
+      await supabase.from('movimientos_stock').insert({
+        stock_id: m.stock_id, tipo: 'devolucion', unidades: -Number(m.unidades),
+        venta_id: venta!.id, usuario_id: user?.id ?? null,
+        nota: `Anulacion de venta #${venta!.id}`,
+      })
+    }
+    // 3) Marcar venta cancelado
+    const { error: e2 } = await supabase.from('ventas').update({ estado: 'cancelado' }).eq('id', venta!.id)
+    setGuardando(false)
+    if (e2) { setError(e2.message); return }
+    setEstado('cancelado')
+    onCambio()
+  }
+
+  return (
+    <Dialog abierto={venta !== null} onCerrar={onCerrar} titulo={`Venta #${venta.id} · ${venta.fecha}`} ancho="lg">
+      <div className="space-y-4">
+        {anulada && (
+          <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-800">
+            Esta venta está <b>anulada</b>. El stock ya fue devuelto.
+          </div>
+        )}
+
+        {/* Estado — botones rápidos */}
+        <div>
+          <div className="text-xs uppercase tracking-wide text-oliva-600 mb-1">Estado</div>
+          <div className="flex flex-wrap gap-1">
+            {ESTADOS.map((s) => (
+              <button
+                key={s}
+                disabled={!puedeEditar || anulada || guardando}
+                onClick={() => cambiarEstado(s)}
+                className={`text-xs px-3 py-1 rounded-full border transition ${
+                  estado === s
+                    ? 'bg-oliva-700 text-white border-oliva-700'
+                    : 'bg-white text-oliva-700 border-oliva-200 hover:bg-oliva-50'
+                }`}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Cabecera editable */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="label">Cliente</label>
+            <select className="input" value={clienteId} onChange={(e) => setClienteId(e.target.value)} disabled={!puedeEditar || anulada}>
+              <option value="">— sin cliente —</option>
+              {clientes.map((c) => <option key={c.id} value={c.id}>{c.nombre} ({c.tipo})</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="label">Canal</label>
+            <select className="input" value={canal} onChange={(e) => setCanal(e.target.value)} disabled={!puedeEditar || anulada}>
+              {CANALES.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="label">Forma de pago</label>
+            <select className="input" value={formaPago} onChange={(e) => setFormaPago(e.target.value)} disabled={!puedeEditar || anulada}>
+              {FORMAS_PAGO.map((f) => <option key={f} value={f}>{f.replace('_', ' ')}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="label">Socio (vendedor)</label>
+            <div className="input">{socio?.nombre ?? '—'}</div>
+          </div>
+        </div>
+
+        <div>
+          <label className="label">Notas</label>
+          <input className="input" value={notas} onChange={(e) => setNotas(e.target.value)} disabled={!puedeEditar || anulada} />
+        </div>
+
+        {puedeEditar && !anulada && (
+          <div className="flex justify-end">
+            <button
+              className="btn-secondary text-xs"
+              onClick={() => guardarCambios()}
+              disabled={guardando}
+            >
+              Guardar cambios de cabecera
+            </button>
+          </div>
+        )}
+
+        {/* Ítems */}
+        <div>
+          <div className="text-xs uppercase tracking-wide text-oliva-600 mb-1">Ítems</div>
+          {cargando ? (
+            <div className="text-sm text-oliva-600">Cargando…</div>
+          ) : items.length === 0 ? (
+            <div className="text-sm text-oliva-600">Sin ítems.</div>
+          ) : (
+            <div className="rounded-lg border border-oliva-100 overflow-x-auto">
+              <table className="w-full text-sm min-w-[420px]">
+                <thead>
+                  <tr className="text-left text-xs uppercase tracking-wide text-oliva-600 bg-oliva-50">
+                    <th className="py-2 px-3">Producto · Presentación</th>
+                    <th className="py-2 px-3 text-right">Cant.</th>
+                    <th className="py-2 px-3 text-right">P. u.</th>
+                    <th className="py-2 px-3 text-right">Desc.</th>
+                    <th className="py-2 px-3 text-right">Subtotal</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((it) => {
+                    const p = presMap.get(it.presentacion_id)
+                    const prod = p ? prodMap.get(p.producto_id) : null
+                    return (
+                      <tr key={it.id} className="border-t border-oliva-100/70">
+                        <td className="py-2 px-3 text-oliva-800">
+                          {prod?.nombre ?? '—'} · {p?.nombre ?? '—'}
+                          {p?.es_pack && <span className="text-[10px] ml-2 text-oliva-600">(pack)</span>}
+                        </td>
+                        <td className="py-2 px-3 text-right tabular-nums">{it.unidades}</td>
+                        <td className="py-2 px-3 text-right tabular-nums">{money(it.precio_unitario)}</td>
+                        <td className="py-2 px-3 text-right tabular-nums">{Number(it.descuento_unitario) > 0 ? money(it.descuento_unitario) : '—'}</td>
+                        <td className="py-2 px-3 text-right tabular-nums font-medium">{money(it.subtotal)}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Totales */}
+        <div className="card p-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm bg-oliva-50/60">
+          <div>
+            <div className="text-xs uppercase tracking-wide text-oliva-600">Subtotal</div>
+            <div className="tabular-nums font-medium">{money(venta.subtotal)}</div>
+          </div>
+          <div>
+            <div className="text-xs uppercase tracking-wide text-oliva-600">IVA {venta.con_factura ? '' : '(sin factura)'}</div>
+            <div className="tabular-nums font-medium">{venta.con_factura ? money(venta.iva) : <span className="text-oliva-400">—</span>}</div>
+          </div>
+          <div>
+            <div className="text-xs uppercase tracking-wide text-oliva-600">🛵 Envío</div>
+            <div className="tabular-nums font-medium">{venta.envio ? money(venta.costo_envio) : <span className="text-oliva-400">—</span>}</div>
+          </div>
+          <div>
+            <div className="text-xs uppercase tracking-wide text-oliva-600">Total</div>
+            <div className="tabular-nums font-semibold text-lg">{money(venta.total)}</div>
+          </div>
+        </div>
+
+        {error && <div className="text-sm text-red-700">{error}</div>}
+
+        {/* Acciones destructivas */}
+        {puedeEditar && !anulada && (
+          <div className="border-t border-oliva-100 pt-4">
+            {confirmAnular ? (
+              <div className="rounded-lg bg-red-50 border border-red-200 p-3 space-y-2">
+                <div className="text-sm text-red-800">
+                  ¿Anular la venta? El stock se devuelve automáticamente a los lotes de origen y la venta queda marcada como <b>cancelado</b>. Esta acción no se puede deshacer.
+                </div>
+                <div className="flex justify-end gap-2">
+                  <button className="btn-secondary text-xs" onClick={() => setConfirmAnular(false)} disabled={guardando}>Cancelar</button>
+                  <button className="text-xs px-3 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50" onClick={anular} disabled={guardando}>
+                    {guardando ? 'Anulando…' : 'Sí, anular y devolver stock'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex justify-between items-center">
+                <button className="text-xs text-red-700 hover:text-red-900 underline" onClick={() => setConfirmAnular(true)}>Anular esta venta</button>
+                <button className="btn-secondary" onClick={onCerrar}>Cerrar</button>
+              </div>
+            )}
+          </div>
+        )}
+        {(!puedeEditar || anulada) && (
+          <div className="flex justify-end pt-2">
+            <button className="btn-secondary" onClick={onCerrar}>Cerrar</button>
+          </div>
+        )}
+      </div>
     </Dialog>
   )
 }
