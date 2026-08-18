@@ -136,7 +136,7 @@ export function Stock() {
 
       <AjusteEnvasadoDialog
         abierto={ajusteEnv}
-        presentaciones={presentaciones.filter((x) => x.activo)}
+        presentaciones={presentaciones.filter((x) => x.activo && !x.es_pack)}
         prodPorId={prodPorId}
         stock={stock}
         tanques={tanques}
@@ -703,7 +703,9 @@ function AjusteEnvasadoDialog({
           <label className="label">Tanque de origen (opcional)</label>
           <select className="input" value={tanqueId} onChange={(e) => setTanqueId(e.target.value)}>
             <option value="">— sin asociar (carga externa) —</option>
-            {tanques.map((t) => <option key={t.id} value={t.id}>{t.nombre}</option>)}
+            {tanques.map((t) => (
+              <option key={t.id} value={t.id}>{t.nombre} · {contenidoDe(t, prodPorId)}{t.campana ? ` ${t.campana}` : ''}</option>
+            ))}
           </select>
           <p className="text-xs text-oliva-600 mt-1">
             Solo si querés dejar registrado de qué tanque proviene ese stock ya envasado.
