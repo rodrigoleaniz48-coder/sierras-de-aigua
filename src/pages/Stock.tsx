@@ -4,7 +4,7 @@ import { useAuth } from '../lib/auth'
 import { Dialog } from '../components/Dialog'
 import { num } from '../lib/format'
 
-interface Producto { id: number; nombre: string; categoria: string }
+interface Producto { id: number; nombre: string; categoria: string; granel: boolean }
 interface Presentacion {
   id: number; producto_id: number; nombre: string; volumen_ml: number | null
   stock_minimo: number; activo: boolean
@@ -48,7 +48,7 @@ export function Stock() {
   async function cargar() {
     setCargando(true)
     const [p, pr, t, s, mS, mG] = await Promise.all([
-      supabase.from('productos').select('id,nombre,categoria').order('nombre'),
+      supabase.from('productos').select('id,nombre,categoria,granel').order('nombre'),
       supabase.from('presentaciones').select('id,producto_id,nombre,volumen_ml,stock_minimo,activo'),
       supabase.from('tanques').select('*').order('id'),
       supabase.from('stock').select('*'),
@@ -154,7 +154,7 @@ export function Stock() {
       <CargarCosechaDialog
         abierto={cargarCosecha}
         tanques={tanques.filter((t) => t.activo)}
-        productos={productos.filter((p) => p.categoria === 'aceite')}
+        productos={productos.filter((p) => p.granel)}
         prodPorId={prodPorId}
         onCerrar={() => setCargarCosecha(false)}
         onOk={() => { setCargarCosecha(false); cargar() }}
@@ -171,7 +171,7 @@ export function Stock() {
       <TanqueEditDialog
         abierto={tanqueEdit !== null}
         tanque={tanqueEdit}
-        productos={productos.filter((p) => p.categoria === 'aceite')}
+        productos={productos.filter((p) => p.granel)}
         onCerrar={() => setTanqueEdit(null)}
         onOk={() => { setTanqueEdit(null); cargar() }}
       />
