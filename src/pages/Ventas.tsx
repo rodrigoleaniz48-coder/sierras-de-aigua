@@ -9,7 +9,9 @@ interface Producto { id: number; nombre: string }
 interface Presentacion {
   id: number; producto_id: number; nombre: string; volumen_ml: number | null
   precio_minorista: number; precio_mayorista: number; iva_pct: number; activo: boolean
+  es_pack: boolean
 }
+interface Componente { presentacion_pack_id: number; presentacion_componente_id: number; unidades: number }
 interface StockRow { id: number; tanque_id: number | null; presentacion_id: number; unidades: number }
 interface Tanque { id: number; nombre: string; producto_id: number | null; variedad_libre: string | null; campana: number | null }
 interface Cliente { id: number; nombre: string; tipo: 'minorista' | 'mayorista' | 'feria' | 'envio' | 'otro' }
@@ -204,6 +206,7 @@ function NuevaVentaDialog({
   const [presentaciones, setPresentaciones] = useState<Presentacion[]>([])
   const [stock, setStock] = useState<StockRow[]>([])
   const [tanques, setTanques] = useState<Tanque[]>([])
+  const [componentes, setComponentes] = useState<Componente[]>([])
   const [datosCargados, setDatosCargados] = useState(false)
 
   const [guardando, setGuardando] = useState(false)
@@ -218,14 +221,16 @@ function NuevaVentaDialog({
     setDatosCargados(false)
     Promise.all([
       supabase.from('productos').select('id,nombre'),
-      supabase.from('presentaciones').select('id,producto_id,nombre,volumen_ml,precio_minorista,precio_mayorista,iva_pct,activo').eq('activo', true),
+      supabase.from('presentaciones').select('id,producto_id,nombre,volumen_ml,precio_minorista,precio_mayorista,iva_pct,activo,es_pack').eq('activo', true),
       supabase.from('stock').select('id,tanque_id,presentacion_id,unidades').gt('unidades', 0),
       supabase.from('tanques').select('*'),
-    ]).then(([p, pr, s, t]) => {
+      supabase.from('presentacion_componente').select('*'),
+    ]).then(([p, pr, s, t, c]) => {
       setProductos((p.data as Producto[]) ?? [])
       setPresentaciones((pr.data as Presentacion[]) ?? [])
       setStock((s.data as StockRow[]) ?? [])
       setTanques((t.data as Tanque[]) ?? [])
+      setComponentes((c.data as Componente[]) ?? [])
       setDatosCargados(true)
     })
   }, [abierto])
@@ -261,12 +266,16 @@ function NuevaVentaDialog({
   function elegirPresentacion(key: string, presId: number | null) {
     if (!presId) return actualizarItem(key, { presentacion_id: null, stock_id: null, precio_unitario: 0 })
     const p = presPorId.get(presId)
-    // Auto-elegir el stock más viejo (FIFO por id) para esta presentación
+    const precio = p ? (esMayorista && Number(p.precio_mayorista) ? Number(p.precio_mayorista) : Number(p.precio_minorista)) : 0
+    if (p?.es_pack) {
+      // Los packs no requieren stock_id: el trigger descuenta los componentes FIFO
+      actualizarItem(key, { presentacion_id: presId, stock_id: null, precio_unitario: precio })
+      return
+    }
     const stocksPres = stock
       .filter((s) => s.presentacion_id === presId)
       .sort((a, b) => a.id - b.id)
     const stockElegido = stocksPres[0]
-    const precio = p ? (esMayorista && Number(p.precio_mayorista) ? Number(p.precio_mayorista) : Number(p.precio_minorista)) : 0
     actualizarItem(key, {
       presentacion_id: presId,
       stock_id: stockElegido?.id ?? null,
@@ -302,12 +311,33 @@ function NuevaVentaDialog({
 
     // Validaciones
     if (items.length === 0) { setError('Agregá al menos un ítem.'); return }
+    // Preacumular stock necesitado por presentación (para validar packs contra sus componentes)
+    const necesidad = new Map<number, number>()
     for (const f of filas) {
       if (!f.it.presentacion_id) { setError('Todos los ítems necesitan una presentación.'); return }
-      if (!f.it.stock_id) { setError('Todos los ítems necesitan un stock disponible.'); return }
       if (f.it.unidades <= 0) { setError('Las unidades deben ser mayores a 0.'); return }
-      if (f.it.unidades > f.disponible) {
-        setError(`No hay stock suficiente para "${f.p?.nombre ?? ''}": pedís ${f.it.unidades}, disponibles ${f.disponible}.`)
+      if (f.p?.es_pack) {
+        const comps = componentes.filter((c) => c.presentacion_pack_id === f.it.presentacion_id)
+        if (comps.length === 0) { setError(`El pack "${f.p?.nombre}" no tiene componentes definidos.`); return }
+        for (const c of comps) {
+          necesidad.set(c.presentacion_componente_id, (necesidad.get(c.presentacion_componente_id) ?? 0) + c.unidades * f.it.unidades)
+        }
+      } else {
+        if (!f.it.stock_id) { setError('Todos los ítems necesitan un stock disponible.'); return }
+        if (f.it.unidades > f.disponible) {
+          setError(`No hay stock suficiente para "${f.p?.nombre ?? ''}": pedís ${f.it.unidades}, disponibles ${f.disponible}.`)
+          return
+        }
+        necesidad.set(f.it.presentacion_id, (necesidad.get(f.it.presentacion_id) ?? 0) + f.it.unidades)
+      }
+    }
+    // Chequear que la suma de necesidad por presentación no supere el stock total disponible
+    for (const [presId, need] of necesidad) {
+      const totalDisp = stock.filter((s) => s.presentacion_id === presId).reduce((a, b) => a + b.unidades, 0)
+      if (need > totalDisp) {
+        const p = presPorId.get(presId)
+        const prod = p ? prodPorId.get(p.producto_id) : null
+        setError(`Stock insuficiente para ${prod?.nombre ?? ''} ${p?.nombre ?? ''}: se necesitan ${need} u pero hay ${totalDisp} u.`)
         return
       }
     }
@@ -327,10 +357,10 @@ function NuevaVentaDialog({
 
     if (eV || !venta) { setError(eV?.message ?? 'Error creando venta'); setGuardando(false); return }
 
-    // 2) Insert items (el trigger descuenta stock)
+    // 2) Insert items (el trigger descuenta stock; para packs, componentes vía trigger)
     const payloadItems = filas.map((f) => ({
       venta_id: venta.id,
-      stock_id: f.it.stock_id!,
+      stock_id: f.p?.es_pack ? null : f.it.stock_id,
       presentacion_id: f.it.presentacion_id!,
       unidades: Number(f.it.unidades),
       precio_unitario: Number(f.it.precio_unitario),
@@ -416,10 +446,10 @@ function NuevaVentaDialog({
                           <option value="">— elegir —</option>
                           {presentaciones.map((p) => {
                             const prod = prodPorId.get(p.producto_id)
-                            const hayStock = stock.some((s) => s.presentacion_id === p.id)
+                            const hayStock = p.es_pack ? true : stock.some((s) => s.presentacion_id === p.id)
                             return (
                               <option key={p.id} value={p.id} disabled={!hayStock}>
-                                {prod?.nombre} · {p.nombre}{!hayStock ? ' · SIN STOCK' : ''}
+                                {prod?.nombre} · {p.nombre}{p.es_pack ? ' · pack' : ''}{!hayStock ? ' · SIN STOCK' : ''}
                               </option>
                             )
                           })}
@@ -427,27 +457,35 @@ function NuevaVentaDialog({
                       </div>
                       <div>
                         <label className="label">Origen del stock</label>
-                        <select
-                          className="input"
-                          value={f.it.stock_id ?? ''}
-                          onChange={(e) => actualizarItem(f.it.key, { stock_id: e.target.value ? Number(e.target.value) : null })}
-                          disabled={!f.it.presentacion_id}
-                          required
-                        >
-                          <option value="">— elegir origen —</option>
-                          {opcionesStock.map(({ s, tanque }) => {
-                            const origen = tanque
-                              ? `${tanque.nombre}${tanque.campana ? ` · ${tanque.campana}` : ''}`
-                              : 'directo (sin tanque)'
-                            return (
-                              <option key={s.id} value={s.id}>
-                                {origen} · {s.unidades} u
-                              </option>
-                            )
-                          })}
-                        </select>
-                        {f.it.presentacion_id && opcionesStock.length === 0 && (
-                          <p className="text-xs text-red-700 mt-1">Sin stock envasado. Ir a Stock → Envasar o Ajuste envasado.</p>
+                        {f.p?.es_pack ? (
+                          <div className="input text-xs text-oliva-600 italic">
+                            pack — se descuenta 1 unidad de cada componente 250 ml (FIFO)
+                          </div>
+                        ) : (
+                          <>
+                            <select
+                              className="input"
+                              value={f.it.stock_id ?? ''}
+                              onChange={(e) => actualizarItem(f.it.key, { stock_id: e.target.value ? Number(e.target.value) : null })}
+                              disabled={!f.it.presentacion_id}
+                              required
+                            >
+                              <option value="">— elegir origen —</option>
+                              {opcionesStock.map(({ s, tanque }) => {
+                                const origen = tanque
+                                  ? `${tanque.nombre}${tanque.campana ? ` · ${tanque.campana}` : ''}`
+                                  : 'directo (sin tanque)'
+                                return (
+                                  <option key={s.id} value={s.id}>
+                                    {origen} · {s.unidades} u
+                                  </option>
+                                )
+                              })}
+                            </select>
+                            {f.it.presentacion_id && opcionesStock.length === 0 && (
+                              <p className="text-xs text-red-700 mt-1">Sin stock envasado. Ir a Stock → Envasar o Ajuste envasado.</p>
+                            )}
+                          </>
                         )}
                       </div>
                     </div>

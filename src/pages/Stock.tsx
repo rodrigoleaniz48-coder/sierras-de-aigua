@@ -3,11 +3,12 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { Dialog } from '../components/Dialog'
 import { num } from '../lib/format'
+import { colorProducto } from '../lib/colores'
 
 interface Producto { id: number; nombre: string; categoria: string; granel: boolean }
 interface Presentacion {
   id: number; producto_id: number; nombre: string; volumen_ml: number | null
-  stock_minimo: number; activo: boolean
+  stock_minimo: number; activo: boolean; es_pack: boolean
 }
 interface Tanque {
   id: number; nombre: string; capacidad_litros: number
@@ -49,7 +50,7 @@ export function Stock() {
     setCargando(true)
     const [p, pr, t, s, mS, mG] = await Promise.all([
       supabase.from('productos').select('id,nombre,categoria,granel').order('nombre'),
-      supabase.from('presentaciones').select('id,producto_id,nombre,volumen_ml,stock_minimo,activo'),
+      supabase.from('presentaciones').select('id,producto_id,nombre,volumen_ml,stock_minimo,activo,es_pack'),
       supabase.from('tanques').select('*').order('id'),
       supabase.from('stock').select('*'),
       supabase.from('movimientos_stock').select('*').order('fecha', { ascending: false }).limit(100),
@@ -110,7 +111,7 @@ export function Stock() {
       )}
 
       {!cargando && tab === 'envasado' && (
-        <EnvasadoView productos={productos} presentaciones={presentaciones} stock={stock} tanquePorId={tanquePorId} />
+        <EnvasadoView productos={productos} presentaciones={presentaciones.filter((p) => !p.es_pack)} stock={stock} tanquePorId={tanquePorId} />
       )}
 
       {!cargando && tab === 'movimientos' && (
@@ -244,9 +245,10 @@ function TanqueCard({
   const pct = Math.min(100, Math.round((actual / cap) * 100))
   const contenido = contenidoDe(tanque, prodPorId)
   const vacio = actual === 0
+  const color = colorProducto(vacio ? null : contenido)
 
   return (
-    <div className={`card p-4 flex flex-col gap-3 ${!tanque.activo ? 'opacity-60' : ''}`}>
+    <div className={`card p-4 flex flex-col gap-3 border-2 ${color.card} ${!tanque.activo ? 'opacity-60' : ''}`}>
       <div className="flex items-start justify-between gap-2">
         <div>
           <div className="text-lg font-semibold text-oliva-900">{tanque.nombre}</div>
@@ -266,9 +268,9 @@ function TanqueCard({
       </div>
 
       {/* Barra visual tipo "tanque" */}
-      <div className="relative h-24 rounded-lg border-2 border-oliva-200 overflow-hidden bg-oliva-50">
+      <div className="relative h-24 rounded-lg border-2 border-oliva-200 overflow-hidden bg-white/70">
         <div
-          className={`absolute bottom-0 left-0 right-0 transition-all ${vacio ? '' : 'bg-gradient-to-t from-aceite-500 to-aceite-500/70'}`}
+          className={`absolute bottom-0 left-0 right-0 transition-all ${vacio ? '' : color.fill}`}
           style={{ height: `${pct}%` }}
         />
         <div className="absolute inset-0 flex items-end justify-center pb-1">
@@ -335,9 +337,13 @@ function EnvasadoView({
             const origenes = r.detalle
               .filter((d) => d.unidades > 0)
               .map((d) => (d.tanque_id ? tanquePorId.get(d.tanque_id)?.nombre ?? `T${d.tanque_id}` : 'directo'))
+            const color = colorProducto(r.prod?.nombre)
             return (
               <tr key={r.pres.id} className="border-b border-oliva-100/70 last:border-0">
-                <td className="py-2 px-4 text-oliva-800">{r.prod?.nombre}</td>
+                <td className="py-2 px-4 text-oliva-800">
+                  <span className={`inline-block w-2 h-2 rounded-full ${color.dot} mr-2 align-middle`}></span>
+                  {r.prod?.nombre}
+                </td>
                 <td className="py-2 px-4 text-oliva-800">{r.pres.nombre}</td>
                 <td className={`py-2 px-4 text-right tabular-nums font-medium ${r.unidades === 0 ? 'text-oliva-400' : 'text-oliva-900'}`}>{r.unidades}</td>
                 <td className="py-2 px-4 text-right tabular-nums text-oliva-600">{r.pres.stock_minimo || '—'}</td>
