@@ -13,6 +13,7 @@ interface Tanque {
   id: number; nombre: string; capacidad_litros: number
   producto_id: number | null; variedad_libre: string | null
   campana: number | null; litros_actuales: number; notas: string | null; activo: boolean
+  actualizado_en?: string
 }
 interface StockRow { id: number; tanque_id: number | null; presentacion_id: number; unidades: number }
 interface MovStock { id: number; stock_id: number; tipo: string; unidades: number; venta_id: number | null; nota: string | null; fecha: string }
@@ -757,7 +758,7 @@ function TrasegarDialog({
     if (e1) { setError(e1.message); setGuardando(false); return }
 
     // Si destino estaba vacío, hereda contenido/campana del origen
-    const patch: Partial<Tanque> = { litros_actuales: Number(destino.litros_actuales) + L, actualizado_en: new Date().toISOString() as unknown as string }
+    const patch: Partial<Tanque> = { litros_actuales: Number(destino.litros_actuales) + L, actualizado_en: new Date().toISOString() }
     if (Number(destino.litros_actuales) === 0) {
       patch.producto_id = origen.producto_id
       patch.variedad_libre = origen.variedad_libre
@@ -865,7 +866,7 @@ function CargarCosechaDialog({
 
     const patch: Partial<Tanque> = {
       litros_actuales: Number(tanque.litros_actuales) + L,
-      actualizado_en: new Date().toISOString() as unknown as string,
+      actualizado_en: new Date().toISOString(),
     }
     // Si el tanque estaba vacío, tomamos contenido nuevo del formulario
     if (vacio) {
