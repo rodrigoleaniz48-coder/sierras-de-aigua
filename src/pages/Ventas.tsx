@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { Dialog } from '../components/Dialog'
+import { ClienteDialog, type Cliente, type Socio } from '../components/ClienteDialog'
 import { money } from '../lib/format'
 
 // ---------- Tipos ----------
@@ -14,8 +15,6 @@ interface Presentacion {
 interface Componente { presentacion_pack_id: number; presentacion_componente_id: number; unidades: number }
 interface StockRow { id: number; tanque_id: number | null; presentacion_id: number; unidades: number }
 interface Tanque { id: number; nombre: string; producto_id: number | null; variedad_libre: string | null; campana: number | null }
-interface Cliente { id: number; nombre: string; tipo: 'minorista' | 'mayorista' | 'feria' | 'envio' | 'otro' }
-interface Socio { id: string; nombre: string }
 interface Venta {
   id: number; fecha: string; cliente_id: number | null; socio_id: string
   canal: string | null; estado: string; forma_pago: string | null
@@ -152,6 +151,8 @@ export function Ventas() {
         abierto={nueva}
         socioId={session?.user.id ?? ''}
         clientes={clientes}
+        socios={socios}
+        onClienteCreado={(c) => setClientes((prev) => [...prev, c].sort((a, b) => a.nombre.localeCompare(b.nombre)))}
         onCerrar={() => setNueva(false)}
         onOk={() => { setNueva(false); cargar() }}
       />
@@ -185,14 +186,17 @@ function nuevoItem(): Item {
 }
 
 function NuevaVentaDialog({
-  abierto, socioId, clientes, onCerrar, onOk,
+  abierto, socioId, clientes, socios, onClienteCreado, onCerrar, onOk,
 }: {
   abierto: boolean
   socioId: string
   clientes: Cliente[]
+  socios: Socio[]
+  onClienteCreado: (cliente: Cliente) => void
   onCerrar: () => void
   onOk: () => void
 }) {
+  const [nuevoClienteAbierto, setNuevoClienteAbierto] = useState(false)
   const [fecha, setFecha] = useState(() => new Date().toISOString().slice(0, 10))
   const [clienteId, setClienteId] = useState<string>('')
   const [canal, setCanal] = useState<string>('directa')
@@ -389,7 +393,16 @@ function NuevaVentaDialog({
             <input className="input" type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} required />
           </div>
           <div className="sm:col-span-2">
-            <label className="label">Cliente {esMayorista && <span className="text-aceite-600">· mayorista</span>}</label>
+            <label className="label flex items-center justify-between">
+              <span>Cliente {esMayorista && <span className="text-aceite-600">· mayorista</span>}</span>
+              <button
+                type="button"
+                className="text-xs text-oliva-700 hover:text-oliva-900 underline font-normal normal-case tracking-normal"
+                onClick={() => setNuevoClienteAbierto(true)}
+              >
+                + nuevo cliente
+              </button>
+            </label>
             <select className="input" value={clienteId} onChange={(e) => setClienteId(e.target.value)}>
               <option value="">— sin cliente (venta de feria / mostrador) —</option>
               {clientes.map((c) => <option key={c.id} value={c.id}>{c.nombre} ({c.tipo})</option>)}
@@ -571,6 +584,18 @@ function NuevaVentaDialog({
           <button type="submit" className="btn-primary" disabled={guardando || !datosCargados}>{guardando ? 'Guardando…' : 'Guardar venta'}</button>
         </div>
       </form>
+
+      <ClienteDialog
+        abierto={nuevoClienteAbierto}
+        socios={socios}
+        modo="rapido"
+        onCerrar={() => setNuevoClienteAbierto(false)}
+        onOk={(c) => {
+          onClienteCreado(c)
+          setClienteId(String(c.id))
+          setNuevoClienteAbierto(false)
+        }}
+      />
     </Dialog>
   )
 }
