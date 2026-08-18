@@ -380,10 +380,21 @@ function MovimientosView({
     detalle: string; cantidad: string; nota: string | null; scope: 'granel' | 'envasado'
   }
 
+  function tanqueLabel(id: number | null): string | null {
+    if (!id) return null
+    const t = tanquePorId.get(id)
+    if (!t) return `T${id}`
+    const contenido = t.producto_id
+      ? prodPorId.get(t.producto_id)?.nombre
+      : t.variedad_libre
+    const camp = t.campana ? ` ${t.campana}` : ''
+    return contenido ? `${t.nombre} · ${contenido}${camp}` : t.nombre
+  }
+
   const filas: Row[] = useMemo(() => {
     const gr: Row[] = movsGranel.map((m) => {
-      const org = m.tanque_origen_id ? tanquePorId.get(m.tanque_origen_id)?.nombre : null
-      const dest = m.tanque_destino_id ? tanquePorId.get(m.tanque_destino_id)?.nombre : null
+      const org = tanqueLabel(m.tanque_origen_id)
+      const dest = tanqueLabel(m.tanque_destino_id)
       const detalle = m.tipo === 'trasegar' ? `${org} → ${dest}`
         : m.tipo === 'cargar'   ? `→ ${dest}`
         : m.tipo === 'envasar'  ? `${org} → envasado`
