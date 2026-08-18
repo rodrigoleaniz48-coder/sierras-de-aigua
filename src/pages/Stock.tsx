@@ -111,7 +111,7 @@ export function Stock() {
       )}
 
       {!cargando && tab === 'envasado' && (
-        <EnvasadoView productos={productos} presentaciones={presentaciones.filter((p) => !p.es_pack)} stock={stock} tanquePorId={tanquePorId} />
+        <EnvasadoView productos={productos} presentaciones={presentaciones.filter((p) => !p.es_pack)} stock={stock} tanquePorId={tanquePorId} prodPorId={prodPorId} />
       )}
 
       {!cargando && tab === 'movimientos' && (
@@ -293,12 +293,13 @@ function TanqueCard({
 }
 
 function EnvasadoView({
-  productos, presentaciones, stock, tanquePorId,
+  productos, presentaciones, stock, tanquePorId, prodPorId,
 }: {
   productos: Producto[]
   presentaciones: Presentacion[]
   stock: StockRow[]
   tanquePorId: Map<number, Tanque>
+  prodPorId: Map<number, Producto>
 }) {
   const filas = useMemo(() => {
     const porPres = new Map<number, { unidades: number; detalle: { tanque_id: number | null; unidades: number }[] }>()
@@ -336,7 +337,16 @@ function EnvasadoView({
             const bajo = r.unidades <= r.pres.stock_minimo && r.pres.stock_minimo > 0
             const origenes = r.detalle
               .filter((d) => d.unidades > 0)
-              .map((d) => (d.tanque_id ? tanquePorId.get(d.tanque_id)?.nombre ?? `T${d.tanque_id}` : 'directo'))
+              .map((d) => {
+                if (!d.tanque_id) return 'directo (sin tanque)'
+                const t = tanquePorId.get(d.tanque_id)
+                if (!t) return `T${d.tanque_id}`
+                const contenido = t.producto_id
+                  ? prodPorId.get(t.producto_id)?.nombre
+                  : t.variedad_libre
+                const camp = t.campana ? ` ${t.campana}` : ''
+                return contenido ? `${t.nombre} · ${contenido}${camp}` : t.nombre
+              })
             const color = colorProducto(r.prod?.nombre)
             return (
               <tr key={r.pres.id} className="border-b border-oliva-100/70 last:border-0">
