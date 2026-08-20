@@ -40,11 +40,12 @@ export function Ventas() {
   const [socios, setSocios] = useState<Socio[]>([])
   const [ubicaciones, setUbicaciones] = useState<Ubicacion[]>([])
   const [cargando, setCargando] = useState(true)
-  const location = useLocation() as { state?: { abrirNueva?: boolean } }
+  const location = useLocation()
   const navigate = useNavigate()
-  const [nueva, setNueva] = useState(!!location.state?.abrirNueva)
+  const abrirNueva = (location.state as { abrirNueva?: boolean } | null)?.abrirNueva === true
+  const [nueva, setNueva] = useState(abrirNueva)
   useEffect(() => {
-    if (location.state?.abrirNueva) {
+    if (abrirNueva) {
       // Limpiar el state para que un refresh no re-abra el diálogo
       navigate(location.pathname, { replace: true, state: {} })
     }
