@@ -1151,10 +1151,11 @@ function ListaCadeteDialog({
   const [cargando, setCargando] = useState(false)
   const [copiado, setCopiado] = useState(false)
 
-  // Filtro de las ventas: en el rango del listado, con envío, no canceladas
+  // Filtro de las ventas: en el rango del listado, con envío, no canceladas y no entregadas
+  // (Al marcar "🚚 Entregado" en el detalle, el pedido desaparece de la lista del cadete.)
   const enviosDelRango = useMemo(() => {
     return ventas
-      .filter((v) => v.envio && v.estado !== 'cancelado')
+      .filter((v) => v.envio && v.estado !== 'cancelado' && !v.entregado)
       .filter((v) => !desde || v.fecha >= desde)
       .filter((v) => !hasta || v.fecha <= hasta)
       .sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : a.id - b.id))
