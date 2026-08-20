@@ -38,8 +38,6 @@ export function Clientes() {
   }
   useEffect(() => { cargar() }, [])
 
-  const socioPorId = useMemo(() => new Map(socios.map((s) => [s.id, s])), [socios])
-
   // Estadísticas por cliente
   const statsPorCliente = useMemo(() => {
     const m = new Map<number, EstadisticasCliente>()
