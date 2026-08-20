@@ -34,8 +34,8 @@ interface ItemTraslado { id: number; traslado_id: number; presentacion_id: numbe
 type Tab = 'tanques' | 'envasado' | 'movimientos'
 
 export function Stock() {
-  const { puede } = useAuth()
-  const puedeEscribir = puede(['admin', 'ventas'])
+  const { perfil } = useAuth()
+  const puedeEscribir = !!perfil?.puede_modificar_stock
 
   const [tab, setTab] = useState<Tab>('tanques')
   const [productos, setProductos] = useState<Producto[]>([])

@@ -5,6 +5,7 @@ export interface Perfil {
   nombre: string
   rol: Rol
   activo: boolean
+  puede_modificar_stock: boolean
 }
 
 export interface Producto {
