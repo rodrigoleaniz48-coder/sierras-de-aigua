@@ -13,13 +13,15 @@ interface Presentacion {
   es_pack: boolean
 }
 interface Componente { presentacion_pack_id: number; presentacion_componente_id: number; unidades: number }
-interface StockRow { id: number; tanque_id: number | null; presentacion_id: number; unidades: number }
+interface StockRow { id: number; tanque_id: number | null; presentacion_id: number; unidades: number; ubicacion_id: number }
 interface Tanque { id: number; nombre: string; producto_id: number | null; variedad_libre: string | null; campana: number | null }
+interface Ubicacion { id: number; nombre: string; activo: boolean }
 interface Venta {
   id: number; fecha: string; cliente_id: number | null; socio_id: string
   canal: string | null; estado: string; forma_pago: string | null
   con_factura: boolean; subtotal: number; descuento: number; iva: number; total: number
   envio: boolean; costo_envio: number; horario_entrega: string | null
+  ubicacion_id: number
   notas: string | null; creado_en: string
 }
 
@@ -35,6 +37,7 @@ export function Ventas() {
   const [ventas, setVentas] = useState<Venta[]>([])
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [socios, setSocios] = useState<Socio[]>([])
+  const [ubicaciones, setUbicaciones] = useState<Ubicacion[]>([])
   const [cargando, setCargando] = useState(true)
   const [nueva, setNueva] = useState(false)
   const [ventaDetalle, setVentaDetalle] = useState<Venta | null>(null)
@@ -49,14 +52,16 @@ export function Ventas() {
 
   async function cargar() {
     setCargando(true)
-    const [v, c, s] = await Promise.all([
+    const [v, c, s, u] = await Promise.all([
       supabase.from('ventas').select('*').order('fecha', { ascending: false }).order('id', { ascending: false }),
       supabase.from('clientes').select('*').order('nombre'),
       supabase.from('perfiles').select('id,nombre').eq('activo', true).order('nombre'),
+      supabase.from('ubicaciones').select('id,nombre,activo').eq('activo', true).order('id'),
     ])
     setVentas((v.data as Venta[]) ?? [])
     setClientes((c.data as Cliente[]) ?? [])
     setSocios((s.data as Socio[]) ?? [])
+    setUbicaciones((u.data as Ubicacion[]) ?? [])
     setCargando(false)
   }
   useEffect(() => { cargar() }, [])
@@ -134,6 +139,7 @@ export function Ventas() {
                 <th className="py-2 px-4">Fecha</th>
                 <th className="py-2 px-4">Cliente</th>
                 <th className="py-2 px-4">Socio</th>
+                <th className="py-2 px-4">📍</th>
                 <th className="py-2 px-4">Canal</th>
                 <th className="py-2 px-4">Estado</th>
                 <th className="py-2 px-4">Factura</th>
@@ -150,6 +156,7 @@ export function Ventas() {
                   <td className="py-2 px-4 tabular-nums text-oliva-700">{v.fecha}</td>
                   <td className="py-2 px-4 text-oliva-900">{clientePorId.get(v.cliente_id ?? 0)?.nombre ?? <span className="italic text-oliva-500">sin cliente</span>}</td>
                   <td className="py-2 px-4 text-oliva-700 text-xs">{socioPorId.get(v.socio_id)?.nombre ?? '—'}</td>
+                  <td className="py-2 px-4 text-oliva-700 text-xs">{ubicaciones.find((u) => u.id === v.ubicacion_id)?.nombre?.slice(0, 3) ?? '—'}</td>
                   <td className="py-2 px-4 text-oliva-700 text-xs">
                     {v.canal ?? '—'}
                     {v.envio && <span title="Envío por cadete" className="ml-1">🛵</span>}
@@ -171,6 +178,7 @@ export function Ventas() {
         socioId={session?.user.id ?? ''}
         clientes={clientes}
         socios={socios}
+        ubicaciones={ubicaciones}
         onClienteCreado={(c) => setClientes((prev) => [...prev, c].sort((a, b) => a.nombre.localeCompare(b.nombre)))}
         onCerrar={() => setNueva(false)}
         onOk={() => { setNueva(false); cargar() }}
@@ -180,6 +188,7 @@ export function Ventas() {
         venta={ventaDetalle}
         clientes={clientes}
         socios={socios}
+        ubicaciones={ubicaciones}
         puedeEditar={puedeEscribir}
         onCerrar={() => setVentaDetalle(null)}
         onCambio={() => { setVentaDetalle(null); cargar() }}
@@ -222,17 +231,26 @@ function nuevoItem(): Item {
   return { key: crypto.randomUUID(), presentacion_id: null, stock_id: null, unidades: 1, precio_unitario: 0, descuento_unitario: 0 }
 }
 
+function ubicacionDefaultPorSocio(nombre: string | null | undefined): number {
+  const n = (nombre ?? '').toLowerCase()
+  if (n.includes('gonzalo')) return 2 // Maldonado
+  if (n.includes('rodrigo') || n.includes('santi')) return 3 // Montevideo
+  return 1 // Almazara (fallback)
+}
+
 function NuevaVentaDialog({
-  abierto, socioId, clientes, socios, onClienteCreado, onCerrar, onOk,
+  abierto, socioId, clientes, socios, ubicaciones, onClienteCreado, onCerrar, onOk,
 }: {
   abierto: boolean
   socioId: string
   clientes: Cliente[]
   socios: Socio[]
+  ubicaciones: Ubicacion[]
   onClienteCreado: (cliente: Cliente) => void
   onCerrar: () => void
   onOk: () => void
 }) {
+  const { perfil } = useAuth()
   const [nuevoClienteAbierto, setNuevoClienteAbierto] = useState(false)
   const [fecha, setFecha] = useState(() => new Date().toISOString().slice(0, 10))
   const [clienteId, setClienteId] = useState<string>('')
@@ -244,6 +262,7 @@ function NuevaVentaDialog({
   const [horarioEntrega, setHorarioEntrega] = useState('')
   const [direccionEnvio, setDireccionEnvio] = useState('')
   const [telefonoEnvio, setTelefonoEnvio] = useState('')
+  const [ubicacionId, setUbicacionId] = useState<string>('1')
   const [estado, setEstado] = useState<string>('cobrado')
   const [notas, setNotas] = useState('')
   const [items, setItems] = useState<Item[]>([nuevoItem()])
@@ -264,6 +283,7 @@ function NuevaVentaDialog({
     setClienteId(''); setCanal('directa'); setFormaPago('efectivo'); setConFactura(false)
     setEnvio(false); setCostoEnvio('190'); setHorarioEntrega('')
     setDireccionEnvio(''); setTelefonoEnvio('')
+    setUbicacionId(String(ubicacionDefaultPorSocio(perfil?.nombre)))
     setEstado('cobrado'); setNotas(''); setItems([nuevoItem()]); setError(null)
 
     setDatosCargados(false)
@@ -312,6 +332,11 @@ function NuevaVentaDialog({
     }))
   }, [esMayorista, presPorId])
 
+  // Al cambiar de ubicación, resetear stock_id de todos los ítems (son de otra ubicación)
+  useEffect(() => {
+    setItems((prev) => prev.map((it) => ({ ...it, stock_id: null })))
+  }, [ubicacionId])
+
   function actualizarItem(key: string, patch: Partial<Item>) {
     setItems((prev) => prev.map((it) => (it.key === key ? { ...it, ...patch } : it)))
   }
@@ -354,7 +379,7 @@ function NuevaVentaDialog({
 
   function stocksParaPresentacion(presId: number) {
     return stock
-      .filter((s) => s.presentacion_id === presId)
+      .filter((s) => s.presentacion_id === presId && s.ubicacion_id === Number(ubicacionId))
       .sort((a, b) => a.id - b.id)
       .map((s) => {
         const tanque = s.tanque_id ? tanquePorId.get(s.tanque_id) : null
@@ -395,13 +420,16 @@ function NuevaVentaDialog({
         necesidad.set(f.it.presentacion_id, (necesidad.get(f.it.presentacion_id) ?? 0) + f.it.unidades)
       }
     }
-    // Chequear que la suma de necesidad por presentación no supere el stock total disponible
+    // Chequear que la suma de necesidad por presentación no supere el stock de la ubicación
     for (const [presId, need] of necesidad) {
-      const totalDisp = stock.filter((s) => s.presentacion_id === presId).reduce((a, b) => a + b.unidades, 0)
+      const totalDisp = stock
+        .filter((s) => s.presentacion_id === presId && s.ubicacion_id === Number(ubicacionId))
+        .reduce((a, b) => a + b.unidades, 0)
       if (need > totalDisp) {
         const p = presPorId.get(presId)
         const prod = p ? prodPorId.get(p.producto_id) : null
-        setError(`Stock insuficiente para ${prod?.nombre ?? ''} ${p?.nombre ?? ''}: se necesitan ${need} u pero hay ${totalDisp} u.`)
+        const ubicNombre = ubicaciones.find((u) => u.id === Number(ubicacionId))?.nombre ?? ''
+        setError(`Stock insuficiente para ${prod?.nombre ?? ''} ${p?.nombre ?? ''} en ${ubicNombre}: se necesitan ${need} u pero hay ${totalDisp} u.`)
         return
       }
     }
@@ -438,6 +466,7 @@ function NuevaVentaDialog({
       con_factura: conFactura,
       envio, costo_envio: cEnvio,
       horario_entrega: envio ? (horarioEntrega.trim() || null) : null,
+      ubicacion_id: Number(ubicacionId),
       subtotal, descuento: 0, iva, total,
       notas: notas.trim() || null,
     }).select('id').single()
@@ -471,6 +500,15 @@ function NuevaVentaDialog({
       <form onSubmit={guardar} className="space-y-4">
         {/* Cabecera */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="sm:col-span-3 rounded-lg bg-oliva-100/60 border border-oliva-200 p-3">
+            <label className="label">📍 Ubicación desde donde se despacha</label>
+            <select className="input" value={ubicacionId} onChange={(e) => setUbicacionId(e.target.value)}>
+              {ubicaciones.map((u) => <option key={u.id} value={u.id}>{u.nombre}</option>)}
+            </select>
+            <p className="text-[11px] text-oliva-700 mt-1">
+              El stock se descuenta de esta ubicación. Se propone <b>{ubicaciones.find((u) => u.id === ubicacionDefaultPorSocio(perfil?.nombre))?.nombre}</b> según el socio logueado.
+            </p>
+          </div>
           <div>
             <label className="label">Fecha</label>
             <input className="input" type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} required />
@@ -746,11 +784,12 @@ interface PresentacionInfo { id: number; nombre: string; producto_id: number; es
 interface ProdInfo { id: number; nombre: string }
 
 function VentaDetalleDialog({
-  venta, clientes, socios, puedeEditar, onCerrar, onCambio,
+  venta, clientes, socios, ubicaciones, puedeEditar, onCerrar, onCambio,
 }: {
   venta: Venta | null
   clientes: Cliente[]
   socios: Socio[]
+  ubicaciones: Ubicacion[]
   puedeEditar: boolean
   onCerrar: () => void
   onCambio: () => void
@@ -906,6 +945,10 @@ function VentaDetalleDialog({
           <div>
             <label className="label">Socio (vendedor)</label>
             <div className="input">{socio?.nombre ?? '—'}</div>
+          </div>
+          <div>
+            <label className="label">📍 Ubicación</label>
+            <div className="input">{ubicaciones.find((u) => u.id === venta.ubicacion_id)?.nombre ?? '—'}</div>
           </div>
         </div>
 

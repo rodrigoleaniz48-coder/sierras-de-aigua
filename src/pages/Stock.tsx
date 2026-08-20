@@ -16,13 +16,20 @@ interface Tanque {
   campana: number | null; litros_actuales: number; notas: string | null; activo: boolean
   actualizado_en?: string
 }
-interface StockRow { id: number; tanque_id: number | null; presentacion_id: number; unidades: number }
+interface StockRow { id: number; tanque_id: number | null; presentacion_id: number; unidades: number; ubicacion_id: number }
 interface MovStock { id: number; stock_id: number; tipo: string; unidades: number; venta_id: number | null; nota: string | null; fecha: string }
 interface MovGranel {
   id: number; fecha: string; tipo: string
   tanque_origen_id: number | null; tanque_destino_id: number | null
   litros: number; nota: string | null; stock_id: number | null
 }
+interface Ubicacion { id: number; nombre: string; descripcion: string | null; activo: boolean }
+interface Traslado {
+  id: number; fecha: string
+  ubicacion_origen_id: number; ubicacion_destino_id: number
+  usuario_id: string | null; nota: string | null
+}
+interface ItemTraslado { id: number; traslado_id: number; presentacion_id: number; unidades: number }
 
 type Tab = 'tanques' | 'envasado' | 'movimientos'
 
@@ -37,24 +44,31 @@ export function Stock() {
   const [stock, setStock] = useState<StockRow[]>([])
   const [movsStock, setMovsStock] = useState<MovStock[]>([])
   const [movsGranel, setMovsGranel] = useState<MovGranel[]>([])
+  const [ubicaciones, setUbicaciones] = useState<Ubicacion[]>([])
+  const [traslados, setTraslados] = useState<Traslado[]>([])
+  const [itemsTraslado, setItemsTraslado] = useState<ItemTraslado[]>([])
   const [cargando, setCargando] = useState(true)
 
   const [envasar, setEnvasar] = useState(false)
   const [ajusteEnv, setAjusteEnv] = useState(false)
   const [trasegar, setTrasegar] = useState(false)
+  const [trasladar, setTrasladar] = useState(false)
   const [cargarCosecha, setCargarCosecha] = useState(false)
   const [mermaMuestra, setMermaMuestra] = useState(false)
   const [tanqueEdit, setTanqueEdit] = useState<Tanque | null>(null)
 
   async function cargar() {
     setCargando(true)
-    const [p, pr, t, s, mS, mG] = await Promise.all([
+    const [p, pr, t, s, mS, mG, u, tr, it] = await Promise.all([
       supabase.from('productos').select('id,nombre,categoria,granel').order('nombre'),
       supabase.from('presentaciones').select('id,producto_id,nombre,volumen_ml,stock_minimo,activo,es_pack'),
       supabase.from('tanques').select('*').order('id'),
       supabase.from('stock').select('*'),
       supabase.from('movimientos_stock').select('*').order('fecha', { ascending: false }).limit(100),
       supabase.from('movimientos_granel').select('*').order('fecha', { ascending: false }).limit(100),
+      supabase.from('ubicaciones').select('*').eq('activo', true).order('id'),
+      supabase.from('traslados').select('*').order('fecha', { ascending: false }).limit(100),
+      supabase.from('items_traslado').select('*'),
     ])
     setProductos((p.data as Producto[]) ?? [])
     setPresentaciones((pr.data as Presentacion[]) ?? [])
@@ -62,6 +76,9 @@ export function Stock() {
     setStock((s.data as StockRow[]) ?? [])
     setMovsStock((mS.data as MovStock[]) ?? [])
     setMovsGranel((mG.data as MovGranel[]) ?? [])
+    setUbicaciones((u.data as Ubicacion[]) ?? [])
+    setTraslados((tr.data as Traslado[]) ?? [])
+    setItemsTraslado((it.data as ItemTraslado[]) ?? [])
     setCargando(false)
   }
   useEffect(() => { cargar() }, [])
@@ -69,6 +86,21 @@ export function Stock() {
   const prodPorId = useMemo(() => new Map(productos.map((x) => [x.id, x])), [productos])
   const presPorId = useMemo(() => new Map(presentaciones.map((x) => [x.id, x])), [presentaciones])
   const tanquePorId = useMemo(() => new Map(tanques.map((x) => [x.id, x])), [tanques])
+  const ubicPorId = useMemo(() => new Map(ubicaciones.map((x) => [x.id, x])), [ubicaciones])
+
+  // KPI: aceite total (granel + envasado equivalente en litros)
+  const litrosGranelTotal = useMemo(() => tanques.reduce((s, t) => s + Number(t.litros_actuales), 0), [tanques])
+  const litrosEnvasadosTotal = useMemo(() => {
+    let total = 0
+    for (const s of stock) {
+      const p = presPorId.get(s.presentacion_id)
+      const prod = p ? prodPorId.get(p.producto_id) : null
+      if (!p || !prod || prod.categoria !== 'aceite') continue
+      if (!p.volumen_ml) continue // packs y sin volumen no cuentan
+      total += (s.unidades * p.volumen_ml) / 1000
+    }
+    return total
+  }, [stock, presPorId, prodPorId])
 
   return (
     <div className="space-y-6">
@@ -84,10 +116,27 @@ export function Stock() {
             <button className="btn-secondary" onClick={() => setCargarCosecha(true)}>+ Cargar cosecha</button>
             <button className="btn-secondary" onClick={() => setTrasegar(true)}>Trasegar / blend</button>
             <button className="btn-secondary" onClick={() => setMermaMuestra(true)}>Merma / muestra</button>
+            <button className="btn-secondary" onClick={() => setTrasladar(true)}>Trasladar</button>
             <button className="btn-secondary" onClick={() => setAjusteEnv(true)}>Ajuste envasado</button>
             <button className="btn-primary" onClick={() => setEnvasar(true)}>Envasar</button>
           </div>
         )}
+      </div>
+
+      {/* KPI: aceite total */}
+      <div className="card p-4 grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div>
+          <div className="text-xs uppercase tracking-wide text-oliva-600">Granel en tanques</div>
+          <div className="text-2xl font-semibold text-oliva-900 tabular-nums">{num(litrosGranelTotal)} L</div>
+        </div>
+        <div>
+          <div className="text-xs uppercase tracking-wide text-oliva-600">Envasado (aceite en botellas)</div>
+          <div className="text-2xl font-semibold text-oliva-900 tabular-nums">{num(litrosEnvasadosTotal)} L</div>
+        </div>
+        <div className="border-t sm:border-t-0 sm:border-l border-oliva-100 pt-3 sm:pt-0 sm:pl-4">
+          <div className="text-xs uppercase tracking-wide text-oliva-600">🫒 Aceite total</div>
+          <div className="text-2xl font-bold text-aceite-600 tabular-nums">{num(litrosGranelTotal + litrosEnvasadosTotal)} L</div>
+        </div>
       </div>
 
       <div className="flex gap-1 border-b border-oliva-100 overflow-x-auto">
@@ -111,17 +160,25 @@ export function Stock() {
       )}
 
       {!cargando && tab === 'envasado' && (
-        <EnvasadoView productos={productos} presentaciones={presentaciones.filter((p) => !p.es_pack)} stock={stock} tanquePorId={tanquePorId} prodPorId={prodPorId} />
+        <EnvasadoView
+          productos={productos}
+          presentaciones={presentaciones.filter((p) => !p.es_pack)}
+          stock={stock}
+          ubicaciones={ubicaciones}
+        />
       )}
 
       {!cargando && tab === 'movimientos' && (
         <MovimientosView
           movsStock={movsStock}
           movsGranel={movsGranel}
+          traslados={traslados}
+          itemsTraslado={itemsTraslado}
           stock={stock}
           presPorId={presPorId}
           prodPorId={prodPorId}
           tanquePorId={tanquePorId}
+          ubicPorId={ubicPorId}
         />
       )}
 
@@ -140,8 +197,19 @@ export function Stock() {
         prodPorId={prodPorId}
         stock={stock}
         tanques={tanques}
+        ubicaciones={ubicaciones}
         onCerrar={() => setAjusteEnv(false)}
         onOk={() => { setAjusteEnv(false); cargar() }}
+      />
+
+      <TrasladarDialog
+        abierto={trasladar}
+        ubicaciones={ubicaciones}
+        presentaciones={presentaciones.filter((x) => x.activo && !x.es_pack)}
+        stock={stock}
+        prodPorId={prodPorId}
+        onCerrar={() => setTrasladar(false)}
+        onOk={() => { setTrasladar(false); cargar() }}
       />
 
       <TrasegarDialog
@@ -293,27 +361,27 @@ function TanqueCard({
 }
 
 function EnvasadoView({
-  productos, presentaciones, stock, tanquePorId, prodPorId,
+  productos, presentaciones, stock, ubicaciones,
 }: {
   productos: Producto[]
   presentaciones: Presentacion[]
   stock: StockRow[]
-  tanquePorId: Map<number, Tanque>
-  prodPorId: Map<number, Producto>
+  ubicaciones: Ubicacion[]
 }) {
   const filas = useMemo(() => {
-    const porPres = new Map<number, { unidades: number; detalle: { tanque_id: number | null; unidades: number }[] }>()
+    // key: presentacion_id → { unidadesPorUbic, total }
+    const porPres = new Map<number, { porUbic: Map<number, number>; total: number }>()
     for (const s of stock) {
-      const g = porPres.get(s.presentacion_id) ?? { unidades: 0, detalle: [] }
-      g.unidades += s.unidades
-      g.detalle.push({ tanque_id: s.tanque_id, unidades: s.unidades })
+      const g = porPres.get(s.presentacion_id) ?? { porUbic: new Map(), total: 0 }
+      g.porUbic.set(s.ubicacion_id, (g.porUbic.get(s.ubicacion_id) ?? 0) + s.unidades)
+      g.total += s.unidades
       porPres.set(s.presentacion_id, g)
     }
     return presentaciones
       .map((p) => {
         const prod = productos.find((x) => x.id === p.producto_id)
-        const g = porPres.get(p.id) ?? { unidades: 0, detalle: [] }
-        return { pres: p, prod, unidades: g.unidades, detalle: g.detalle }
+        const g = porPres.get(p.id) ?? { porUbic: new Map<number, number>(), total: 0 }
+        return { pres: p, prod, porUbic: g.porUbic, total: g.total }
       })
       .filter((r) => r.prod)
       .sort((a, b) => (a.prod!.nombre + a.pres.nombre).localeCompare(b.prod!.nombre + b.pres.nombre))
@@ -326,27 +394,17 @@ function EnvasadoView({
           <tr className="text-left text-xs uppercase tracking-wide text-oliva-600 border-b border-oliva-100 bg-oliva-50">
             <th className="py-2 px-4">Producto</th>
             <th className="py-2 px-4">Presentación</th>
-            <th className="py-2 px-4 text-right">Unidades</th>
+            {ubicaciones.map((u) => (
+              <th key={u.id} className="py-2 px-4 text-right">{u.nombre}</th>
+            ))}
+            <th className="py-2 px-4 text-right font-semibold">Total</th>
             <th className="py-2 px-4 text-right">Mínimo</th>
-            <th className="py-2 px-4">Proviene de</th>
             <th className="py-2 px-4"></th>
           </tr>
         </thead>
         <tbody>
           {filas.map((r) => {
-            const bajo = r.unidades <= r.pres.stock_minimo && r.pres.stock_minimo > 0
-            const origenes = r.detalle
-              .filter((d) => d.unidades > 0)
-              .map((d) => {
-                if (!d.tanque_id) return 'directo (sin tanque)'
-                const t = tanquePorId.get(d.tanque_id)
-                if (!t) return `T${d.tanque_id}`
-                const contenido = t.producto_id
-                  ? prodPorId.get(t.producto_id)?.nombre
-                  : t.variedad_libre
-                const camp = t.campana ? ` ${t.campana}` : ''
-                return contenido ? `${t.nombre} · ${contenido}${camp}` : t.nombre
-              })
+            const bajo = r.total <= r.pres.stock_minimo && r.pres.stock_minimo > 0
             const color = colorProducto(r.prod?.nombre)
             return (
               <tr key={r.pres.id} className="border-b border-oliva-100/70 last:border-0">
@@ -355,9 +413,16 @@ function EnvasadoView({
                   {r.prod?.nombre}
                 </td>
                 <td className="py-2 px-4 text-oliva-800">{r.pres.nombre}</td>
-                <td className={`py-2 px-4 text-right tabular-nums font-medium ${r.unidades === 0 ? 'text-oliva-400' : 'text-oliva-900'}`}>{r.unidades}</td>
+                {ubicaciones.map((u) => {
+                  const n = r.porUbic.get(u.id) ?? 0
+                  return (
+                    <td key={u.id} className={`py-2 px-4 text-right tabular-nums ${n === 0 ? 'text-oliva-300' : 'text-oliva-900'}`}>
+                      {n}
+                    </td>
+                  )
+                })}
+                <td className={`py-2 px-4 text-right tabular-nums font-semibold ${r.total === 0 ? 'text-oliva-400' : 'text-oliva-900'}`}>{r.total}</td>
                 <td className="py-2 px-4 text-right tabular-nums text-oliva-600">{r.pres.stock_minimo || '—'}</td>
-                <td className="py-2 px-4 text-oliva-600 text-xs">{origenes.length ? Array.from(new Set(origenes)).join(', ') : '—'}</td>
                 <td className="py-2 px-4 text-right">
                   {bajo && <span className="text-[11px] rounded-full bg-red-100 text-red-800 px-2 py-[1px] uppercase tracking-wide">Bajo</span>}
                 </td>
@@ -365,7 +430,7 @@ function EnvasadoView({
             )
           })}
           {filas.length === 0 && (
-            <tr><td colSpan={6} className="py-6 text-center text-sm text-oliva-600">Sin presentaciones cargadas.</td></tr>
+            <tr><td colSpan={4 + ubicaciones.length} className="py-6 text-center text-sm text-oliva-600">Sin presentaciones cargadas.</td></tr>
           )}
         </tbody>
       </table>
@@ -374,20 +439,23 @@ function EnvasadoView({
 }
 
 function MovimientosView({
-  movsStock, movsGranel, stock, presPorId, prodPorId, tanquePorId,
+  movsStock, movsGranel, traslados, itemsTraslado, stock, presPorId, prodPorId, tanquePorId, ubicPorId,
 }: {
   movsStock: MovStock[]
   movsGranel: MovGranel[]
+  traslados: Traslado[]
+  itemsTraslado: ItemTraslado[]
   stock: StockRow[]
   presPorId: Map<number, Presentacion>
   prodPorId: Map<number, Producto>
   tanquePorId: Map<number, Tanque>
+  ubicPorId: Map<number, Ubicacion>
 }) {
   const stockPorId = useMemo(() => new Map(stock.map((s) => [s.id, s])), [stock])
 
   type Row = {
     key: string; fecha: string; tipo: string; que: string
-    detalle: string; cantidad: string; nota: string | null; scope: 'granel' | 'envasado'
+    detalle: string; cantidad: string; nota: string | null; scope: 'granel' | 'envasado' | 'traslado'
   }
 
   function tanqueLabel(id: number | null): string | null {
@@ -418,15 +486,33 @@ function MovimientosView({
       const s = stockPorId.get(m.stock_id)
       const pres = s ? presPorId.get(s.presentacion_id) : undefined
       const prod = pres ? prodPorId.get(pres.producto_id) : undefined
+      const ubic = s ? ubicPorId.get(s.ubicacion_id)?.nombre : ''
       return {
         key: `s${m.id}`, fecha: m.fecha, tipo: m.tipo, que: 'envasado',
-        detalle: `${prod?.nombre ?? '—'} · ${pres?.nombre ?? '—'}`,
+        detalle: `${prod?.nombre ?? '—'} · ${pres?.nombre ?? '—'}${ubic ? ` @ ${ubic}` : ''}`,
         cantidad: `${m.unidades > 0 ? '+' : ''}${m.unidades} u`,
         nota: m.nota, scope: 'envasado',
       }
     })
-    return [...gr, ...st].sort((a, b) => (a.fecha < b.fecha ? 1 : -1))
-  }, [movsStock, movsGranel, stock, presPorId, prodPorId, tanquePorId, stockPorId])
+    const tr: Row[] = traslados.map((t) => {
+      const org = ubicPorId.get(t.ubicacion_origen_id)?.nombre ?? '—'
+      const dest = ubicPorId.get(t.ubicacion_destino_id)?.nombre ?? '—'
+      const items = itemsTraslado.filter((i) => i.traslado_id === t.id)
+      const resumen = items.map((i) => {
+        const p = presPorId.get(i.presentacion_id)
+        const prod = p ? prodPorId.get(p.producto_id) : null
+        return `${i.unidades}× ${prod?.nombre ?? ''} ${p?.nombre ?? ''}`.trim()
+      }).join(', ')
+      const totalU = items.reduce((s, i) => s + i.unidades, 0)
+      return {
+        key: `t${t.id}`, fecha: t.fecha, tipo: 'traslado', que: 'traslado',
+        detalle: `${org} → ${dest} · ${resumen || '(sin items)'}`,
+        cantidad: `${totalU} u`,
+        nota: t.nota, scope: 'traslado',
+      }
+    })
+    return [...gr, ...st, ...tr].sort((a, b) => (a.fecha < b.fecha ? 1 : -1))
+  }, [movsStock, movsGranel, traslados, itemsTraslado, stock, presPorId, prodPorId, tanquePorId, ubicPorId, stockPorId])
 
   if (filas.length === 0) return <div className="card p-6 text-sm text-oliva-700">Sin movimientos todavía.</div>
 
@@ -468,6 +554,7 @@ function badgeTipo(t: string) {
     case 'envasar':   return 'bg-oliva-100 text-oliva-800'
     case 'cargar':    return 'bg-aceite-500/15 text-aceite-600'
     case 'trasegar':  return 'bg-tierra-100 text-tierra-800'
+    case 'traslado':  return 'bg-blue-100 text-blue-800'
     case 'venta':     return 'bg-aceite-500/10 text-aceite-600'
     case 'merma':     return 'bg-red-100 text-red-800'
     case 'muestra':   return 'bg-oliva-200 text-oliva-800'
@@ -526,9 +613,9 @@ function EnvasarDialog({
       .eq('id', tanque.id)
     if (e1) { setError(e1.message); setGuardando(false); return }
 
-    // 2) Upsert en stock
+    // 2) Upsert en stock (siempre a Almazara, ubicacion_id = 1)
     const { data: existente } = await supabase.from('stock')
-      .select('id,unidades').eq('tanque_id', tanque.id).eq('presentacion_id', pres.id).maybeSingle()
+      .select('id,unidades').eq('tanque_id', tanque.id).eq('presentacion_id', pres.id).eq('ubicacion_id', 1).maybeSingle()
     let stockId: number
     if (existente) {
       const { error: e2 } = await supabase.from('stock')
@@ -538,7 +625,7 @@ function EnvasarDialog({
       stockId = existente.id
     } else {
       const { data: creado, error: e2 } = await supabase.from('stock')
-        .insert({ tanque_id: tanque.id, presentacion_id: pres.id, unidades: n }).select('id').single()
+        .insert({ tanque_id: tanque.id, presentacion_id: pres.id, unidades: n, ubicacion_id: 1 }).select('id').single()
       if (e2 || !creado) { setError(e2?.message ?? 'error'); setGuardando(false); return }
       stockId = creado.id
     }
@@ -630,18 +717,20 @@ function EnvasarDialog({
 }
 
 function AjusteEnvasadoDialog({
-  abierto, presentaciones, prodPorId, stock, tanques, onCerrar, onOk,
+  abierto, presentaciones, prodPorId, stock, tanques, ubicaciones, onCerrar, onOk,
 }: {
   abierto: boolean
   presentaciones: Presentacion[]
   prodPorId: Map<number, Producto>
   stock: StockRow[]
   tanques: Tanque[]
+  ubicaciones: Ubicacion[]
   onCerrar: () => void
   onOk: () => void
 }) {
   const [presentacionId, setPresentacionId] = useState<string>('')
   const [tanqueId, setTanqueId] = useState<string>('')  // opcional
+  const [ubicacionId, setUbicacionId] = useState<string>('1')  // Almazara por defecto
   const [delta, setDelta] = useState<string>('')
   const [nota, setNota] = useState('')
   const [guardando, setGuardando] = useState(false)
@@ -649,7 +738,7 @@ function AjusteEnvasadoDialog({
 
   useEffect(() => {
     if (!abierto) return
-    setPresentacionId(''); setTanqueId(''); setDelta(''); setNota(''); setError(null)
+    setPresentacionId(''); setTanqueId(''); setUbicacionId('1'); setDelta(''); setNota(''); setError(null)
   }, [abierto])
 
   async function guardar(e: React.FormEvent) {
@@ -658,12 +747,17 @@ function AjusteEnvasadoDialog({
     if (!pres) return
     const d = Number(delta)
     if (!d) { setError('Ingresá una cantidad distinta de 0'); return }
+    const ubicNum = Number(ubicacionId) || 1
 
     setGuardando(true); setError(null)
     const { data: { user } } = await supabase.auth.getUser()
 
     const tanqueNum = tanqueId ? Number(tanqueId) : null
-    const existente = stock.find((s) => s.presentacion_id === pres.id && (s.tanque_id ?? null) === tanqueNum)
+    const existente = stock.find((s) =>
+      s.presentacion_id === pres.id
+      && (s.tanque_id ?? null) === tanqueNum
+      && s.ubicacion_id === ubicNum
+    )
     let stockId: number
     if (existente) {
       const nueva = existente.unidades + d
@@ -675,7 +769,7 @@ function AjusteEnvasadoDialog({
     } else {
       if (d < 0) { setError('No hay stock previo para ajustar negativo.'); setGuardando(false); return }
       const { data: creado, error: e2 } = await supabase.from('stock')
-        .insert({ tanque_id: tanqueNum, presentacion_id: pres.id, unidades: d }).select('id').single()
+        .insert({ tanque_id: tanqueNum, presentacion_id: pres.id, unidades: d, ubicacion_id: ubicNum }).select('id').single()
       if (e2 || !creado) { setError(e2?.message ?? 'error'); setGuardando(false); return }
       stockId = creado.id
     }
@@ -707,6 +801,18 @@ function AjusteEnvasadoDialog({
               )
             })}
           </select>
+        </div>
+
+        <div>
+          <label className="label">Ubicación</label>
+          <select className="input" value={ubicacionId} onChange={(e) => setUbicacionId(e.target.value)} required>
+            {ubicaciones.map((u) => (
+              <option key={u.id} value={u.id}>{u.nombre}</option>
+            ))}
+          </select>
+          <p className="text-xs text-oliva-600 mt-1">
+            Dónde queda ese stock físicamente (Almazara / Maldonado / Montevideo).
+          </p>
         </div>
 
         <div>
@@ -1161,6 +1267,241 @@ function TanqueEditDialog({
         <div className="flex justify-end gap-2 pt-2">
           <button type="button" className="btn-secondary" onClick={onCerrar}>Cancelar</button>
           <button type="submit" className="btn-primary" disabled={guardando}>{guardando ? 'Guardando…' : 'Guardar'}</button>
+        </div>
+      </form>
+    </Dialog>
+  )
+}
+
+// ============================================================
+// Diálogo: Trasladar stock envasado entre ubicaciones (multi-línea)
+// ============================================================
+
+interface LineaTraslado { key: string; presentacion_id: number | null; unidades: number }
+
+function nuevaLineaTraslado(): LineaTraslado {
+  return { key: crypto.randomUUID(), presentacion_id: null, unidades: 1 }
+}
+
+function TrasladarDialog({
+  abierto, ubicaciones, presentaciones, stock, prodPorId, onCerrar, onOk,
+}: {
+  abierto: boolean
+  ubicaciones: Ubicacion[]
+  presentaciones: Presentacion[]
+  stock: StockRow[]
+  prodPorId: Map<number, Producto>
+  onCerrar: () => void
+  onOk: () => void
+}) {
+  const [origenId, setOrigenId] = useState<string>('1')
+  const [destinoId, setDestinoId] = useState<string>('')
+  const [nota, setNota] = useState('')
+  const [lineas, setLineas] = useState<LineaTraslado[]>([nuevaLineaTraslado()])
+  const [guardando, setGuardando] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!abierto) return
+    setOrigenId('1'); setDestinoId(''); setNota('')
+    setLineas([nuevaLineaTraslado()]); setError(null)
+  }, [abierto])
+
+  const origen = Number(origenId)
+  const destino = Number(destinoId)
+
+  // Presentaciones disponibles en el origen (con stock > 0)
+  const presDisponibles = useMemo(() => {
+    const stockPorPres = new Map<number, number>()
+    for (const s of stock) {
+      if (s.ubicacion_id !== origen) continue
+      stockPorPres.set(s.presentacion_id, (stockPorPres.get(s.presentacion_id) ?? 0) + s.unidades)
+    }
+    return presentaciones
+      .filter((p) => (stockPorPres.get(p.id) ?? 0) > 0)
+      .map((p) => ({ pres: p, prod: prodPorId.get(p.producto_id), disp: stockPorPres.get(p.id) ?? 0 }))
+      .sort((a, b) => (a.prod?.nombre + a.pres.nombre).localeCompare(b.prod?.nombre + b.pres.nombre))
+  }, [stock, presentaciones, prodPorId, origen])
+
+  function disponibleEnOrigen(presId: number | null): number {
+    if (!presId) return 0
+    return stock.filter((s) => s.ubicacion_id === origen && s.presentacion_id === presId).reduce((a, b) => a + b.unidades, 0)
+  }
+
+  function actualizarLinea(key: string, patch: Partial<LineaTraslado>) {
+    setLineas((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)))
+  }
+  function borrarLinea(key: string) {
+    setLineas((prev) => (prev.length === 1 ? prev : prev.filter((l) => l.key !== key)))
+  }
+
+  async function guardar(e: React.FormEvent) {
+    e.preventDefault()
+    if (!origen || !destino) { setError('Elegí origen y destino.'); return }
+    if (origen === destino) { setError('Origen y destino deben ser distintos.'); return }
+
+    // Validar líneas + acumular por presentación (permite duplicados)
+    const necesidad = new Map<number, number>()
+    for (const l of lineas) {
+      if (!l.presentacion_id) { setError('Todas las líneas necesitan una presentación.'); return }
+      if (l.unidades <= 0) { setError('Las unidades deben ser > 0.'); return }
+      necesidad.set(l.presentacion_id, (necesidad.get(l.presentacion_id) ?? 0) + l.unidades)
+    }
+    if (necesidad.size === 0) { setError('Agregá al menos una línea.'); return }
+
+    for (const [presId, need] of necesidad) {
+      const disp = disponibleEnOrigen(presId)
+      if (need > disp) {
+        const p = presentaciones.find((x) => x.id === presId)
+        const prod = p ? prodPorId.get(p.producto_id) : null
+        setError(`En ${ubicaciones.find((u) => u.id === origen)?.nombre} hay ${disp} u de ${prod?.nombre ?? ''} ${p?.nombre ?? ''}, pedís ${need}.`)
+        return
+      }
+    }
+
+    setGuardando(true); setError(null)
+    const { data: { user } } = await supabase.auth.getUser()
+
+    // 1) Crear cabecera del traslado
+    const { data: tr, error: eT } = await supabase.from('traslados').insert({
+      ubicacion_origen_id: origen, ubicacion_destino_id: destino,
+      usuario_id: user?.id ?? null, nota: nota.trim() || null,
+    }).select('id').single()
+    if (eT || !tr) { setError(eT?.message ?? 'error creando traslado'); setGuardando(false); return }
+
+    // 2) Por cada presentación acumulada: descontar del origen (FIFO por id) y sumar al destino (upsert)
+    for (const [presId, need] of necesidad) {
+      let restante = need
+      const filasOrig = stock
+        .filter((s) => s.ubicacion_id === origen && s.presentacion_id === presId && s.unidades > 0)
+        .sort((a, b) => a.id - b.id)
+      for (const s of filasOrig) {
+        if (restante <= 0) break
+        const desc = Math.min(s.unidades, restante)
+        await supabase.from('stock').update({ unidades: s.unidades - desc, actualizado_en: new Date().toISOString() }).eq('id', s.id)
+        await supabase.from('movimientos_stock').insert({
+          stock_id: s.id, tipo: 'ajuste', unidades: -desc,
+          usuario_id: user?.id ?? null, nota: `Traslado #${tr.id} → ${ubicaciones.find((u) => u.id === destino)?.nombre}`,
+        })
+        restante -= desc
+      }
+      // Upsert destino (tanque_id = null en destino — no propagamos trazabilidad de tanque)
+      const { data: dest } = await supabase.from('stock')
+        .select('id,unidades')
+        .eq('ubicacion_id', destino).eq('presentacion_id', presId).is('tanque_id', null)
+        .maybeSingle()
+      let destStockId: number
+      if (dest) {
+        await supabase.from('stock').update({ unidades: dest.unidades + need, actualizado_en: new Date().toISOString() }).eq('id', dest.id)
+        destStockId = dest.id
+      } else {
+        const { data: creado } = await supabase.from('stock')
+          .insert({ ubicacion_id: destino, presentacion_id: presId, tanque_id: null, unidades: need })
+          .select('id').single()
+        destStockId = creado?.id ?? 0
+      }
+      if (destStockId) {
+        await supabase.from('movimientos_stock').insert({
+          stock_id: destStockId, tipo: 'ajuste', unidades: need,
+          usuario_id: user?.id ?? null, nota: `Traslado #${tr.id} ← ${ubicaciones.find((u) => u.id === origen)?.nombre}`,
+        })
+      }
+    }
+
+    // 3) Guardar items del traslado (para trazabilidad)
+    const payload = [...necesidad.entries()].map(([presentacion_id, unidades]) => ({
+      traslado_id: tr.id, presentacion_id, unidades,
+    }))
+    await supabase.from('items_traslado').insert(payload)
+
+    setGuardando(false); onOk()
+  }
+
+  return (
+    <Dialog abierto={abierto} onCerrar={onCerrar} titulo="Trasladar stock entre ubicaciones" ancho="lg">
+      <form onSubmit={guardar} className="space-y-4">
+        <p className="text-xs text-oliva-600">
+          Por ejemplo, Gonzalo lleva unidades de Almazara a Maldonado, o Rodrigo/Santiago llevan de Almazara a Montevideo.
+          El envasado nuevo entra siempre por Almazara y desde ahí se distribuye.
+        </p>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="label">Origen</label>
+            <select className="input" value={origenId} onChange={(e) => setOrigenId(e.target.value)} required>
+              {ubicaciones.map((u) => <option key={u.id} value={u.id}>{u.nombre}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="label">Destino</label>
+            <select className="input" value={destinoId} onChange={(e) => setDestinoId(e.target.value)} required>
+              <option value="">— elegir —</option>
+              {ubicaciones.filter((u) => u.id !== origen).map((u) => <option key={u.id} value={u.id}>{u.nombre}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex justify-between items-center">
+            <div className="text-sm font-medium text-oliva-800">Presentaciones a trasladar</div>
+            <button type="button" className="text-xs text-oliva-700 underline" onClick={() => setLineas((p) => [...p, nuevaLineaTraslado()])}>
+              + agregar línea
+            </button>
+          </div>
+          {lineas.map((l) => {
+            const disp = disponibleEnOrigen(l.presentacion_id)
+            const excede = l.unidades > disp
+            return (
+              <div key={l.key} className="grid grid-cols-12 gap-2 items-end p-2 rounded-lg border border-oliva-100 bg-oliva-50/60">
+                <div className="col-span-8">
+                  <label className="label">Presentación</label>
+                  <select
+                    className="input"
+                    value={l.presentacion_id ?? ''}
+                    onChange={(e) => actualizarLinea(l.key, { presentacion_id: e.target.value ? Number(e.target.value) : null })}
+                    required
+                  >
+                    <option value="">— elegir —</option>
+                    {presDisponibles.map(({ pres, prod, disp: d }) => (
+                      <option key={pres.id} value={pres.id}>{prod?.nombre} · {pres.nombre} · disp {d}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="col-span-3">
+                  <label className="label">Unidades</label>
+                  <input
+                    className={`input tabular-nums ${excede ? 'border-red-400 text-red-700' : ''}`}
+                    type="number" min="1" step="1"
+                    value={l.unidades}
+                    onChange={(e) => actualizarLinea(l.key, { unidades: Number(e.target.value) || 0 })}
+                    required
+                  />
+                </div>
+                <div className="col-span-1 flex justify-end">
+                  <button
+                    type="button"
+                    className="text-red-700 hover:text-red-900 text-lg leading-none pb-1"
+                    onClick={() => borrarLinea(l.key)}
+                    aria-label="Quitar línea"
+                  >×</button>
+                </div>
+              </div>
+            )
+          })}
+          {presDisponibles.length === 0 && (
+            <p className="text-xs text-red-700">No hay stock en {ubicaciones.find((u) => u.id === origen)?.nombre ?? 'esta ubicación'}.</p>
+          )}
+        </div>
+
+        <div>
+          <label className="label">Nota</label>
+          <input className="input" value={nota} onChange={(e) => setNota(e.target.value)} placeholder="ej: viaje del sábado" />
+        </div>
+
+        {error && <div className="text-sm text-red-700">{error}</div>}
+        <div className="flex justify-end gap-2 pt-2">
+          <button type="button" className="btn-secondary" onClick={onCerrar}>Cancelar</button>
+          <button type="submit" className="btn-primary" disabled={guardando}>{guardando ? 'Guardando…' : 'Trasladar'}</button>
         </div>
       </form>
     </Dialog>
