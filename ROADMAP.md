@@ -67,6 +67,18 @@ sesión, Claude lee este archivo + el código de esa área y ya está al día.
   cuya composición se define después. `granel = true`.
 - **Pack degustación excluido** de todos los dropdowns de tanques (`granel
   = false`).
+- **Ubicaciones físicas del stock envasado** — 3 ubicaciones: Almazara,
+  Maldonado, Montevideo. `stock.ubicacion_id` con default Almazara.
+  Envasar siempre suma a Almazara; los traslados mueven a Maldonado o
+  Montevideo. Vista "Stock envasado" muestra columnas por ubicación.
+- **Traslados multi-línea** (`traslados` + `items_traslado`): un viaje
+  puede llevar múltiples presentaciones. Se registra en Movimientos con
+  badge azul.
+- **KPI aceite total** en el header de Stock: granel (litros en tanques)
+  + envasado equivalente (unidades × volumen_ml) = total.
+- **Ventas por ubicación**: cada venta tiene `ubicacion_id` (default por
+  socio — Gonzalo→Maldonado, Rodrigo/Santi→Montevideo). El trigger de
+  packs busca componentes en la ubicación de la venta.
 
 ### Pendientes / mejoras
 
