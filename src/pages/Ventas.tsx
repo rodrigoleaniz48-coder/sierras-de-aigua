@@ -311,7 +311,7 @@ function NuevaVentaDialog({
     Promise.all([
       supabase.from('productos').select('id,nombre'),
       supabase.from('presentaciones').select('id,producto_id,nombre,volumen_ml,precio_minorista,precio_mayorista,iva_pct,activo,es_pack').eq('activo', true),
-      supabase.from('stock').select('id,tanque_id,presentacion_id,unidades').gt('unidades', 0),
+      supabase.from('stock').select('id,tanque_id,presentacion_id,unidades,ubicacion_id').gt('unidades', 0),
       supabase.from('tanques').select('*'),
       supabase.from('presentacion_componente').select('*'),
     ]).then(([p, pr, s, t, c]) => {
