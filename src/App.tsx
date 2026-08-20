@@ -28,15 +28,7 @@ export function App() {
               </ProtectedRoute>
             }
           >
-            <Route
-              index
-              element={
-                <ProtectedRoute roles={['admin', 'ventas']}>
-                  <Ventas />
-                </ProtectedRoute>
-              }
-            />
-            <Route path="dashboard" element={<Dashboard />} />
+            <Route index element={<Dashboard />} />
             <Route path="stock" element={<Stock />} />
             <Route
               path="ventas"

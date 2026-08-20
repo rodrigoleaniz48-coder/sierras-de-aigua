@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { Dialog } from '../components/Dialog'
@@ -39,7 +40,16 @@ export function Ventas() {
   const [socios, setSocios] = useState<Socio[]>([])
   const [ubicaciones, setUbicaciones] = useState<Ubicacion[]>([])
   const [cargando, setCargando] = useState(true)
-  const [nueva, setNueva] = useState(false)
+  const location = useLocation() as { state?: { abrirNueva?: boolean } }
+  const navigate = useNavigate()
+  const [nueva, setNueva] = useState(!!location.state?.abrirNueva)
+  useEffect(() => {
+    if (location.state?.abrirNueva) {
+      // Limpiar el state para que un refresh no re-abra el diálogo
+      navigate(location.pathname, { replace: true, state: {} })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [ventaDetalle, setVentaDetalle] = useState<Venta | null>(null)
   const [cadeteAbierto, setCadeteAbierto] = useState(false)
 

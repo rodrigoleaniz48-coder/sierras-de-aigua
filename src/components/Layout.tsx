@@ -10,13 +10,13 @@ interface NavItem {
 }
 
 const NAV: NavItem[] = [
-  { to: '/',            label: 'Ventas',       roles: ['admin', 'ventas'] },
+  { to: '/',            label: 'Inicio',       roles: ['admin', 'ventas', 'marketing'] },
+  { to: '/ventas',      label: 'Ventas',       roles: ['admin', 'ventas'] },
   { to: '/clientes',    label: 'Clientes',     roles: ['admin', 'ventas', 'marketing'] },
   { to: '/stock',       label: 'Stock',        roles: ['admin', 'ventas', 'marketing'] },
   { to: '/gastos',      label: 'Mis gastos',   roles: ['admin', 'ventas', 'marketing'] },
   { to: '/contabilidad',label: 'Contabilidad', roles: ['admin'] },
   { to: '/admin',       label: 'Administración',roles: ['admin'] },
-  { to: '/dashboard',   label: 'Inicio',       roles: ['admin', 'ventas', 'marketing'] },
 ]
 
 export function Layout() {
@@ -37,7 +37,7 @@ export function Layout() {
             <path d="M4 6h16M4 12h16M4 18h16" strokeLinecap="round"/>
           </svg>
         </button>
-        <img src={import.meta.env.BASE_URL + 'logo.webp'} alt="Sierras de Aiguá" className="h-8 w-auto" />
+        <img src={import.meta.env.BASE_URL + 'logo.webp'} alt="Sierras de Aiguá" className="h-12 w-auto" />
         <button className="text-xs text-oliva-700 underline" onClick={signOut}>Salir</button>
       </header>
 
@@ -45,8 +45,8 @@ export function Layout() {
       <aside
         className={`${open ? 'block' : 'hidden'} lg:block w-full lg:w-64 shrink-0 border-r border-oliva-100 bg-white`}
       >
-        <div className="hidden lg:flex items-center justify-center px-5 py-5 border-b border-oliva-100">
-          <img src={import.meta.env.BASE_URL + 'logo.webp'} alt="Sierras de Aiguá" className="h-16 w-auto" />
+        <div className="hidden lg:flex items-center justify-center px-5 py-6 border-b border-oliva-100">
+          <img src={import.meta.env.BASE_URL + 'logo.webp'} alt="Sierras de Aiguá" className="h-28 w-auto" />
         </div>
         <nav className="p-3 space-y-1">
           {items.map((n) => (
