@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Dialog } from './Dialog'
+import { money } from '../lib/format'
 
 export interface Cliente {
   id: number
   nombre: string
-  tipo: 'minorista' | 'mayorista' | 'feria' | 'envio' | 'otro'
+  tipo: 'minorista' | 'mayorista' | 'feria' | 'envio' | 'otro' | 'distribuidor'
   telefono: string | null
   email: string | null
   whatsapp: string | null
@@ -20,7 +21,17 @@ export interface Cliente {
 
 export interface Socio { id: string; nombre: string }
 
-export const TIPOS_CLIENTE: Cliente['tipo'][] = ['minorista', 'mayorista', 'feria', 'envio', 'otro']
+export const TIPOS_CLIENTE: Cliente['tipo'][] = ['minorista', 'mayorista', 'distribuidor', 'feria', 'envio', 'otro']
+
+export interface EstadisticasCliente {
+  compras: number
+  total: number
+  ticketPromedio: number
+  primeraCompra: string | null
+  ultimaCompra: string | null
+  diasDesdeUltima: number | null
+  frecuenciaDias: number | null // promedio de días entre compras (null si solo 1)
+}
 
 interface Props {
   abierto: boolean
@@ -29,14 +40,20 @@ interface Props {
   soloLectura?: boolean
   /** Si es "rapido", muestra solo los campos esenciales — pensado para alta express desde Ventas. */
   modo?: 'completo' | 'rapido'
+  /** Estadísticas de compras (solo se muestra al editar). */
+  stats?: EstadisticasCliente | null
+  /** Callback opcional para eliminar el cliente. Si no se pasa, no aparece el botón. */
+  onEliminar?: (cliente: Cliente) => Promise<void>
   onCerrar: () => void
   /** Devuelve el cliente creado/editado para que quien invoca pueda seleccionarlo automáticamente. */
   onOk: (cliente: Cliente) => void
 }
 
 export function ClienteDialog({
-  abierto, socios, editar, soloLectura, modo = 'completo', onCerrar, onOk,
+  abierto, socios, editar, soloLectura, modo = 'completo', stats, onEliminar, onCerrar, onOk,
 }: Props) {
+  const [confirmEliminar, setConfirmEliminar] = useState(false)
+  const [eliminando, setEliminando] = useState(false)
   const [nombre, setNombre] = useState('')
   const [tipo, setTipo] = useState<Cliente['tipo']>('minorista')
   const [telefono, setTelefono] = useState('')
@@ -63,8 +80,39 @@ export function ClienteDialog({
       setNombre(''); setTipo('minorista'); setTelefono(''); setEmail(''); setWhatsapp('')
       setDireccion(''); setLocalidad(''); setRut(''); setPago(''); setSocioAsig(''); setNotas('')
     }
-    setError(null)
+    setError(null); setConfirmEliminar(false)
   }, [abierto, editar])
+
+  async function eliminar() {
+    if (!editar || !onEliminar) return
+    setEliminando(true); setError(null)
+    try {
+      await onEliminar(editar)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al eliminar')
+      setEliminando(false)
+    }
+  }
+
+  function formatFecha(iso: string | null): string {
+    if (!iso) return '—'
+    return new Date(iso + 'T00:00:00').toLocaleDateString('es-UY', { day: '2-digit', month: 'short', year: 'numeric' })
+  }
+  function formatDias(n: number | null): string {
+    if (n === null) return '—'
+    if (n === 0) return 'hoy'
+    if (n === 1) return 'ayer'
+    if (n < 7) return `hace ${n} días`
+    if (n < 30) return `hace ${Math.round(n / 7)} sem.`
+    if (n < 365) return `hace ${Math.round(n / 30)} meses`
+    return `hace ${Math.round(n / 365)} años`
+  }
+  function formatFrecuencia(n: number | null): string {
+    if (n === null) return 'primera compra'
+    if (n < 14) return `cada ${Math.round(n)} días`
+    if (n < 60) return `cada ${Math.round(n / 7)} semanas`
+    return `cada ${Math.round(n / 30)} meses`
+  }
 
   async function guardar(e: React.FormEvent) {
     e.preventDefault()
@@ -157,7 +205,69 @@ export function ClienteDialog({
             Alta express — solo nombre, tipo y teléfono. Podés completar el resto después desde el módulo Clientes.
           </p>
         )}
+
+        {/* Estadísticas de compras (solo al editar) */}
+        {editar && stats && (
+          <div className="rounded-xl border border-oliva-100 bg-oliva-50/60 p-4 space-y-3">
+            <div className="text-xs uppercase tracking-wide text-oliva-700 font-medium">📊 Historial de compras</div>
+            {stats.compras === 0 ? (
+              <div className="text-sm text-oliva-600 italic">Sin compras registradas en la app todavía.</div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+                <div>
+                  <div className="text-[11px] text-oliva-600 uppercase">Compras</div>
+                  <div className="tabular-nums font-semibold text-oliva-900">{stats.compras}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] text-oliva-600 uppercase">Total gastado</div>
+                  <div className="tabular-nums font-semibold text-oliva-900">{money(stats.total)}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] text-oliva-600 uppercase">Ticket promedio</div>
+                  <div className="tabular-nums font-semibold text-oliva-900">{money(stats.ticketPromedio)}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] text-oliva-600 uppercase">Frecuencia</div>
+                  <div className="font-semibold text-oliva-900">{formatFrecuencia(stats.frecuenciaDias)}</div>
+                </div>
+                <div className="col-span-2">
+                  <div className="text-[11px] text-oliva-600 uppercase">Última compra</div>
+                  <div className="font-medium text-oliva-900">{formatFecha(stats.ultimaCompra)} <span className="text-xs text-oliva-600">· {formatDias(stats.diasDesdeUltima)}</span></div>
+                </div>
+                <div className="col-span-2">
+                  <div className="text-[11px] text-oliva-600 uppercase">Primera compra</div>
+                  <div className="font-medium text-oliva-900">{formatFecha(stats.primeraCompra)}</div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {error && <div className="text-sm text-red-700">{error}</div>}
+
+        {/* Zona destructiva: eliminar (solo al editar y si hay callback) */}
+        {editar && onEliminar && !soloLectura && (
+          <div className="border-t border-oliva-100 pt-3">
+            {confirmEliminar ? (
+              <div className="rounded-lg bg-red-50 border border-red-200 p-3 space-y-2">
+                <div className="text-sm text-red-800">
+                  ¿Eliminar el cliente <b>{editar.nombre}</b>? Las ventas cargadas se conservan como <i>"sin cliente"</i>. Esta acción no se puede deshacer.
+                </div>
+                <div className="flex justify-end gap-2">
+                  <button type="button" className="btn-secondary text-xs" onClick={() => setConfirmEliminar(false)} disabled={eliminando}>Cancelar</button>
+                  <button type="button" className="text-xs px-3 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50" onClick={eliminar} disabled={eliminando}>
+                    {eliminando ? 'Eliminando…' : 'Sí, eliminar'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button type="button" className="text-xs text-red-700 hover:text-red-900 underline" onClick={() => setConfirmEliminar(true)}>
+                Eliminar cliente
+              </button>
+            )}
+          </div>
+        )}
+
         <div className="flex justify-end gap-2 pt-2">
           <button type="button" className="btn-secondary" onClick={onCerrar}>{soloLectura ? 'Cerrar' : 'Cancelar'}</button>
           {!soloLectura && (
