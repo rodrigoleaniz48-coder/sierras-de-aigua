@@ -379,8 +379,9 @@ function NuevaVentaDialog({
       actualizarItem(key, { presentacion_id: presId, stock_id: null, precio_unitario: precio })
       return
     }
+    // Auto-seleccionar stock FIFO SOLO de la ubicación elegida en la venta
     const stocksPres = stock
-      .filter((s) => s.presentacion_id === presId)
+      .filter((s) => s.presentacion_id === presId && s.ubicacion_id === Number(ubicacionId))
       .sort((a, b) => a.id - b.id)
     const stockElegido = stocksPres[0]
     actualizarItem(key, {
@@ -656,10 +657,13 @@ function NuevaVentaDialog({
                           <option value="">— elegir —</option>
                           {presentaciones.map((p) => {
                             const prod = prodPorId.get(p.producto_id)
-                            const hayStock = p.es_pack ? true : stock.some((s) => s.presentacion_id === p.id)
+                            const stockEnUbic = p.es_pack ? 0 : stock
+                              .filter((s) => s.presentacion_id === p.id && s.ubicacion_id === Number(ubicacionId))
+                              .reduce((a, b) => a + b.unidades, 0)
+                            const hayStock = p.es_pack ? true : stockEnUbic > 0
                             return (
                               <option key={p.id} value={p.id} disabled={!hayStock}>
-                                {prod?.nombre} · {p.nombre}{p.es_pack ? ' · pack' : ''}{!hayStock ? ' · SIN STOCK' : ''}
+                                {prod?.nombre} · {p.nombre}{p.es_pack ? ' · pack' : ''}{!hayStock ? ' · SIN STOCK AQUÍ' : ` · ${stockEnUbic} u`}
                               </option>
                             )
                           })}
