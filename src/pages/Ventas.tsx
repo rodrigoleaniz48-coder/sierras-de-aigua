@@ -582,7 +582,7 @@ function NuevaVentaDialog({
             </label>
             <label className="flex items-center gap-2 cursor-pointer">
               <input id="cf" type="checkbox" checked={conFactura} onChange={(e) => setConFactura(e.target.checked)} className="h-4 w-4 accent-oliva-700" />
-              <span className="text-sm text-oliva-800">🧾 Con factura</span>
+              <span className="text-sm text-oliva-800">🧾 Con factura <span className="text-xs text-oliva-600">(agrega 10% IVA)</span></span>
             </label>
           </div>
 
