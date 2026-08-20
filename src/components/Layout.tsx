@@ -10,13 +10,13 @@ interface NavItem {
 }
 
 const NAV: NavItem[] = [
-  { to: '/',            label: 'Inicio',       roles: ['admin', 'ventas', 'marketing'] },
-  { to: '/stock',       label: 'Stock',        roles: ['admin', 'ventas', 'marketing'] },
-  { to: '/ventas',      label: 'Ventas',       roles: ['admin', 'ventas'] },
+  { to: '/',            label: 'Ventas',       roles: ['admin', 'ventas'] },
   { to: '/clientes',    label: 'Clientes',     roles: ['admin', 'ventas', 'marketing'] },
+  { to: '/stock',       label: 'Stock',        roles: ['admin', 'ventas', 'marketing'] },
   { to: '/gastos',      label: 'Mis gastos',   roles: ['admin', 'ventas', 'marketing'] },
   { to: '/contabilidad',label: 'Contabilidad', roles: ['admin'] },
   { to: '/admin',       label: 'Administración',roles: ['admin'] },
+  { to: '/dashboard',   label: 'Inicio',       roles: ['admin', 'ventas', 'marketing'] },
 ]
 
 export function Layout() {
