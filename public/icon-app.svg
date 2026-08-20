@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Fondo verde oliva (safe zone maskable) -->
+  <rect width="512" height="512" rx="96" fill="#4a5228"/>
+  <!-- Aceituna dorada al centro -->
+  <ellipse cx="256" cy="256" rx="140" ry="170" fill="#c08f2b"/>
+  <ellipse cx="256" cy="256" rx="140" ry="170" fill="url(#brillo)"/>
+  <!-- Rama arriba -->
+  <path d="M256 88 C 240 130, 240 170, 256 210" stroke="#3a4120" stroke-width="10" fill="none" stroke-linecap="round"/>
+  <!-- Hojas -->
+  <path d="M256 130 C 220 118, 200 128, 190 148 C 218 152, 240 148, 256 138 Z" fill="#7a8842"/>
+  <path d="M256 160 C 292 148, 312 158, 322 178 C 294 182, 272 178, 256 168 Z" fill="#7a8842"/>
+  <defs>
+    <radialGradient id="brillo" cx="35%" cy="30%" r="70%">
+      <stop offset="0%" stop-color="#e8c85f" stop-opacity="0.65"/>
+      <stop offset="100%" stop-color="#c08f2b" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+</svg>
