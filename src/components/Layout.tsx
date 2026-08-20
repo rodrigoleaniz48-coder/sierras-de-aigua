@@ -37,7 +37,7 @@ export function Layout() {
             <path d="M4 6h16M4 12h16M4 18h16" strokeLinecap="round"/>
           </svg>
         </button>
-        <div className="font-semibold text-oliva-800">Sierras de Aiguá</div>
+        <img src={import.meta.env.BASE_URL + 'logo.webp'} alt="Sierras de Aiguá" className="h-8 w-auto" />
         <button className="text-xs text-oliva-700 underline" onClick={signOut}>Salir</button>
       </header>
 
@@ -45,12 +45,8 @@ export function Layout() {
       <aside
         className={`${open ? 'block' : 'hidden'} lg:block w-full lg:w-64 shrink-0 border-r border-oliva-100 bg-white`}
       >
-        <div className="hidden lg:flex items-center gap-2 px-5 py-5 border-b border-oliva-100">
-          <div className="h-8 w-8 rounded-full bg-oliva-700 flex items-center justify-center text-white font-bold">S</div>
-          <div>
-            <div className="font-semibold text-oliva-900 leading-none">Sierras de Aiguá</div>
-            <div className="text-[11px] text-oliva-600 mt-1">Gestión interna</div>
-          </div>
+        <div className="hidden lg:flex items-center justify-center px-5 py-5 border-b border-oliva-100">
+          <img src={import.meta.env.BASE_URL + 'logo.webp'} alt="Sierras de Aiguá" className="h-16 w-auto" />
         </div>
         <nav className="p-3 space-y-1">
           {items.map((n) => (

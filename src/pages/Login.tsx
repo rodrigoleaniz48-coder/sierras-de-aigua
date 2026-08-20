@@ -27,12 +27,11 @@ export function Login() {
   }
 
   return (
-    <div className="min-h-screen grid place-items-center bg-gradient-to-br from-oliva-100 via-oliva-50 to-tierra-100 p-4">
+    <div className="min-h-screen grid place-items-center bg-gradient-to-br from-oliva-50 via-white to-tierra-100 p-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-6">
-          <div className="mx-auto h-14 w-14 rounded-full bg-oliva-700 flex items-center justify-center text-white text-2xl font-bold">S</div>
-          <h1 className="mt-3 text-2xl font-semibold text-oliva-900">Sierras de Aiguá</h1>
-          <p className="text-sm text-oliva-700">Gestión interna</p>
+          <img src={import.meta.env.BASE_URL + 'logo.webp'} alt="Sierras de Aiguá" className="mx-auto h-28 w-auto" />
+          <p className="mt-2 text-sm text-oliva-700">Gestión interna</p>
         </div>
 
         {!supabaseConfigured && (

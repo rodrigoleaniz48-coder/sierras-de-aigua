@@ -7,9 +7,15 @@
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#f7f8f2",
-  "theme_color": "#4a5228",
+  "theme_color": "#829378",
   "lang": "es-UY",
   "icons": [
+    {
+      "src": "/sierras-de-aigua/icon-app.webp",
+      "sizes": "1920x1920",
+      "type": "image/webp",
+      "purpose": "any"
+    },
     {
       "src": "/sierras-de-aigua/icon-app.svg",
       "sizes": "any",
