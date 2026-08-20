@@ -202,8 +202,8 @@ export function Clientes() {
 
 function badgeTipo(t: Cliente['tipo']) {
   switch (t) {
-    case 'mayorista':    return 'bg-aceite-500/15 text-aceite-600'
-    case 'distribuidor': return 'bg-tierra-300/40 text-tierra-800'
+    case 'mayorista':    return 'bg-aceite-500/20 text-aceite-600 ring-1 ring-aceite-500/30'
+    case 'distribuidor': return 'bg-blue-100 text-blue-800 ring-1 ring-blue-300'
     case 'feria':        return 'bg-tierra-100 text-tierra-800'
     case 'envio':        return 'bg-oliva-200 text-oliva-800'
     default:             return 'bg-oliva-100 text-oliva-700'
