@@ -44,13 +44,15 @@ interface Props {
   stats?: EstadisticasCliente | null
   /** Callback opcional para eliminar el cliente. Si no se pasa, no aparece el botón. */
   onEliminar?: (cliente: Cliente) => Promise<void>
+  /** Si se pasa y se está creando un cliente nuevo, se lo asigna a este socio automáticamente. */
+  defaultSocioAsignado?: string
   onCerrar: () => void
   /** Devuelve el cliente creado/editado para que quien invoca pueda seleccionarlo automáticamente. */
   onOk: (cliente: Cliente) => void
 }
 
 export function ClienteDialog({
-  abierto, socios, editar, soloLectura, modo = 'completo', stats, onEliminar, onCerrar, onOk,
+  abierto, socios, editar, soloLectura, modo = 'completo', stats, onEliminar, defaultSocioAsignado, onCerrar, onOk,
 }: Props) {
   const [confirmEliminar, setConfirmEliminar] = useState(false)
   const [eliminando, setEliminando] = useState(false)
@@ -78,10 +80,12 @@ export function ClienteDialog({
       setSocioAsig(editar.socio_asignado ?? ''); setNotas(editar.notas ?? '')
     } else {
       setNombre(''); setTipo('minorista'); setTelefono(''); setEmail(''); setWhatsapp('')
-      setDireccion(''); setLocalidad(''); setRut(''); setPago(''); setSocioAsig(''); setNotas('')
+      setDireccion(''); setLocalidad(''); setRut(''); setPago('')
+      setSocioAsig(defaultSocioAsignado ?? '')
+      setNotas('')
     }
     setError(null); setConfirmEliminar(false)
-  }, [abierto, editar])
+  }, [abierto, editar, defaultSocioAsignado])
 
   async function eliminar() {
     if (!editar || !onEliminar) return

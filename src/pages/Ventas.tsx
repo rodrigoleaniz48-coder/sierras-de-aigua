@@ -464,17 +464,21 @@ function NuevaVentaDialog({
 
     setGuardando(true); setError(null)
 
-    // 0) Si es envío con cliente, y cambiaron direccion o telefono/whatsapp respecto al cliente, actualizar la ficha
-    if (envio && cliente) {
+    // 0) Actualizar la ficha del cliente si corresponde:
+    //    - auto-asignar socio (si el cliente no tenía socio, queda del vendedor que carga la venta)
+    //    - si es envío, guardar direccion/telefono nuevos
+    if (cliente) {
       const patch: Record<string, unknown> = {}
-      const dirNueva = direccionEnvio.trim()
-      const telNuevo = telefonoEnvio.trim()
-      if (dirNueva && dirNueva !== (cliente.direccion ?? '')) patch.direccion = dirNueva
-      if (telNuevo && telNuevo !== (cliente.whatsapp ?? '') && telNuevo !== (cliente.telefono ?? '')) {
-        // Guardar en whatsapp si el cliente no tiene, si no en telefono
-        if (!cliente.whatsapp) patch.whatsapp = telNuevo
-        else if (!cliente.telefono) patch.telefono = telNuevo
-        else patch.whatsapp = telNuevo // reemplaza whatsapp por defecto
+      if (!cliente.socio_asignado) patch.socio_asignado = socioId
+      if (envio) {
+        const dirNueva = direccionEnvio.trim()
+        const telNuevo = telefonoEnvio.trim()
+        if (dirNueva && dirNueva !== (cliente.direccion ?? '')) patch.direccion = dirNueva
+        if (telNuevo && telNuevo !== (cliente.whatsapp ?? '') && telNuevo !== (cliente.telefono ?? '')) {
+          if (!cliente.whatsapp) patch.whatsapp = telNuevo
+          else if (!cliente.telefono) patch.telefono = telNuevo
+          else patch.whatsapp = telNuevo
+        }
       }
       if (Object.keys(patch).length > 0) {
         patch.actualizado_en = new Date().toISOString()
@@ -794,6 +798,7 @@ function NuevaVentaDialog({
         abierto={nuevoClienteAbierto}
         socios={socios}
         modo="rapido"
+        defaultSocioAsignado={socioId}
         onCerrar={() => setNuevoClienteAbierto(false)}
         onOk={(c) => {
           onClienteCreado(c)
