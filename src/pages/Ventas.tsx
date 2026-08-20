@@ -22,12 +22,12 @@ interface Venta {
   con_factura: boolean; subtotal: number; descuento: number; iva: number; total: number
   envio: boolean; costo_envio: number; horario_entrega: string | null
   ubicacion_id: number
+  entregado: boolean; cobrado: boolean
   notas: string | null; creado_en: string
 }
 
 const CANALES = ['directa', 'feria', 'envio', 'whatsapp'] as const
-const FORMAS_PAGO = ['efectivo', 'transferencia', 'tarjeta', 'mercado_pago', 'cheque', 'otro'] as const
-const ESTADOS = ['pendiente', 'entregado', 'facturado', 'cobrado', 'cancelado'] as const
+const FORMAS_PAGO = ['efectivo', 'transferencia'] as const
 
 // ---------- Página ----------
 
@@ -45,6 +45,8 @@ export function Ventas() {
 
   const [filtroSocio, setFiltroSocio] = useState<string>('todos')
   const [soloEnvio, setSoloEnvio] = useState(false)
+  const [soloPendientesEntrega, setSoloPendientesEntrega] = useState(false)
+  const [soloPendientesCobro, setSoloPendientesCobro] = useState(false)
   const [filtroDesde, setFiltroDesde] = useState<string>(() => {
     const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10)
   })
@@ -75,9 +77,11 @@ export function Ventas() {
       if (filtroDesde && v.fecha < filtroDesde) return false
       if (filtroHasta && v.fecha > filtroHasta) return false
       if (soloEnvio && !v.envio) return false
+      if (soloPendientesEntrega && (v.entregado || v.estado === 'cancelado')) return false
+      if (soloPendientesCobro && (v.cobrado || v.estado === 'cancelado')) return false
       return true
     })
-  }, [ventas, filtroSocio, filtroDesde, filtroHasta, soloEnvio])
+  }, [ventas, filtroSocio, filtroDesde, filtroHasta, soloEnvio, soloPendientesEntrega, soloPendientesCobro])
 
   const totalPeriodo = useMemo(() => filtradas.reduce((s, v) => s + Number(v.total ?? 0), 0), [filtradas])
 
@@ -113,10 +117,20 @@ export function Ventas() {
             <option value="todos">Todos</option>
             {socios.map((s) => <option key={s.id} value={s.id}>{s.nombre}</option>)}
           </select>
-          <label className="flex items-center gap-1 mt-2 text-xs text-oliva-700">
-            <input type="checkbox" className="h-3 w-3 accent-oliva-700" checked={soloEnvio} onChange={(e) => setSoloEnvio(e.target.checked)} />
-            🛵 solo con envío
-          </label>
+          <div className="mt-2 space-y-1">
+            <label className="flex items-center gap-1 text-xs text-oliva-700">
+              <input type="checkbox" className="h-3 w-3 accent-oliva-700" checked={soloEnvio} onChange={(e) => setSoloEnvio(e.target.checked)} />
+              🛵 solo con envío
+            </label>
+            <label className="flex items-center gap-1 text-xs text-amber-800">
+              <input type="checkbox" className="h-3 w-3 accent-amber-600" checked={soloPendientesEntrega} onChange={(e) => setSoloPendientesEntrega(e.target.checked)} />
+              ⏳ pendientes de entrega
+            </label>
+            <label className="flex items-center gap-1 text-xs text-red-800">
+              <input type="checkbox" className="h-3 w-3 accent-red-600" checked={soloPendientesCobro} onChange={(e) => setSoloPendientesCobro(e.target.checked)} />
+              ⚠ pendientes de cobro
+            </label>
+          </div>
         </div>
         <div className="rounded-lg bg-oliva-100 border border-oliva-200 p-3 text-right">
           <div className="text-[11px] uppercase tracking-wide text-oliva-700">Total del período</div>
@@ -141,7 +155,8 @@ export function Ventas() {
                 <th className="py-2 px-4">Socio</th>
                 <th className="py-2 px-4">📍</th>
                 <th className="py-2 px-4">Canal</th>
-                <th className="py-2 px-4">Estado</th>
+                <th className="py-2 px-4 text-center">Entrega</th>
+                <th className="py-2 px-4 text-center">Cobro</th>
                 <th className="py-2 px-4">Factura</th>
                 <th className="py-2 px-4 text-right">Total</th>
               </tr>
@@ -161,9 +176,24 @@ export function Ventas() {
                     {v.canal ?? '—'}
                     {v.envio && <span title="Envío por cadete" className="ml-1">🛵</span>}
                   </td>
-                  <td className="py-2 px-4">
-                    <span className={`text-[11px] uppercase tracking-wide rounded-full px-2 py-[1px] ${badgeEstado(v.estado)}`}>{v.estado}</span>
-                  </td>
+                  {v.estado === 'cancelado' ? (
+                    <td colSpan={2} className="py-2 px-4 text-center">
+                      <span className="text-[11px] uppercase tracking-wide rounded-full px-2 py-[1px] bg-red-100 text-red-800">Anulada</span>
+                    </td>
+                  ) : (
+                    <>
+                      <td className="py-2 px-4 text-center">
+                        <span className={`text-[11px] uppercase tracking-wide rounded-full px-2 py-[1px] ${v.entregado ? 'bg-oliva-200 text-oliva-900' : 'bg-amber-100 text-amber-800'}`}>
+                          {v.entregado ? '🚚 entregado' : '⏳ pendiente'}
+                        </span>
+                      </td>
+                      <td className="py-2 px-4 text-center">
+                        <span className={`text-[11px] uppercase tracking-wide rounded-full px-2 py-[1px] ${v.cobrado ? 'bg-aceite-500/20 text-aceite-600' : 'bg-red-100 text-red-800'}`}>
+                          {v.cobrado ? '💰 cobrado' : '⚠ sin cobrar'}
+                        </span>
+                      </td>
+                    </>
+                  )}
                   <td className="py-2 px-4 text-xs">{v.con_factura ? 'Sí' : '—'}</td>
                   <td className="py-2 px-4 text-right tabular-nums font-medium text-oliva-900">{money(v.total)}</td>
                 </tr>
@@ -204,16 +234,6 @@ export function Ventas() {
       />
     </div>
   )
-}
-
-function badgeEstado(e: string) {
-  switch (e) {
-    case 'entregado':  return 'bg-oliva-100 text-oliva-800'
-    case 'facturado':  return 'bg-tierra-100 text-tierra-800'
-    case 'cobrado':    return 'bg-aceite-500/15 text-aceite-600'
-    case 'cancelado':  return 'bg-red-100 text-red-800'
-    default:           return 'bg-oliva-200 text-oliva-800'
-  }
 }
 
 // ---------- Diálogo Nueva venta ----------
@@ -263,7 +283,8 @@ function NuevaVentaDialog({
   const [direccionEnvio, setDireccionEnvio] = useState('')
   const [telefonoEnvio, setTelefonoEnvio] = useState('')
   const [ubicacionId, setUbicacionId] = useState<string>('1')
-  const [estado, setEstado] = useState<string>('cobrado')
+  const [entregado, setEntregado] = useState(true)
+  const [cobrado, setCobrado] = useState(true)
   const [notas, setNotas] = useState('')
   const [items, setItems] = useState<Item[]>([nuevoItem()])
 
@@ -284,7 +305,7 @@ function NuevaVentaDialog({
     setEnvio(false); setCostoEnvio('190'); setHorarioEntrega('')
     setDireccionEnvio(''); setTelefonoEnvio('')
     setUbicacionId(String(ubicacionDefaultPorSocio(perfil?.nombre)))
-    setEstado('cobrado'); setNotas(''); setItems([nuevoItem()]); setError(null)
+    setEntregado(true); setCobrado(true); setNotas(''); setItems([nuevoItem()]); setError(null)
 
     setDatosCargados(false)
     Promise.all([
@@ -336,6 +357,12 @@ function NuevaVentaDialog({
   useEffect(() => {
     setItems((prev) => prev.map((it) => ({ ...it, stock_id: null })))
   }, [ubicacionId])
+
+  // Al marcar envío por cadete: por default queda como pendiente de entrega y de cobro
+  // (típicamente se entrega y cobra al día siguiente). Se puede corregir a mano igual.
+  useEffect(() => {
+    if (envio) { setEntregado(false); setCobrado(false); setCanal('envio') }
+  }, [envio])
 
   function actualizarItem(key: string, patch: Partial<Item>) {
     setItems((prev) => prev.map((it) => (it.key === key ? { ...it, ...patch } : it)))
@@ -458,15 +485,18 @@ function NuevaVentaDialog({
     }
 
     // 1) Insert venta
+    // estado se sincroniza con los booleans para mantener compat con datos viejos
+    const estadoSync = cobrado ? 'cobrado' : (entregado ? 'entregado' : 'pendiente')
     const { data: venta, error: eV } = await supabase.from('ventas').insert({
       fecha,
       cliente_id: clienteId ? Number(clienteId) : null,
       socio_id: socioId,
-      canal, estado, forma_pago: formaPago,
+      canal, estado: estadoSync, forma_pago: formaPago,
       con_factura: conFactura,
       envio, costo_envio: cEnvio,
       horario_entrega: envio ? (horarioEntrega.trim() || null) : null,
       ubicacion_id: Number(ubicacionId),
+      entregado, cobrado,
       subtotal, descuento: 0, iva, total,
       notas: notas.trim() || null,
     }).select('id').single()
@@ -541,15 +571,19 @@ function NuevaVentaDialog({
               {FORMAS_PAGO.map((f) => <option key={f} value={f}>{f.replace('_', ' ')}</option>)}
             </select>
           </div>
-          <div>
-            <label className="label">Estado</label>
-            <select className="input" value={estado} onChange={(e) => setEstado(e.target.value)}>
-              {ESTADOS.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </div>
-          <div className="sm:col-span-3 flex items-center gap-2">
-            <input id="cf" type="checkbox" checked={conFactura} onChange={(e) => setConFactura(e.target.checked)} className="h-4 w-4 accent-oliva-700" />
-            <label htmlFor="cf" className="text-sm text-oliva-800">Con factura (agrega IVA)</label>
+          <div className="sm:col-span-3 grid grid-cols-1 sm:grid-cols-3 gap-3 rounded-xl border border-oliva-100 bg-oliva-50/60 p-3">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={entregado} onChange={(e) => setEntregado(e.target.checked)} className="h-4 w-4 accent-oliva-700" />
+              <span className="text-sm text-oliva-800">🚚 Ya entregado</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={cobrado} onChange={(e) => setCobrado(e.target.checked)} className="h-4 w-4 accent-oliva-700" />
+              <span className="text-sm text-oliva-800">💰 Ya cobrado</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input id="cf" type="checkbox" checked={conFactura} onChange={(e) => setConFactura(e.target.checked)} className="h-4 w-4 accent-oliva-700" />
+              <span className="text-sm text-oliva-800">🧾 Con factura</span>
+            </label>
           </div>
 
           <div className="sm:col-span-3 rounded-xl border border-oliva-100 bg-oliva-50/60 p-3 space-y-2">
@@ -806,7 +840,8 @@ function VentaDetalleDialog({
   const [clienteId, setClienteId] = useState<string>('')
   const [canal, setCanal] = useState('')
   const [formaPago, setFormaPago] = useState('')
-  const [estado, setEstado] = useState('')
+  const [entregado, setEntregado] = useState(false)
+  const [cobrado, setCobrado] = useState(false)
   const [notas, setNotas] = useState('')
   const [horarioEntrega, setHorarioEntrega] = useState('')
 
@@ -815,7 +850,8 @@ function VentaDetalleDialog({
     setClienteId(venta.cliente_id ? String(venta.cliente_id) : '')
     setCanal(venta.canal ?? 'directa')
     setFormaPago(venta.forma_pago ?? 'efectivo')
-    setEstado(venta.estado)
+    setEntregado(venta.entregado)
+    setCobrado(venta.cobrado)
     setNotas(venta.notas ?? '')
     setHorarioEntrega(venta.horario_entrega ?? '')
     setError(null); setConfirmAnular(false)
@@ -835,31 +871,42 @@ function VentaDetalleDialog({
 
   if (!venta) return null
 
-  const anulada = estado === 'cancelado' || venta.estado === 'cancelado'
+  const anulada = venta.estado === 'cancelado'
   const socio = socios.find((s) => s.id === venta.socio_id)
 
-  async function guardarCambios(nuevoEstado?: string) {
+  async function guardarCambios() {
     setGuardando(true); setError(null)
     const patch: Record<string, unknown> = {
       cliente_id: clienteId ? Number(clienteId) : null,
       canal, forma_pago: formaPago, notas: notas.trim() || null,
       horario_entrega: venta!.envio ? (horarioEntrega.trim() || null) : null,
     }
-    if (nuevoEstado) patch.estado = nuevoEstado
     const { error } = await supabase.from('ventas').update(patch).eq('id', venta!.id)
     setGuardando(false)
     if (error) { setError(error.message); return }
-    if (nuevoEstado) setEstado(nuevoEstado)
     onCambio()
   }
 
-  async function cambiarEstado(nuevo: string) {
-    if (nuevo === estado) return
+  async function toggleEntregado() {
+    const nuevo = !entregado
     setGuardando(true); setError(null)
-    const { error } = await supabase.from('ventas').update({ estado: nuevo }).eq('id', venta!.id)
+    // Mantener estado sincronizado por compat
+    const estadoSync = cobrado ? 'cobrado' : (nuevo ? 'entregado' : 'pendiente')
+    const { error } = await supabase.from('ventas').update({ entregado: nuevo, estado: estadoSync }).eq('id', venta!.id)
     setGuardando(false)
     if (error) { setError(error.message); return }
-    setEstado(nuevo)
+    setEntregado(nuevo)
+    onCambio()
+  }
+
+  async function toggleCobrado() {
+    const nuevo = !cobrado
+    setGuardando(true); setError(null)
+    const estadoSync = nuevo ? 'cobrado' : (entregado ? 'entregado' : 'pendiente')
+    const { error } = await supabase.from('ventas').update({ cobrado: nuevo, estado: estadoSync }).eq('id', venta!.id)
+    setGuardando(false)
+    if (error) { setError(error.message); return }
+    setCobrado(nuevo)
     onCambio()
   }
 
@@ -887,7 +934,6 @@ function VentaDetalleDialog({
     const { error: e2 } = await supabase.from('ventas').update({ estado: 'cancelado' }).eq('id', venta!.id)
     setGuardando(false)
     if (e2) { setError(e2.message); return }
-    setEstado('cancelado')
     onCambio()
   }
 
@@ -900,25 +946,34 @@ function VentaDetalleDialog({
           </div>
         )}
 
-        {/* Estado — botones rápidos */}
-        <div>
-          <div className="text-xs uppercase tracking-wide text-oliva-600 mb-1">Estado</div>
-          <div className="flex flex-wrap gap-1">
-            {ESTADOS.map((s) => (
-              <button
-                key={s}
-                disabled={!puedeEditar || anulada || guardando}
-                onClick={() => cambiarEstado(s)}
-                className={`text-xs px-3 py-1 rounded-full border transition ${
-                  estado === s
-                    ? 'bg-oliva-700 text-white border-oliva-700'
-                    : 'bg-white text-oliva-700 border-oliva-200 hover:bg-oliva-50'
-                }`}
-              >
-                {s}
-              </button>
-            ))}
-          </div>
+        {/* Entrega y cobro — toggles grandes clickeables */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <button
+            type="button"
+            disabled={!puedeEditar || anulada || guardando}
+            onClick={toggleEntregado}
+            className={`rounded-xl border-2 p-4 text-left transition ${
+              entregado
+                ? 'bg-oliva-100 border-oliva-400 text-oliva-900'
+                : 'bg-amber-50 border-amber-300 text-amber-900 hover:bg-amber-100'
+            } disabled:opacity-60 disabled:cursor-not-allowed`}
+          >
+            <div className="text-lg font-semibold">{entregado ? '🚚 Entregado' : '⏳ Pendiente de entrega'}</div>
+            <div className="text-xs mt-1 opacity-80">Clic para {entregado ? 'marcar como pendiente' : 'marcar como entregado'}</div>
+          </button>
+          <button
+            type="button"
+            disabled={!puedeEditar || anulada || guardando}
+            onClick={toggleCobrado}
+            className={`rounded-xl border-2 p-4 text-left transition ${
+              cobrado
+                ? 'bg-aceite-500/20 border-aceite-500 text-aceite-600'
+                : 'bg-red-50 border-red-300 text-red-800 hover:bg-red-100'
+            } disabled:opacity-60 disabled:cursor-not-allowed`}
+          >
+            <div className="text-lg font-semibold">{cobrado ? '💰 Cobrado' : '⚠ Sin cobrar'}</div>
+            <div className="text-xs mt-1 opacity-80">Clic para {cobrado ? 'marcar como sin cobrar' : 'marcar como cobrado'}</div>
+          </button>
         </div>
 
         {/* Cabecera editable */}
