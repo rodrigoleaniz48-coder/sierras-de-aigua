@@ -6,6 +6,8 @@ export interface Perfil {
   rol: Rol
   activo: boolean
   puede_modificar_stock: boolean
+  ve_todo_crm: boolean
+  ve_todos_gastos: boolean
 }
 
 export interface Producto {
