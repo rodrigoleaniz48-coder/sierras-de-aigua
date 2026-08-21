@@ -54,6 +54,7 @@ export function Ventas() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   const [ventaDetalle, setVentaDetalle] = useState<Venta | null>(null)
+  const [ventaEnEdicion, setVentaEnEdicion] = useState<Venta | null>(null)
   const [cadeteAbierto, setCadeteAbierto] = useState(false)
 
   const [filtroSocio, setFiltroSocio] = useState<string>('todos')
@@ -217,14 +218,15 @@ export function Ventas() {
       )}
 
       <NuevaVentaDialog
-        abierto={nueva}
+        abierto={nueva || ventaEnEdicion !== null}
         socioId={session?.user.id ?? ''}
         clientes={clientes}
         socios={socios}
         ubicaciones={ubicaciones}
+        ventaAEditar={ventaEnEdicion}
         onClienteCreado={(c) => setClientes((prev) => [...prev, c].sort((a, b) => a.nombre.localeCompare(b.nombre)))}
-        onCerrar={() => setNueva(false)}
-        onOk={() => { setNueva(false); cargar() }}
+        onCerrar={() => { setNueva(false); setVentaEnEdicion(null) }}
+        onOk={() => { setNueva(false); setVentaEnEdicion(null); cargar() }}
       />
 
       <VentaDetalleDialog
@@ -233,6 +235,7 @@ export function Ventas() {
         socios={socios}
         ubicaciones={ubicaciones}
         puedeEditar={puedeEscribir}
+        onEditarItems={(v) => { setVentaDetalle(null); setVentaEnEdicion(v) }}
         onCerrar={() => setVentaDetalle(null)}
         onCambio={() => { setVentaDetalle(null); cargar() }}
       />
@@ -272,13 +275,15 @@ function ubicacionDefaultPorSocio(nombre: string | null | undefined): number {
 }
 
 function NuevaVentaDialog({
-  abierto, socioId, clientes, socios, ubicaciones, onClienteCreado, onCerrar, onOk,
+  abierto, socioId, clientes, socios, ubicaciones, ventaAEditar, onClienteCreado, onCerrar, onOk,
 }: {
   abierto: boolean
   socioId: string
   clientes: Cliente[]
   socios: Socio[]
   ubicaciones: Ubicacion[]
+  /** Si viene, el diálogo abre en modo edición: precarga la venta y hace revertir+reaplicar al guardar. */
+  ventaAEditar?: Venta | null
   onClienteCreado: (cliente: Cliente) => void
   onCerrar: () => void
   onOk: () => void
@@ -313,12 +318,29 @@ function NuevaVentaDialog({
 
   useEffect(() => {
     if (!abierto) return
-    setFecha(new Date().toISOString().slice(0, 10))
-    setClienteId(''); setCanal('directa'); setFormaPago('efectivo'); setConFactura(false)
-    setEnvio(false); setCostoEnvio('190'); setHorarioEntrega('')
-    setDireccionEnvio(''); setTelefonoEnvio('')
-    setUbicacionId(String(ubicacionDefaultPorSocio(perfil?.nombre)))
-    setEntregado(true); setCobrado(true); setNotas(''); setItems([nuevoItem()]); setError(null)
+    if (ventaAEditar) {
+      setFecha(ventaAEditar.fecha)
+      setClienteId(ventaAEditar.cliente_id ? String(ventaAEditar.cliente_id) : '')
+      setCanal(ventaAEditar.canal ?? 'directa')
+      setFormaPago(ventaAEditar.forma_pago ?? 'efectivo')
+      setConFactura(ventaAEditar.con_factura)
+      setEnvio(ventaAEditar.envio)
+      setCostoEnvio(String(ventaAEditar.costo_envio ?? '190'))
+      setHorarioEntrega(ventaAEditar.horario_entrega ?? '')
+      setDireccionEnvio(''); setTelefonoEnvio('') // se recargan del cliente al elegirlo
+      setUbicacionId(String(ventaAEditar.ubicacion_id ?? 1))
+      setEntregado(ventaAEditar.entregado)
+      setCobrado(ventaAEditar.cobrado)
+      setNotas(ventaAEditar.notas ?? '')
+    } else {
+      setFecha(new Date().toISOString().slice(0, 10))
+      setClienteId(''); setCanal('directa'); setFormaPago('efectivo'); setConFactura(false)
+      setEnvio(false); setCostoEnvio('190'); setHorarioEntrega('')
+      setDireccionEnvio(''); setTelefonoEnvio('')
+      setUbicacionId(String(ubicacionDefaultPorSocio(perfil?.nombre)))
+      setEntregado(true); setCobrado(true); setNotas(''); setItems([nuevoItem()])
+    }
+    setError(null)
 
     setDatosCargados(false)
     Promise.all([
@@ -327,12 +349,26 @@ function NuevaVentaDialog({
       supabase.from('stock').select('id,tanque_id,presentacion_id,unidades,ubicacion_id').gt('unidades', 0),
       supabase.from('tanques').select('*'),
       supabase.from('presentacion_componente').select('*'),
-    ]).then(([p, pr, s, t, c]) => {
+      ventaAEditar
+        ? supabase.from('items_venta').select('*').eq('venta_id', ventaAEditar.id).order('id')
+        : Promise.resolve({ data: [] as ItemVenta[] }),
+    ]).then(([p, pr, s, t, c, iv]) => {
       setProductos((p.data as Producto[]) ?? [])
       setPresentaciones((pr.data as Presentacion[]) ?? [])
       setStock((s.data as StockRow[]) ?? [])
       setTanques((t.data as Tanque[]) ?? [])
       setComponentes((c.data as Componente[]) ?? [])
+      if (ventaAEditar) {
+        const itemsExist = ((iv.data as ItemVenta[] | null) ?? []).map((it) => ({
+          key: crypto.randomUUID(),
+          presentacion_id: it.presentacion_id,
+          stock_id: it.stock_id,
+          unidades: Number(it.unidades),
+          precio_unitario: Number(it.precio_unitario),
+          descuento_unitario: Number(it.descuento_unitario),
+        } as Item))
+        setItems(itemsExist.length > 0 ? itemsExist : [nuevoItem()])
+      }
       setDatosCargados(true)
     })
   }, [abierto])
@@ -502,10 +538,10 @@ function NuevaVentaDialog({
       }
     }
 
-    // 1) Insert venta
+    // 1) Insert venta O update si es edición
     // estado se sincroniza con los booleans para mantener compat con datos viejos
     const estadoSync = cobrado ? 'cobrado' : (entregado ? 'entregado' : 'pendiente')
-    const { data: venta, error: eV } = await supabase.from('ventas').insert({
+    const cabecera = {
       fecha,
       cliente_id: clienteId ? Number(clienteId) : null,
       socio_id: socioId,
@@ -517,13 +553,36 @@ function NuevaVentaDialog({
       entregado, cobrado,
       subtotal, descuento: 0, iva, total,
       notas: notas.trim() || null,
-    }).select('id').single()
+    }
 
-    if (eV || !venta) { setError(eV?.message ?? 'Error creando venta'); setGuardando(false); return }
+    let ventaId: number
+    if (ventaAEditar) {
+      // Edición: revertir movs_stock previos, borrar items viejos, actualizar cabecera
+      const { data: { user } } = await supabase.auth.getUser()
+      const { data: movsPrev } = await supabase.from('movimientos_stock').select('*').eq('venta_id', ventaAEditar.id)
+      for (const m of (movsPrev ?? [])) {
+        const { data: s } = await supabase.from('stock').select('unidades').eq('id', m.stock_id).maybeSingle()
+        if (!s) continue
+        await supabase.from('stock').update({ unidades: Number(s.unidades) - Number(m.unidades), actualizado_en: new Date().toISOString() }).eq('id', m.stock_id)
+        await supabase.from('movimientos_stock').insert({
+          stock_id: m.stock_id, tipo: 'devolucion', unidades: -Number(m.unidades),
+          venta_id: ventaAEditar.id, usuario_id: user?.id ?? null,
+          nota: `Reversion por edicion de venta #${ventaAEditar.id}`,
+        })
+      }
+      await supabase.from('items_venta').delete().eq('venta_id', ventaAEditar.id)
+      const { error: eU } = await supabase.from('ventas').update(cabecera).eq('id', ventaAEditar.id)
+      if (eU) { setError('Error actualizando venta: ' + eU.message); setGuardando(false); return }
+      ventaId = ventaAEditar.id
+    } else {
+      const { data: venta, error: eV } = await supabase.from('ventas').insert(cabecera).select('id').single()
+      if (eV || !venta) { setError(eV?.message ?? 'Error creando venta'); setGuardando(false); return }
+      ventaId = venta.id
+    }
 
     // 2) Insert items (el trigger descuenta stock; para packs, componentes vía trigger)
     const payloadItems = filas.map((f) => ({
-      venta_id: venta.id,
+      venta_id: ventaId,
       stock_id: f.p?.es_pack ? null : f.it.stock_id,
       presentacion_id: f.it.presentacion_id!,
       unidades: Number(f.it.unidades),
@@ -533,8 +592,10 @@ function NuevaVentaDialog({
     }))
     const { error: eI } = await supabase.from('items_venta').insert(payloadItems)
     if (eI) {
-      // Rollback manual: borrar la venta creada
-      await supabase.from('ventas').delete().eq('id', venta.id)
+      if (!ventaAEditar) {
+        // Rollback manual: borrar la venta creada
+        await supabase.from('ventas').delete().eq('id', ventaId)
+      }
       setError('Error cargando ítems: ' + eI.message)
       setGuardando(false); return
     }
@@ -544,7 +605,7 @@ function NuevaVentaDialog({
   }
 
   return (
-    <Dialog abierto={abierto} onCerrar={onCerrar} titulo="Nueva venta" ancho="lg">
+    <Dialog abierto={abierto} onCerrar={onCerrar} titulo={ventaAEditar ? `Editar venta #${ventaAEditar.id}` : 'Nueva venta'} ancho="lg">
       <form onSubmit={guardar} className="space-y-4">
         {/* Cabecera */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -835,13 +896,14 @@ interface PresentacionInfo { id: number; nombre: string; producto_id: number; es
 interface ProdInfo { id: number; nombre: string }
 
 function VentaDetalleDialog({
-  venta, clientes, socios, ubicaciones, puedeEditar, onCerrar, onCambio,
+  venta, clientes, socios, ubicaciones, puedeEditar, onEditarItems, onCerrar, onCambio,
 }: {
   venta: Venta | null
   clientes: Cliente[]
   socios: Socio[]
   ubicaciones: Ubicacion[]
   puedeEditar: boolean
+  onEditarItems: (v: Venta) => void
   onCerrar: () => void
   onCambio: () => void
 }) {
@@ -1080,7 +1142,14 @@ function VentaDetalleDialog({
 
         {/* Ítems */}
         <div>
-          <div className="text-xs uppercase tracking-wide text-oliva-600 mb-1">Ítems</div>
+          <div className="flex items-center justify-between mb-1">
+            <div className="text-xs uppercase tracking-wide text-oliva-600">Ítems</div>
+            {puedeEditar && !anulada && (
+              <button type="button" className="text-xs text-oliva-700 hover:text-oliva-900 underline" onClick={() => onEditarItems(venta)}>
+                Editar ítems
+              </button>
+            )}
+          </div>
           {cargando ? (
             <div className="text-sm text-oliva-600">Cargando…</div>
           ) : items.length === 0 ? (
