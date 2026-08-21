@@ -4,7 +4,9 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { Dialog } from '../components/Dialog'
 import { ClienteDialog, type Cliente, type Socio } from '../components/ClienteDialog'
+import { ClienteCombo } from '../components/ClienteCombo'
 import { money } from '../lib/format'
+import { CADETE_MVD_WA, normalizarTelWA } from '../lib/config'
 
 // ---------- Tipos ----------
 interface Producto { id: number; nombre: string }
@@ -562,18 +564,13 @@ function NuevaVentaDialog({
           <div className="sm:col-span-2">
             <label className="label flex items-center justify-between">
               <span>Cliente {esMayorista && <span className="text-aceite-600">· mayorista</span>}</span>
-              <button
-                type="button"
-                className="text-xs text-oliva-700 hover:text-oliva-900 underline font-normal normal-case tracking-normal"
-                onClick={() => setNuevoClienteAbierto(true)}
-              >
-                + nuevo cliente
-              </button>
             </label>
-            <select className="input" value={clienteId} onChange={(e) => setClienteId(e.target.value)}>
-              <option value="">— sin cliente (venta de feria / mostrador) —</option>
-              {clientes.map((c) => <option key={c.id} value={c.id}>{c.nombre} ({c.tipo})</option>)}
-            </select>
+            <ClienteCombo
+              clientes={clientes}
+              clienteId={clienteId}
+              onCambiar={setClienteId}
+              onNuevo={() => setNuevoClienteAbierto(true)}
+            />
           </div>
           <div>
             <label className="label">Canal</label>
@@ -893,6 +890,36 @@ function VentaDetalleDialog({
 
   const anulada = venta.estado === 'cancelado'
   const socio = socios.find((s) => s.id === venta.socio_id)
+  const clienteActual = venta.cliente_id ? clientes.find((c) => c.id === venta.cliente_id) : null
+  const clienteWA = normalizarTelWA(clienteActual?.whatsapp ?? clienteActual?.telefono ?? null)
+
+  function armarMensajeCliente(): string {
+    const items_str = items.map((it) => {
+      const p = presMap.get(it.presentacion_id)
+      const prod = p ? prodMap.get(p.producto_id) : null
+      return `• ${it.unidades}× ${prod?.nombre ?? ''} ${p?.nombre ?? ''}`.trim()
+    }).join('\n')
+    const partes: string[] = []
+    partes.push(`Hola ${clienteActual?.nombre?.split(' ')[0] ?? ''}!`)
+    partes.push('Gracias por tu compra en Sierras de Aiguá 🫒')
+    partes.push('')
+    partes.push(`*Pedido #${venta!.id}* · ${venta!.fecha}`)
+    partes.push(items_str)
+    if (venta!.envio) partes.push(`🛵 Envío: ${money(venta!.costo_envio)}`)
+    if (venta!.con_factura) partes.push(`IVA (10%): ${money(venta!.iva)}`)
+    partes.push(`*Total: ${money(venta!.total)}*`)
+    if (venta!.horario_entrega) partes.push(`🕐 ${venta!.horario_entrega}`)
+    partes.push('')
+    partes.push('Cualquier duda avisanos 🙌')
+    partes.push('_Sierras de Aiguá · Producción familiar_')
+    return partes.join('\n')
+  }
+
+  function enviarReciboWA() {
+    const texto = encodeURIComponent(armarMensajeCliente())
+    const url = clienteWA ? `https://wa.me/${clienteWA}?text=${texto}` : `https://wa.me/?text=${texto}`
+    window.open(url, '_blank')
+  }
 
   async function guardarCambios() {
     setGuardando(true); setError(null)
@@ -1131,9 +1158,20 @@ function VentaDetalleDialog({
                 </div>
               </div>
             ) : (
-              <div className="flex justify-between items-center">
+              <div className="flex justify-between items-center gap-2 flex-wrap">
                 <button className="text-xs text-red-700 hover:text-red-900 underline" onClick={() => setConfirmAnular(true)}>Anular esta venta</button>
-                <button className="btn-secondary" onClick={onCerrar}>Cerrar</button>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    className="btn-secondary text-sm"
+                    onClick={enviarReciboWA}
+                    disabled={cargando}
+                    title={clienteWA ? 'Abre WhatsApp con el mensaje ya escrito' : 'El cliente no tiene teléfono cargado — se abre WA sin destinatario'}
+                  >
+                    📱 Recibo por WhatsApp
+                  </button>
+                  <button className="btn-secondary" onClick={onCerrar}>Cerrar</button>
+                </div>
               </div>
             )}
           </div>
@@ -1278,7 +1316,7 @@ function ListaCadeteDialog({
   }
 
   function abrirWhatsapp() {
-    const url = 'https://wa.me/?text=' + encodeURIComponent(armarTexto())
+    const url = `https://wa.me/${CADETE_MVD_WA}?text=` + encodeURIComponent(armarTexto())
     window.open(url, '_blank')
   }
 
