@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { money } from '../lib/format'
 import { ReporteSemanalCard } from '../components/ReporteSemanalCard'
+import { AlertasStockBajo } from '../components/AlertasStockBajo'
 
 interface Resumen {
   ventasMes: number
@@ -62,6 +63,8 @@ export function Dashboard() {
           <div className="shrink-0 h-14 w-14 rounded-full bg-white/15 flex items-center justify-center text-3xl leading-none">+</div>
         </button>
       )}
+
+      <AlertasStockBajo />
 
       <ReporteSemanalCard />
 
