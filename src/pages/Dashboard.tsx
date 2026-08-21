@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { money } from '../lib/format'
+import { ReporteSemanalCard } from '../components/ReporteSemanalCard'
 
 interface Resumen {
   ventasMes: number
@@ -61,6 +62,8 @@ export function Dashboard() {
           <div className="shrink-0 h-14 w-14 rounded-full bg-white/15 flex items-center justify-center text-3xl leading-none">+</div>
         </button>
       )}
+
+      <ReporteSemanalCard />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard titulo="Ventas del mes"       valor={cargando ? '…' : money(r.ventasMesTotal)} sub={`${r.ventasMes} operaciones`} />
