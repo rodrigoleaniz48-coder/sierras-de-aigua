@@ -374,8 +374,8 @@ function EnvasadoView({
   puedeEditar: boolean
   onEditar: (presId: number) => void
 }) {
-  const filas = useMemo(() => {
-    // key: presentacion_id → { unidadesPorUbic, total }
+  // Agrupar: producto → presentaciones → stock por ubicación
+  const grupos = useMemo(() => {
     const porPres = new Map<number, { porUbic: Map<number, number>; total: number }>()
     for (const s of stock) {
       const g = porPres.get(s.presentacion_id) ?? { porUbic: new Map(), total: 0 }
@@ -383,72 +383,86 @@ function EnvasadoView({
       g.total += s.unidades
       porPres.set(s.presentacion_id, g)
     }
-    return presentaciones
-      .map((p) => {
-        const prod = productos.find((x) => x.id === p.producto_id)
-        const g = porPres.get(p.id) ?? { porUbic: new Map<number, number>(), total: 0 }
-        return { pres: p, prod, porUbic: g.porUbic, total: g.total }
-      })
-      .filter((r) => r.prod)
-      .sort((a, b) => (a.prod!.nombre + a.pres.nombre).localeCompare(b.prod!.nombre + b.pres.nombre))
+    const map = new Map<number, { prod: Producto; presentaciones: { pres: Presentacion; porUbic: Map<number, number>; total: number }[]; totalProducto: number }>()
+    for (const p of presentaciones) {
+      const prod = productos.find((x) => x.id === p.producto_id)
+      if (!prod) continue
+      const g = porPres.get(p.id) ?? { porUbic: new Map<number, number>(), total: 0 }
+      const entry = map.get(prod.id) ?? { prod, presentaciones: [], totalProducto: 0 }
+      entry.presentaciones.push({ pres: p, porUbic: g.porUbic, total: g.total })
+      entry.totalProducto += g.total
+      map.set(prod.id, entry)
+    }
+    // Sort: presentaciones dentro de cada producto por volumen_ml asc, productos por nombre
+    for (const [, e] of map) {
+      e.presentaciones.sort((a, b) => (a.pres.volumen_ml ?? 0) - (b.pres.volumen_ml ?? 0))
+    }
+    return [...map.values()].sort((a, b) => a.prod.nombre.localeCompare(b.prod.nombre))
   }, [productos, presentaciones, stock])
 
+  if (grupos.length === 0) {
+    return <div className="card p-6 text-sm text-oliva-700">Sin presentaciones cargadas.</div>
+  }
+
   return (
-    <div className="card p-0 overflow-x-auto">
-      <table className="w-full text-sm min-w-[720px]">
-        <thead>
-          <tr className="text-left text-xs uppercase tracking-wide text-oliva-600 border-b border-oliva-100 bg-oliva-50">
-            <th className="py-2 px-4">Producto</th>
-            <th className="py-2 px-4">Presentación</th>
-            {ubicaciones.map((u) => (
-              <th key={u.id} className="py-2 px-4 text-right">{u.nombre}</th>
-            ))}
-            <th className="py-2 px-4 text-right font-semibold">Total</th>
-            <th className="py-2 px-4 text-right">Mínimo</th>
-            <th className="py-2 px-4"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {filas.map((r) => {
-            const bajo = r.total <= r.pres.stock_minimo && r.pres.stock_minimo > 0
-            const color = colorProducto(r.prod?.nombre)
-            return (
-              <tr key={r.pres.id} className="border-b border-oliva-100/70 last:border-0">
-                <td className="py-2 px-4 text-oliva-800">
-                  <span className={`inline-block w-2 h-2 rounded-full ${color.dot} mr-2 align-middle`}></span>
-                  {r.prod?.nombre}
-                </td>
-                <td className="py-2 px-4 text-oliva-800">{r.pres.nombre}</td>
-                {ubicaciones.map((u) => {
-                  const n = r.porUbic.get(u.id) ?? 0
-                  return (
-                    <td key={u.id} className={`py-2 px-4 text-right tabular-nums ${n === 0 ? 'text-oliva-300' : 'text-oliva-900'}`}>
-                      {n}
-                    </td>
-                  )
-                })}
-                <td className={`py-2 px-4 text-right tabular-nums font-semibold ${r.total === 0 ? 'text-oliva-400' : 'text-oliva-900'}`}>{r.total}</td>
-                <td className="py-2 px-4 text-right tabular-nums text-oliva-600">{r.pres.stock_minimo || '—'}</td>
-                <td className="py-2 px-4 text-right">
-                  {bajo && <span className="text-[11px] rounded-full bg-red-100 text-red-800 px-2 py-[1px] uppercase tracking-wide">Bajo</span>}
-                  {puedeEditar && (
-                    <button
-                      type="button"
-                      className="ml-2 text-xs text-oliva-700 hover:text-oliva-900 underline"
-                      onClick={() => onEditar(r.pres.id)}
-                    >
-                      Editar
-                    </button>
-                  )}
-                </td>
-              </tr>
-            )
-          })}
-          {filas.length === 0 && (
-            <tr><td colSpan={4 + ubicaciones.length} className="py-6 text-center text-sm text-oliva-600">Sin presentaciones cargadas.</td></tr>
-          )}
-        </tbody>
-      </table>
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+      {grupos.map(({ prod, presentaciones: pres, totalProducto }) => {
+        const color = colorProducto(prod.nombre)
+        return (
+          <div key={prod.id} className={`rounded-xl border-2 ${color.card} overflow-hidden`}>
+            {/* Header producto */}
+            <div className="px-3 py-2 flex items-center justify-between gap-2 border-b border-oliva-100/60">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className={`w-3 h-3 rounded-full ${color.dot} shrink-0`}></span>
+                <span className="font-semibold text-oliva-900 truncate">{prod.nombre}</span>
+              </div>
+              <span className="text-xs text-oliva-600 tabular-nums shrink-0">{totalProducto} u</span>
+            </div>
+            {/* Presentaciones */}
+            <div className="divide-y divide-oliva-100/60">
+              {pres.map(({ pres: p, porUbic, total }) => {
+                const bajo = total <= p.stock_minimo && p.stock_minimo > 0
+                return (
+                  <div key={p.id} className="px-3 py-2 bg-white/60">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm text-oliva-800 font-medium truncate">{p.nombre}</div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {bajo && <span className="text-[10px] rounded-full bg-red-100 text-red-800 px-1.5 py-[1px] uppercase tracking-wide">bajo</span>}
+                        <span className={`text-sm tabular-nums font-semibold ${total === 0 ? 'text-oliva-400' : 'text-oliva-900'}`}>{total}</span>
+                        {puedeEditar && (
+                          <button
+                            type="button"
+                            className="text-xs text-oliva-700 hover:text-oliva-900"
+                            title="Ajustar stock"
+                            onClick={() => onEditar(p.id)}
+                          >
+                            ✎
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {/* Desglose por ubicación (chips chicos) */}
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {ubicaciones.map((u) => {
+                        const n = porUbic.get(u.id) ?? 0
+                        return (
+                          <span
+                            key={u.id}
+                            className={`text-[10px] px-1.5 py-[1px] rounded-full ${n === 0 ? 'bg-oliva-100/60 text-oliva-400' : 'bg-oliva-100 text-oliva-800'}`}
+                            title={u.nombre}
+                          >
+                            {u.nombre.slice(0, 3)} <span className="tabular-nums font-semibold">{n}</span>
+                          </span>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }
