@@ -59,8 +59,6 @@ export function Ventas() {
 
   const [filtroSocio, setFiltroSocio] = useState<string>('todos')
   const [soloEnvio, setSoloEnvio] = useState(false)
-  const [soloPendientesEntrega, setSoloPendientesEntrega] = useState(false)
-  const [soloPendientesCobro, setSoloPendientesCobro] = useState(false)
   const [filtroDesde, setFiltroDesde] = useState<string>(() => {
     const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10)
   })
@@ -91,13 +89,17 @@ export function Ventas() {
       if (filtroDesde && v.fecha < filtroDesde) return false
       if (filtroHasta && v.fecha > filtroHasta) return false
       if (soloEnvio && !v.envio) return false
-      if (soloPendientesEntrega && (v.entregado || v.estado === 'cancelado')) return false
-      if (soloPendientesCobro && (v.cobrado || v.estado === 'cancelado')) return false
       return true
     })
-  }, [ventas, filtroSocio, filtroDesde, filtroHasta, soloEnvio, soloPendientesEntrega, soloPendientesCobro])
+  }, [ventas, filtroSocio, filtroDesde, filtroHasta, soloEnvio])
 
   const totalPeriodo = useMemo(() => filtradas.reduce((s, v) => s + Number(v.total ?? 0), 0), [filtradas])
+
+  // Ventas pendientes de entrega o cobro (siempre visibles arriba, sin filtros)
+  const pendientes = useMemo(
+    () => ventas.filter((v) => v.estado !== 'cancelado' && (!v.entregado || !v.cobrado)),
+    [ventas],
+  )
 
   return (
     <div className="space-y-5">
@@ -116,6 +118,28 @@ export function Ventas() {
         </div>
       </div>
 
+      {/* Sección 1: Pendientes de entrega o cobro (siempre visible arriba, sin filtros) */}
+      {pendientes.length > 0 && (
+        <div className="card p-0 overflow-x-auto border-2 border-amber-300 bg-amber-50/40">
+          <div className="px-4 pt-3 pb-1 flex items-center gap-2 text-xs uppercase tracking-wide text-amber-800 font-semibold">
+            ⏳ Pendientes de entrega o cobro <span className="text-amber-600">({pendientes.length})</span>
+          </div>
+          <TablaVentas
+            ventas={pendientes}
+            clientePorId={clientePorId}
+            socioPorId={socioPorId}
+            ubicaciones={ubicaciones}
+            onClic={setVentaDetalle}
+          />
+        </div>
+      )}
+      {pendientes.length === 0 && (
+        <div className="card p-3 text-sm text-oliva-700 text-center bg-oliva-50">
+          ✅ Sin ventas pendientes de entrega ni cobro
+        </div>
+      )}
+
+      {/* Sección 2: Histórico con filtros */}
       <div className="card p-3 grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
         <div>
           <label className="label">Desde</label>
@@ -131,20 +155,10 @@ export function Ventas() {
             <option value="todos">Todos</option>
             {socios.map((s) => <option key={s.id} value={s.id}>{s.nombre}</option>)}
           </select>
-          <div className="mt-2 space-y-1">
-            <label className="flex items-center gap-1 text-xs text-oliva-700">
-              <input type="checkbox" className="h-3 w-3 accent-oliva-700" checked={soloEnvio} onChange={(e) => setSoloEnvio(e.target.checked)} />
-              🛵 solo con envío
-            </label>
-            <label className="flex items-center gap-1 text-xs text-amber-800">
-              <input type="checkbox" className="h-3 w-3 accent-amber-600" checked={soloPendientesEntrega} onChange={(e) => setSoloPendientesEntrega(e.target.checked)} />
-              ⏳ pendientes de entrega
-            </label>
-            <label className="flex items-center gap-1 text-xs text-red-800">
-              <input type="checkbox" className="h-3 w-3 accent-red-600" checked={soloPendientesCobro} onChange={(e) => setSoloPendientesCobro(e.target.checked)} />
-              ⚠ pendientes de cobro
-            </label>
-          </div>
+          <label className="flex items-center gap-1 text-xs text-oliva-700 mt-2">
+            <input type="checkbox" className="h-3 w-3 accent-oliva-700" checked={soloEnvio} onChange={(e) => setSoloEnvio(e.target.checked)} />
+            🛵 solo con envío
+          </label>
         </div>
         <div className="rounded-lg bg-oliva-100 border border-oliva-200 p-3 text-right">
           <div className="text-[11px] uppercase tracking-wide text-oliva-700">Total del período</div>
@@ -156,64 +170,16 @@ export function Ventas() {
       {cargando ? (
         <div className="card p-6 text-sm text-oliva-700">Cargando…</div>
       ) : filtradas.length === 0 ? (
-        <div className="card p-6 text-sm text-oliva-700">
-          Sin ventas en el período. {puedeEscribir && <>Cargá una con <b>+ Nueva venta</b>.</>}
-        </div>
+        <div className="card p-6 text-sm text-oliva-700">Sin ventas en el período.</div>
       ) : (
         <div className="card p-0 overflow-x-auto">
-          <table className="w-full text-sm min-w-[860px]">
-            <thead>
-              <tr className="text-left text-xs uppercase tracking-wide text-oliva-600 border-b border-oliva-100 bg-oliva-50">
-                <th className="py-2 px-4">Fecha</th>
-                <th className="py-2 px-4">Cliente</th>
-                <th className="py-2 px-4">Socio</th>
-                <th className="py-2 px-4">📍</th>
-                <th className="py-2 px-4">Canal</th>
-                <th className="py-2 px-4 text-center">Entrega</th>
-                <th className="py-2 px-4 text-center">Cobro</th>
-                <th className="py-2 px-4">Factura</th>
-                <th className="py-2 px-4 text-right">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtradas.map((v) => (
-                <tr
-                  key={v.id}
-                  className="border-b border-oliva-100/70 last:border-0 hover:bg-oliva-50/60 cursor-pointer"
-                  onClick={() => setVentaDetalle(v)}
-                >
-                  <td className="py-2 px-4 tabular-nums text-oliva-700">{v.fecha}</td>
-                  <td className="py-2 px-4 text-oliva-900">{clientePorId.get(v.cliente_id ?? 0)?.nombre ?? <span className="italic text-oliva-500">sin cliente</span>}</td>
-                  <td className="py-2 px-4 text-oliva-700 text-xs">{socioPorId.get(v.socio_id)?.nombre ?? '—'}</td>
-                  <td className="py-2 px-4 text-oliva-700 text-xs">{ubicaciones.find((u) => u.id === v.ubicacion_id)?.nombre?.slice(0, 3) ?? '—'}</td>
-                  <td className="py-2 px-4 text-oliva-700 text-xs">
-                    {v.canal ?? '—'}
-                    {v.envio && <span title="Envío por cadete" className="ml-1">🛵</span>}
-                  </td>
-                  {v.estado === 'cancelado' ? (
-                    <td colSpan={2} className="py-2 px-4 text-center">
-                      <span className="text-[11px] uppercase tracking-wide rounded-full px-2 py-[1px] bg-red-100 text-red-800">Anulada</span>
-                    </td>
-                  ) : (
-                    <>
-                      <td className="py-2 px-4 text-center">
-                        <span className={`text-[11px] uppercase tracking-wide rounded-full px-2 py-[1px] ${v.entregado ? 'bg-oliva-200 text-oliva-900' : 'bg-amber-100 text-amber-800'}`}>
-                          {v.entregado ? '🚚 entregado' : '⏳ pendiente'}
-                        </span>
-                      </td>
-                      <td className="py-2 px-4 text-center">
-                        <span className={`text-[11px] uppercase tracking-wide rounded-full px-2 py-[1px] ${v.cobrado ? 'bg-aceite-500/20 text-aceite-600' : 'bg-red-100 text-red-800'}`}>
-                          {v.cobrado ? '💰 cobrado' : '⚠ sin cobrar'}
-                        </span>
-                      </td>
-                    </>
-                  )}
-                  <td className="py-2 px-4 text-xs">{v.con_factura ? 'Sí' : '—'}</td>
-                  <td className="py-2 px-4 text-right tabular-nums font-medium text-oliva-900">{money(v.total)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <TablaVentas
+            ventas={filtradas}
+            clientePorId={clientePorId}
+            socioPorId={socioPorId}
+            ubicaciones={ubicaciones}
+            onClic={setVentaDetalle}
+          />
         </div>
       )}
 
@@ -252,6 +218,73 @@ export function Ventas() {
   )
 }
 
+// ---------- Tabla de ventas (reutilizada en Pendientes y Histórico) ----------
+function TablaVentas({
+  ventas, clientePorId, socioPorId, ubicaciones, onClic,
+}: {
+  ventas: Venta[]
+  clientePorId: Map<number, Cliente>
+  socioPorId: Map<string, Socio>
+  ubicaciones: Ubicacion[]
+  onClic: (v: Venta) => void
+}) {
+  return (
+    <table className="w-full text-sm min-w-[860px]">
+      <thead>
+        <tr className="text-left text-xs uppercase tracking-wide text-oliva-600 border-b border-oliva-100 bg-oliva-50">
+          <th className="py-2 px-4">Fecha</th>
+          <th className="py-2 px-4">Cliente</th>
+          <th className="py-2 px-4">Socio</th>
+          <th className="py-2 px-4">📍</th>
+          <th className="py-2 px-4">Canal</th>
+          <th className="py-2 px-4 text-center">Entrega</th>
+          <th className="py-2 px-4 text-center">Cobro</th>
+          <th className="py-2 px-4">Factura</th>
+          <th className="py-2 px-4 text-right">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {ventas.map((v) => (
+          <tr
+            key={v.id}
+            className="border-b border-oliva-100/70 last:border-0 hover:bg-oliva-50/60 cursor-pointer"
+            onClick={() => onClic(v)}
+          >
+            <td className="py-2 px-4 tabular-nums text-oliva-700">{v.fecha}</td>
+            <td className="py-2 px-4 text-oliva-900">{clientePorId.get(v.cliente_id ?? 0)?.nombre ?? <span className="italic text-oliva-500">sin cliente</span>}</td>
+            <td className="py-2 px-4 text-oliva-700 text-xs">{socioPorId.get(v.socio_id)?.nombre ?? '—'}</td>
+            <td className="py-2 px-4 text-oliva-700 text-xs">{ubicaciones.find((u) => u.id === v.ubicacion_id)?.nombre?.slice(0, 3) ?? '—'}</td>
+            <td className="py-2 px-4 text-oliva-700 text-xs">
+              {v.canal ?? '—'}
+              {v.envio && <span title="Envío por cadete" className="ml-1">🛵</span>}
+            </td>
+            {v.estado === 'cancelado' ? (
+              <td colSpan={2} className="py-2 px-4 text-center">
+                <span className="text-[11px] uppercase tracking-wide rounded-full px-2 py-[1px] bg-red-100 text-red-800">Anulada</span>
+              </td>
+            ) : (
+              <>
+                <td className="py-2 px-4 text-center">
+                  <span className={`text-[11px] uppercase tracking-wide rounded-full px-2 py-[1px] ${v.entregado ? 'bg-oliva-200 text-oliva-900' : 'bg-amber-100 text-amber-800'}`}>
+                    {v.entregado ? '🚚 entregado' : '⏳ pendiente'}
+                  </span>
+                </td>
+                <td className="py-2 px-4 text-center">
+                  <span className={`text-[11px] uppercase tracking-wide rounded-full px-2 py-[1px] ${v.cobrado ? 'bg-aceite-500/20 text-aceite-600' : 'bg-red-100 text-red-800'}`}>
+                    {v.cobrado ? '💰 cobrado' : '⚠ sin cobrar'}
+                  </span>
+                </td>
+              </>
+            )}
+            <td className="py-2 px-4 text-xs">{v.con_factura ? 'Sí' : '—'}</td>
+            <td className="py-2 px-4 text-right tabular-nums font-medium text-oliva-900">{money(v.total)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
 // ---------- Diálogo Nueva venta ----------
 
 interface Item {
@@ -273,6 +306,33 @@ function ubicacionDefaultPorSocio(nombre: string | null | undefined): number {
   if (n.includes('rodrigo') || n.includes('santi')) return 3 // Montevideo
   return 1 // Almazara (fallback)
 }
+
+// ---------- Borrador de nueva venta (persiste ante cambios de ventana / app en mobile) ----------
+const BORRADOR_KEY = 'nueva-venta-borrador-v1'
+const BORRADOR_TTL_MS = 24 * 60 * 60 * 1000 // 24 h
+
+interface Borrador {
+  ts: number
+  fecha: string; clienteId: string; canal: string; formaPago: string; conFactura: boolean
+  envio: boolean; costoEnvio: string; horarioEntrega: string
+  direccionEnvio: string; telefonoEnvio: string
+  ubicacionId: string; entregado: boolean; cobrado: boolean; notas: string
+  items: Item[]
+}
+
+function leerBorrador(): Borrador | null {
+  try {
+    const raw = localStorage.getItem(BORRADOR_KEY)
+    if (!raw) return null
+    const b = JSON.parse(raw) as Borrador
+    if (!b?.ts || Date.now() - b.ts > BORRADOR_TTL_MS) { localStorage.removeItem(BORRADOR_KEY); return null }
+    return b
+  } catch { return null }
+}
+function guardarBorrador(b: Omit<Borrador, 'ts'>) {
+  try { localStorage.setItem(BORRADOR_KEY, JSON.stringify({ ...b, ts: Date.now() })) } catch { /* nada */ }
+}
+function limpiarBorrador() { try { localStorage.removeItem(BORRADOR_KEY) } catch { /* nada */ } }
 
 function NuevaVentaDialog({
   abierto, socioId, clientes, socios, ubicaciones, ventaAEditar, onClienteCreado, onCerrar, onOk,
@@ -333,12 +393,22 @@ function NuevaVentaDialog({
       setCobrado(ventaAEditar.cobrado)
       setNotas(ventaAEditar.notas ?? '')
     } else {
-      setFecha(new Date().toISOString().slice(0, 10))
-      setClienteId(''); setCanal('directa'); setFormaPago('efectivo'); setConFactura(false)
-      setEnvio(false); setCostoEnvio('190'); setHorarioEntrega('')
-      setDireccionEnvio(''); setTelefonoEnvio('')
-      setUbicacionId(String(ubicacionDefaultPorSocio(perfil?.nombre)))
-      setEntregado(true); setCobrado(true); setNotas(''); setItems([nuevoItem()])
+      // Intentar cargar borrador de localStorage (últimas 24h)
+      const b = leerBorrador()
+      if (b) {
+        setFecha(b.fecha); setClienteId(b.clienteId); setCanal(b.canal); setFormaPago(b.formaPago)
+        setConFactura(b.conFactura); setEnvio(b.envio); setCostoEnvio(b.costoEnvio); setHorarioEntrega(b.horarioEntrega)
+        setDireccionEnvio(b.direccionEnvio); setTelefonoEnvio(b.telefonoEnvio)
+        setUbicacionId(b.ubicacionId); setEntregado(b.entregado); setCobrado(b.cobrado); setNotas(b.notas)
+        setItems(b.items && b.items.length > 0 ? b.items : [nuevoItem()])
+      } else {
+        setFecha(new Date().toISOString().slice(0, 10))
+        setClienteId(''); setCanal('whatsapp'); setFormaPago('efectivo'); setConFactura(false)
+        setEnvio(false); setCostoEnvio('190'); setHorarioEntrega('')
+        setDireccionEnvio(''); setTelefonoEnvio('')
+        setUbicacionId(String(ubicacionDefaultPorSocio(perfil?.nombre)))
+        setEntregado(false); setCobrado(false); setNotas(''); setItems([nuevoItem()])
+      }
     }
     setError(null)
 
@@ -423,21 +493,26 @@ function NuevaVentaDialog({
     if (!presId) return actualizarItem(key, { presentacion_id: null, stock_id: null, precio_unitario: 0 })
     const p = presPorId.get(presId)
     const precio = p ? (esMayorista && Number(p.precio_mayorista) ? Number(p.precio_mayorista) : Number(p.precio_minorista)) : 0
+    const esUltimoItem = items.length > 0 && items[items.length - 1].key === key
     if (p?.es_pack) {
       // Los packs no requieren stock_id: el trigger descuenta los componentes FIFO
       actualizarItem(key, { presentacion_id: presId, stock_id: null, precio_unitario: precio })
-      return
+    } else {
+      // Auto-seleccionar stock FIFO SOLO de la ubicación elegida en la venta
+      const stocksPres = stock
+        .filter((s) => s.presentacion_id === presId && s.ubicacion_id === Number(ubicacionId))
+        .sort((a, b) => a.id - b.id)
+      const stockElegido = stocksPres[0]
+      actualizarItem(key, {
+        presentacion_id: presId,
+        stock_id: stockElegido?.id ?? null,
+        precio_unitario: precio,
+      })
     }
-    // Auto-seleccionar stock FIFO SOLO de la ubicación elegida en la venta
-    const stocksPres = stock
-      .filter((s) => s.presentacion_id === presId && s.ubicacion_id === Number(ubicacionId))
-      .sort((a, b) => a.id - b.id)
-    const stockElegido = stocksPres[0]
-    actualizarItem(key, {
-      presentacion_id: presId,
-      stock_id: stockElegido?.id ?? null,
-      precio_unitario: precio,
-    })
+    // Si acabás de completar el último ítem, agregar una línea vacía nueva al final
+    if (esUltimoItem) {
+      setItems((prev) => [...prev, nuevoItem()])
+    }
   }
 
   // Cálculos
@@ -449,8 +524,8 @@ function NuevaVentaDialog({
     const ivaLinea = conFactura && p ? subtotal * (Number(p.iva_pct) / 100) : 0
     return { it, p, st, disponible, subtotal, ivaLinea }
   })
-  const subtotal = filas.reduce((s, f) => s + f.subtotal, 0)
-  const iva = filas.reduce((s, f) => s + f.ivaLinea, 0)
+  const subtotal = filas.reduce((s, f) => s + (f.it.presentacion_id ? f.subtotal : 0), 0)
+  const iva = filas.reduce((s, f) => s + (f.it.presentacion_id ? f.ivaLinea : 0), 0)
   const cEnvio = envio ? (Number(costoEnvio) || 0) : 0
   const total = subtotal + iva + cEnvio
 
@@ -467,8 +542,9 @@ function NuevaVentaDialog({
   async function guardar(e: React.FormEvent) {
     e.preventDefault()
 
-    // Validaciones
-    if (items.length === 0) { setError('Agregá al menos un ítem.'); return }
+    // Ignoramos ítems vacíos (líneas sin presentación que quedan al final por auto-add)
+    const filasValidas = filas.filter((f) => f.it.presentacion_id)
+    if (filasValidas.length === 0) { setError('Agregá al menos un ítem.'); return }
     if (envio && !clienteId) {
       setError('Para envío por cadete es necesario seleccionar un cliente (o crearlo con "+ nuevo cliente"). Así queda registrada la dirección/teléfono para el cadete y para próximas ventas.')
       return
@@ -479,7 +555,7 @@ function NuevaVentaDialog({
     }
     // Preacumular stock necesitado por presentación (para validar packs contra sus componentes)
     const necesidad = new Map<number, number>()
-    for (const f of filas) {
+    for (const f of filasValidas) {
       if (!f.it.presentacion_id) { setError('Todos los ítems necesitan una presentación.'); return }
       if (f.it.unidades <= 0) { setError('Las unidades deben ser mayores a 0.'); return }
       if (f.p?.es_pack) {
@@ -581,7 +657,7 @@ function NuevaVentaDialog({
     }
 
     // 2) Insert items (el trigger descuenta stock; para packs, componentes vía trigger)
-    const payloadItems = filas.map((f) => ({
+    const payloadItems = filasValidas.map((f) => ({
       venta_id: ventaId,
       stock_id: f.p?.es_pack ? null : f.it.stock_id,
       presentacion_id: f.it.presentacion_id!,
@@ -601,8 +677,19 @@ function NuevaVentaDialog({
     }
 
     setGuardando(false)
+    if (!ventaAEditar) limpiarBorrador()
     onOk()
   }
+
+  // Guardar borrador con cada cambio (solo si es nueva venta, no edición)
+  useEffect(() => {
+    if (!abierto || ventaAEditar) return
+    guardarBorrador({
+      fecha, clienteId, canal, formaPago, conFactura,
+      envio, costoEnvio, horarioEntrega, direccionEnvio, telefonoEnvio,
+      ubicacionId, entregado, cobrado, notas, items,
+    })
+  }, [abierto, ventaAEditar, fecha, clienteId, canal, formaPago, conFactura, envio, costoEnvio, horarioEntrega, direccionEnvio, telefonoEnvio, ubicacionId, entregado, cobrado, notas, items])
 
   return (
     <Dialog abierto={abierto} onCerrar={onCerrar} titulo={ventaAEditar ? `Editar venta #${ventaAEditar.id}` : 'Nueva venta'} ancho="lg">

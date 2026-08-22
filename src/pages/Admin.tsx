@@ -140,7 +140,7 @@ export function Admin() {
                         </table>
                       </div>
                     )}
-                    <div className="flex gap-2 flex-wrap">
+                    <div className="flex gap-2 flex-wrap items-center">
                       <button className="btn-secondary" onClick={() => setNuevaPresProd(p.id)}>+ Nueva presentación</button>
                       <button
                         className="btn-secondary"
@@ -150,6 +150,18 @@ export function Admin() {
                         }}
                       >
                         {p.activo ? 'Desactivar producto' : 'Activar producto'}
+                      </button>
+                      <button
+                        className="ml-auto text-xs text-red-700 hover:text-red-900 underline"
+                        onClick={async () => {
+                          const ok = confirm(`¿Eliminar definitivamente el producto "${p.nombre}"?\n\nSe borran también sus presentaciones. Si alguna venta ya lo usaba, el borrado se bloquea (usá "Desactivar producto" en ese caso).`)
+                          if (!ok) return
+                          const { error } = await supabase.from('productos').delete().eq('id', p.id)
+                          if (error) alert('No se pudo eliminar: ' + error.message)
+                          else cargar()
+                        }}
+                      >
+                        Eliminar producto
                       </button>
                     </div>
                   </div>

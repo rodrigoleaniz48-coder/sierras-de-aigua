@@ -51,6 +51,7 @@ export function Stock() {
 
   const [envasar, setEnvasar] = useState(false)
   const [ajusteEnv, setAjusteEnv] = useState(false)
+  const [ajustePresId, setAjustePresId] = useState<number | null>(null)
   const [trasegar, setTrasegar] = useState(false)
   const [trasladar, setTrasladar] = useState(false)
   const [cargarCosecha, setCargarCosecha] = useState(false)
@@ -165,6 +166,8 @@ export function Stock() {
           presentaciones={presentaciones.filter((p) => !p.es_pack)}
           stock={stock}
           ubicaciones={ubicaciones}
+          puedeEditar={puedeEscribir}
+          onEditar={(presId) => { setAjustePresId(presId); setAjusteEnv(true) }}
         />
       )}
 
@@ -198,8 +201,9 @@ export function Stock() {
         stock={stock}
         tanques={tanques}
         ubicaciones={ubicaciones}
-        onCerrar={() => setAjusteEnv(false)}
-        onOk={() => { setAjusteEnv(false); cargar() }}
+        presIdInicial={ajustePresId}
+        onCerrar={() => { setAjusteEnv(false); setAjustePresId(null) }}
+        onOk={() => { setAjusteEnv(false); setAjustePresId(null); cargar() }}
       />
 
       <TrasladarDialog
@@ -361,12 +365,14 @@ function TanqueCard({
 }
 
 function EnvasadoView({
-  productos, presentaciones, stock, ubicaciones,
+  productos, presentaciones, stock, ubicaciones, puedeEditar, onEditar,
 }: {
   productos: Producto[]
   presentaciones: Presentacion[]
   stock: StockRow[]
   ubicaciones: Ubicacion[]
+  puedeEditar: boolean
+  onEditar: (presId: number) => void
 }) {
   const filas = useMemo(() => {
     // key: presentacion_id → { unidadesPorUbic, total }
@@ -425,6 +431,15 @@ function EnvasadoView({
                 <td className="py-2 px-4 text-right tabular-nums text-oliva-600">{r.pres.stock_minimo || '—'}</td>
                 <td className="py-2 px-4 text-right">
                   {bajo && <span className="text-[11px] rounded-full bg-red-100 text-red-800 px-2 py-[1px] uppercase tracking-wide">Bajo</span>}
+                  {puedeEditar && (
+                    <button
+                      type="button"
+                      className="ml-2 text-xs text-oliva-700 hover:text-oliva-900 underline"
+                      onClick={() => onEditar(r.pres.id)}
+                    >
+                      Editar
+                    </button>
+                  )}
                 </td>
               </tr>
             )
@@ -717,7 +732,7 @@ function EnvasarDialog({
 }
 
 function AjusteEnvasadoDialog({
-  abierto, presentaciones, prodPorId, stock, tanques, ubicaciones, onCerrar, onOk,
+  abierto, presentaciones, prodPorId, stock, tanques, ubicaciones, presIdInicial, onCerrar, onOk,
 }: {
   abierto: boolean
   presentaciones: Presentacion[]
@@ -725,6 +740,7 @@ function AjusteEnvasadoDialog({
   stock: StockRow[]
   tanques: Tanque[]
   ubicaciones: Ubicacion[]
+  presIdInicial?: number | null
   onCerrar: () => void
   onOk: () => void
 }) {
@@ -738,8 +754,9 @@ function AjusteEnvasadoDialog({
 
   useEffect(() => {
     if (!abierto) return
-    setPresentacionId(''); setTanqueId(''); setUbicacionId('1'); setDelta(''); setNota(''); setError(null)
-  }, [abierto])
+    setPresentacionId(presIdInicial ? String(presIdInicial) : '')
+    setTanqueId(''); setUbicacionId('1'); setDelta(''); setNota(''); setError(null)
+  }, [abierto, presIdInicial])
 
   async function guardar(e: React.FormEvent) {
     e.preventDefault()

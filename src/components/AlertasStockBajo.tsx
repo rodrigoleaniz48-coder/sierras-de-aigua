@@ -82,6 +82,8 @@ export function AlertasStockBajo() {
     })
   }, [pres, prod, stock, ubicIds, prodPorId, minimoPorPresUbic])
 
+  const [expandido, setExpandido] = useState(false)
+
   if (cargando) return null
   if (alertas.length === 0) return null
 
@@ -89,45 +91,51 @@ export function AlertasStockBajo() {
   const amar = alertas.filter((a) => a.nivel === 'amarillo').length
 
   return (
-    <div className={`card p-4 ${rojas > 0 ? 'border-2 border-red-300 bg-red-50/40' : 'border-2 border-aceite-500/40 bg-aceite-500/5'}`}>
-      <div className="flex items-start justify-between gap-3 flex-wrap mb-3">
-        <div>
-          <div className="text-xs uppercase tracking-wide text-oliva-600">⚠️ Alertas de stock bajo</div>
-          <div className="text-lg font-semibold text-oliva-900 mt-1">
-            {rojas > 0 && <span className="text-red-700">{rojas} debajo del mínimo</span>}
-            {rojas > 0 && amar > 0 && <span className="text-oliva-700"> · </span>}
-            {amar > 0 && <span className="text-aceite-600">{amar} cerca del mínimo</span>}
-          </div>
-        </div>
-      </div>
-      <div className="space-y-1.5 max-h-72 overflow-y-auto">
-        {alertas.map((a, i) => {
-          const color = colorProducto(a.prod.nombre)
-          const bar = a.nivel === 'rojo' ? 'bg-red-600' : 'bg-aceite-500'
-          const pct = a.minimo > 0 ? Math.min(100, (a.stock / a.minimo) * 100) : 0
-          return (
-            <div key={i} className="flex items-center gap-2 py-1.5 border-b border-oliva-100/70 last:border-0">
-              <span className={`inline-block w-2 h-2 rounded-full ${color.dot}`}></span>
-              <div className="flex-1 min-w-0">
-                <div className="text-sm text-oliva-900 truncate">
-                  <b>{a.prod.nombre}</b> · {a.pres.nombre}
-                </div>
-                <div className="flex items-center gap-2 mt-0.5">
-                  <div className="flex-1 h-1.5 bg-oliva-100 rounded overflow-hidden">
-                    <div className={`h-full ${bar}`} style={{ width: pct + '%' }} />
+    <div className={`rounded-lg border ${rojas > 0 ? 'border-red-300 bg-red-50/50' : 'border-aceite-500/40 bg-aceite-500/5'}`}>
+      <button
+        type="button"
+        className="w-full flex items-center gap-2 px-3 py-2 text-left"
+        onClick={() => setExpandido((v) => !v)}
+      >
+        <span className="text-sm">⚠️</span>
+        <span className="text-sm text-oliva-900 flex-1">
+          <b>Stock bajo:</b>{' '}
+          {rojas > 0 && <span className="text-red-700">{rojas} bajo mín.</span>}
+          {rojas > 0 && amar > 0 && ' · '}
+          {amar > 0 && <span className="text-aceite-600">{amar} cerca</span>}
+        </span>
+        <span className="text-xs text-oliva-600">{expandido ? '▲' : '▼'}</span>
+      </button>
+      {expandido && (
+        <div className="space-y-1 px-3 pb-3 max-h-72 overflow-y-auto border-t border-oliva-100/70">
+          {alertas.map((a, i) => {
+            const color = colorProducto(a.prod.nombre)
+            const bar = a.nivel === 'rojo' ? 'bg-red-600' : 'bg-aceite-500'
+            const pct = a.minimo > 0 ? Math.min(100, (a.stock / a.minimo) * 100) : 0
+            return (
+              <div key={i} className="flex items-center gap-2 py-1 border-b border-oliva-100/60 last:border-0">
+                <span className={`inline-block w-2 h-2 rounded-full ${color.dot}`}></span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs text-oliva-900 truncate">
+                    <b>{a.prod.nombre}</b> · {a.pres.nombre}
                   </div>
-                  <span className="text-[11px] text-oliva-600 tabular-nums whitespace-nowrap">
-                    {a.stock} / {a.minimo}
-                  </span>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <div className="flex-1 h-1 bg-oliva-100 rounded overflow-hidden">
+                      <div className={`h-full ${bar}`} style={{ width: pct + '%' }} />
+                    </div>
+                    <span className="text-[10px] text-oliva-600 tabular-nums whitespace-nowrap">
+                      {a.stock}/{a.minimo}
+                    </span>
+                  </div>
                 </div>
+                <span className="text-[9px] uppercase tracking-wide text-oliva-600 whitespace-nowrap">
+                  {ubicPorId.get(a.ubicacionId)?.nombre}
+                </span>
               </div>
-              <span className="text-[10px] uppercase tracking-wide text-oliva-600 whitespace-nowrap px-2">
-                {ubicPorId.get(a.ubicacionId)?.nombre}
-              </span>
-            </div>
-          )
-        })}
-      </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
