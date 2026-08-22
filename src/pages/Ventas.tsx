@@ -684,6 +684,11 @@ function NuevaVentaDialog({
     onOk()
   }
 
+  // Si el usuario cambia la ubicación a Maldonado, forzar envio=false (Maldonado no usa cadete)
+  useEffect(() => {
+    if (Number(ubicacionId) === 2 && envio) setEnvio(false)
+  }, [ubicacionId, envio])
+
   // Guardar borrador con cada cambio (solo si es nueva venta, no edición)
   useEffect(() => {
     if (!abierto || ventaAEditar) return
@@ -750,6 +755,7 @@ function NuevaVentaDialog({
             </label>
           </div>
 
+          {Number(ubicacionId) !== 2 && (
           <div className="sm:col-span-3 rounded-xl border border-oliva-100 bg-oliva-50/60 p-3 space-y-2">
             <div className="flex items-center gap-2">
               <input id="env" type="checkbox" checked={envio} onChange={(e) => setEnvio(e.target.checked)} className="h-4 w-4 accent-oliva-700" />
@@ -791,6 +797,7 @@ function NuevaVentaDialog({
               </div>
             )}
           </div>
+          )}
         </div>
 
         {/* Ítems */}
