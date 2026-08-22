@@ -7,6 +7,7 @@ import { ClienteDialog, type Cliente, type Socio } from '../components/ClienteDi
 import { ClienteCombo } from '../components/ClienteCombo'
 import { money } from '../lib/format'
 import { CADETE_MVD_WA, normalizarTelWA } from '../lib/config'
+import { guardarFlag, leerFlag } from '../lib/persistencia'
 
 // ---------- Tipos ----------
 interface Producto { id: number; nombre: string }
@@ -45,7 +46,8 @@ export function Ventas() {
   const location = useLocation()
   const navigate = useNavigate()
   const abrirNueva = (location.state as { abrirNueva?: boolean } | null)?.abrirNueva === true
-  const [nueva, setNueva] = useState(abrirNueva)
+  const [nueva, setNuevaRaw] = useState(abrirNueva || leerFlag('dialog:nueva-venta'))
+  const setNueva = (v: boolean) => { setNuevaRaw(v); guardarFlag('dialog:nueva-venta', v) }
   useEffect(() => {
     if (abrirNueva) {
       // Limpiar el state para que un refresh no re-abra el diálogo
@@ -53,7 +55,7 @@ export function Ventas() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-  const [ventaDetalle, setVentaDetalle] = useState<Venta | null>(null)
+  const [ventaDetalleId, setVentaDetalleId] = useState<number | null>(null)
   const [ventaEnEdicion, setVentaEnEdicion] = useState<Venta | null>(null)
   const [cadeteAbierto, setCadeteAbierto] = useState(false)
 
@@ -129,7 +131,7 @@ export function Ventas() {
             clientePorId={clientePorId}
             socioPorId={socioPorId}
             ubicaciones={ubicaciones}
-            onClic={setVentaDetalle}
+            onClic={(v) => setVentaDetalleId(v.id)}
           />
         </div>
       )}
@@ -178,7 +180,7 @@ export function Ventas() {
             clientePorId={clientePorId}
             socioPorId={socioPorId}
             ubicaciones={ubicaciones}
-            onClic={setVentaDetalle}
+            onClic={(v) => setVentaDetalleId(v.id)}
           />
         </div>
       )}
@@ -196,14 +198,15 @@ export function Ventas() {
       />
 
       <VentaDetalleDialog
-        venta={ventaDetalle}
+        venta={ventaDetalleId ? ventas.find((v) => v.id === ventaDetalleId) ?? null : null}
         clientes={clientes}
         socios={socios}
         ubicaciones={ubicaciones}
         puedeEditar={puedeEscribir}
-        onEditarItems={(v) => { setVentaDetalle(null); setVentaEnEdicion(v) }}
-        onCerrar={() => setVentaDetalle(null)}
-        onCambio={() => { setVentaDetalle(null); cargar() }}
+        onEditarItems={(v) => { setVentaDetalleId(null); setVentaEnEdicion(v) }}
+        onCerrar={() => setVentaDetalleId(null)}
+        onCambio={() => { cargar() /* NO cierra: el detalle sigue abierto y se actualiza con la nueva venta */ }}
+        onAnulada={() => { setVentaDetalleId(null); cargar() /* Anular sí cierra */ }}
       />
 
       <ListaCadeteDialog
@@ -983,7 +986,7 @@ interface PresentacionInfo { id: number; nombre: string; producto_id: number; es
 interface ProdInfo { id: number; nombre: string }
 
 function VentaDetalleDialog({
-  venta, clientes, socios, ubicaciones, puedeEditar, onEditarItems, onCerrar, onCambio,
+  venta, clientes, socios, ubicaciones, puedeEditar, onEditarItems, onCerrar, onCambio, onAnulada,
 }: {
   venta: Venta | null
   clientes: Cliente[]
@@ -993,6 +996,7 @@ function VentaDetalleDialog({
   onEditarItems: (v: Venta) => void
   onCerrar: () => void
   onCambio: () => void
+  onAnulada: () => void
 }) {
   const [items, setItems] = useState<ItemVenta[]>([])
   const [presMap, setPresMap] = useState<Map<number, PresentacionInfo>>(new Map())
@@ -1130,7 +1134,7 @@ function VentaDetalleDialog({
     const { error: e2 } = await supabase.from('ventas').update({ estado: 'cancelado' }).eq('id', venta!.id)
     setGuardando(false)
     if (e2) { setError(e2.message); return }
-    onCambio()
+    onAnulada()
   }
 
   return (

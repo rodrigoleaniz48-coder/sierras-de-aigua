@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { Dialog } from '../components/Dialog'
 import { money } from '../lib/format'
+import { guardarFlag, leerFlag, guardarObj, leerObj, borrarKey } from '../lib/persistencia'
 
 interface Gasto {
   id: number
@@ -59,7 +60,8 @@ export function Gastos() {
   const [gastos, setGastos] = useState<Gasto[]>([])
   const [socios, setSocios] = useState<Socio[]>([])
   const [cargando, setCargando] = useState(true)
-  const [nuevo, setNuevo] = useState(false)
+  const [nuevo, setNuevoRaw] = useState(() => leerFlag('dialog:nuevo-gasto'))
+  const setNuevo = (v: boolean) => { setNuevoRaw(v); guardarFlag('dialog:nuevo-gasto', v) }
   const [editando, setEditando] = useState<Gasto | null>(null)
 
   // Filtros
@@ -273,13 +275,27 @@ function GastoDialog({
       setDescripcion(editar.descripcion ?? ''); setMetodoPago(editar.metodo_pago ?? 'efectivo')
       setReembolsable(editar.reembolsable); setReembolsado(editar.reembolsado)
     } else {
-      setFecha(new Date().toISOString().slice(0, 10))
-      setCategoria('otros'); setMonto(''); setMoneda('UYU')
-      setDescripcion(''); setMetodoPago('efectivo')
-      setReembolsable(false); setReembolsado(false)
+      // Intento cargar borrador
+      const b = leerObj<{ fecha: string; categoria: string; monto: string; moneda: 'UYU' | 'USD'; descripcion: string; metodoPago: string; reembolsable: boolean; reembolsado: boolean }>('borrador:nuevo-gasto')
+      if (b) {
+        setFecha(b.fecha); setCategoria(b.categoria); setMonto(b.monto); setMoneda(b.moneda)
+        setDescripcion(b.descripcion); setMetodoPago(b.metodoPago)
+        setReembolsable(b.reembolsable); setReembolsado(b.reembolsado)
+      } else {
+        setFecha(new Date().toISOString().slice(0, 10))
+        setCategoria('otros'); setMonto(''); setMoneda('UYU')
+        setDescripcion(''); setMetodoPago('efectivo')
+        setReembolsable(false); setReembolsado(false)
+      }
     }
     setError(null); setConfirmEliminar(false)
   }, [abierto, editar])
+
+  // Guardar borrador al escribir (solo en modo nuevo)
+  useEffect(() => {
+    if (!abierto || editar) return
+    guardarObj('borrador:nuevo-gasto', { fecha, categoria, monto, moneda, descripcion, metodoPago, reembolsable, reembolsado })
+  }, [abierto, editar, fecha, categoria, monto, moneda, descripcion, metodoPago, reembolsable, reembolsado])
 
   const propio = !editar || editar.socio_id === socioId
   const soloLectura = editar !== null && editar !== undefined && !propio && !veTodos
@@ -304,7 +320,9 @@ function GastoDialog({
       : supabase.from('gastos').insert(payload)
     const { error } = await q
     setGuardando(false)
-    if (error) setError(error.message); else onOk()
+    if (error) { setError(error.message); return }
+    if (!editar) borrarKey('borrador:nuevo-gasto')
+    onOk()
   }
 
   return (

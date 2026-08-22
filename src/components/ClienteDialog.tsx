@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Dialog } from './Dialog'
 import { money } from '../lib/format'
+import { borrarKey, guardarObj, leerObj } from '../lib/persistencia'
+
+const BORRADOR_CLIENTE = 'borrador:nuevo-cliente'
 
 export interface Cliente {
   id: number
@@ -79,13 +82,27 @@ export function ClienteDialog({
       setRut(editar.rut ?? ''); setPago(editar.condiciones_pago ?? '')
       setSocioAsig(editar.socio_asignado ?? ''); setNotas(editar.notas ?? '')
     } else {
-      setNombre(''); setTipo('minorista'); setTelefono(''); setEmail(''); setWhatsapp('')
-      setDireccion(''); setLocalidad(''); setRut(''); setPago('')
-      setSocioAsig(defaultSocioAsignado ?? '')
-      setNotas('')
+      const b = leerObj<{ nombre: string; tipo: Cliente['tipo']; telefono: string; email: string; whatsapp: string; direccion: string; localidad: string; rut: string; pago: string; socioAsig: string; notas: string }>(BORRADOR_CLIENTE)
+      if (b) {
+        setNombre(b.nombre); setTipo(b.tipo); setTelefono(b.telefono); setEmail(b.email); setWhatsapp(b.whatsapp)
+        setDireccion(b.direccion); setLocalidad(b.localidad); setRut(b.rut); setPago(b.pago)
+        setSocioAsig(b.socioAsig || (defaultSocioAsignado ?? ''))
+        setNotas(b.notas)
+      } else {
+        setNombre(''); setTipo('minorista'); setTelefono(''); setEmail(''); setWhatsapp('')
+        setDireccion(''); setLocalidad(''); setRut(''); setPago('')
+        setSocioAsig(defaultSocioAsignado ?? '')
+        setNotas('')
+      }
     }
     setError(null); setConfirmEliminar(false)
   }, [abierto, editar, defaultSocioAsignado])
+
+  // Guardar borrador al escribir (solo en modo nuevo)
+  useEffect(() => {
+    if (!abierto || editar) return
+    guardarObj(BORRADOR_CLIENTE, { nombre, tipo, telefono, email, whatsapp, direccion, localidad, rut, pago, socioAsig, notas })
+  }, [abierto, editar, nombre, tipo, telefono, email, whatsapp, direccion, localidad, rut, pago, socioAsig, notas])
 
   async function eliminar() {
     if (!editar || !onEliminar) return
@@ -141,6 +158,7 @@ export function ClienteDialog({
     const { data, error } = await q
     setGuardando(false)
     if (error || !data) { setError(error?.message ?? 'Error al guardar'); return }
+    if (!editar) borrarKey(BORRADOR_CLIENTE)
     onOk(data as Cliente)
   }
 

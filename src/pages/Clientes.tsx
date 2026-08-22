@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { ClienteDialog, type Cliente, type Socio, type EstadisticasCliente, TIPOS_CLIENTE } from '../components/ClienteDialog'
 import { money } from '../lib/format'
+import { guardarFlag, leerFlag } from '../lib/persistencia'
 
 interface VentaMin {
   id: number
@@ -21,7 +22,8 @@ export function Clientes() {
   const [cargando, setCargando] = useState(true)
   const [q, setQ] = useState('')
   const [tipo, setTipo] = useState<string>('todos')
-  const [nuevo, setNuevo] = useState(false)
+  const [nuevo, setNuevoRaw] = useState(() => leerFlag('dialog:nuevo-cliente'))
+  const setNuevo = (v: boolean) => { setNuevoRaw(v); guardarFlag('dialog:nuevo-cliente', v) }
   const [editando, setEditando] = useState<Cliente | null>(null)
 
   async function cargar() {
