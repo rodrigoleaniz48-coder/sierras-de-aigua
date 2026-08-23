@@ -816,7 +816,6 @@ async function guardar(e: React.FormEvent) {
                         className="input"
                         value={f.it.presentacion_id ?? ''}
                         onChange={(e) => elegirPresentacion(f.it.key, e.target.value ? Number(e.target.value) : null)}
-                        required
                       >
                         <option value="">— elegir —</option>
                         {presentaciones.map((p) => {
@@ -846,7 +845,6 @@ async function guardar(e: React.FormEvent) {
                           type="number" min="1" step="1"
                           value={f.it.unidades}
                           onChange={(e) => actualizarItem(f.it.key, { unidades: Number(e.target.value) || 0 })}
-                          required
                         />
                         {f.it.stock_id && (
                           <p className={`text-[11px] mt-1 ${f.it.unidades > f.disponible ? 'text-red-700' : 'text-oliva-600'}`}>
