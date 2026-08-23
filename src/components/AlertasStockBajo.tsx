@@ -2,12 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { colorProducto } from '../lib/colores'
+import { reglaMinimo } from '../lib/minimos'
 
 interface Presentacion { id: number; producto_id: number; nombre: string; activo: boolean; es_pack: boolean; stock_minimo: number }
 interface Producto { id: number; nombre: string; categoria: string }
 interface StockRow { presentacion_id: number; unidades: number; ubicacion_id: number }
 interface Ubicacion { id: number; nombre: string }
-interface MinimoUbic { presentacion_id: number; ubicacion_id: number; minimo: number }
 
 /** Ubicaciones que le interesan al socio según su rol/lugar. Almazara siempre. */
 function ubicacionesRelevantes(nombre: string | null | undefined): number[] {
@@ -24,7 +24,6 @@ export function AlertasStockBajo() {
   const [prod, setProd] = useState<Producto[]>([])
   const [stock, setStock] = useState<StockRow[]>([])
   const [ubic, setUbic] = useState<Ubicacion[]>([])
-  const [minimos, setMinimos] = useState<MinimoUbic[]>([])
   const [cargando, setCargando] = useState(true)
 
   useEffect(() => {
@@ -33,54 +32,79 @@ export function AlertasStockBajo() {
       supabase.from('productos').select('id,nombre,categoria'),
       supabase.from('stock').select('presentacion_id,unidades,ubicacion_id'),
       supabase.from('ubicaciones').select('id,nombre').eq('activo', true),
-      supabase.from('stock_minimos_ubicacion').select('*'),
-    ]).then(([p, pr, s, u, m]) => {
+    ]).then(([p, pr, s, u]) => {
       setPres((p.data as Presentacion[]) ?? [])
       setProd((pr.data as Producto[]) ?? [])
       setStock((s.data as StockRow[]) ?? [])
       setUbic((u.data as Ubicacion[]) ?? [])
-      setMinimos((m.data as MinimoUbic[]) ?? [])
       setCargando(false)
     })
   }, [])
 
   const prodPorId = useMemo(() => new Map(prod.map((p) => [p.id, p])), [prod])
   const ubicPorId = useMemo(() => new Map(ubic.map((u) => [u.id, u])), [ubic])
-  const minimoPorPresUbic = useMemo(() => {
-    const m = new Map<string, number>()
-    for (const x of minimos) m.set(`${x.presentacion_id}:${x.ubicacion_id}`, x.minimo)
+  const presPorProd = useMemo(() => {
+    const m = new Map<number, Presentacion[]>()
+    for (const p of pres) {
+      if (p.es_pack) continue
+      const arr = m.get(p.producto_id) ?? []
+      arr.push(p)
+      m.set(p.producto_id, arr)
+    }
     return m
-  }, [minimos])
+  }, [pres])
 
   const ubicIds = useMemo(() => ubicacionesRelevantes(perfil?.nombre), [perfil])
 
-  type Alerta = { pres: Presentacion; prod: Producto; ubicacionId: number; stock: number; minimo: number; nivel: 'rojo' | 'amarillo' }
+  type Alerta = {
+    prod: Producto
+    pres: Presentacion | null // null cuando la alerta es a nivel producto (no-aceite)
+    ubicacionId: number
+    stock: number
+    minimo: number
+    nivel: 'rojo' | 'amarillo'
+  }
 
   const alertas: Alerta[] = useMemo(() => {
     const arr: Alerta[] = []
-    for (const p of pres) {
-      if (p.es_pack) continue
-      const pr = prodPorId.get(p.producto_id)
-      if (!pr) continue
+    const stockEn = (presId: number, ubicId: number) =>
+      stock.filter((s) => s.presentacion_id === presId && s.ubicacion_id === ubicId).reduce((a, b) => a + b.unidades, 0)
+
+    for (const pr of prod) {
+      const presProd = presPorProd.get(pr.id) ?? []
+      if (presProd.length === 0) continue
       for (const uid of ubicIds) {
-        // Override por ubicacion; si no, cae al minimo global (presentaciones.stock_minimo)
-        const min = minimoPorPresUbic.get(`${p.id}:${uid}`) ?? Number(p.stock_minimo) ?? 0
-        if (min <= 0) continue
-        const totalEnUbic = stock.filter((s) => s.presentacion_id === p.id && s.ubicacion_id === uid).reduce((a, b) => a + b.unidades, 0)
-        if (totalEnUbic >= Math.ceil(min * 1.3)) continue // por encima del umbral amarillo → no alerta
-        arr.push({
-          pres: p, prod: pr, ubicacionId: uid,
-          stock: totalEnUbic, minimo: min,
-          nivel: totalEnUbic < min ? 'rojo' : 'amarillo',
-        })
+        const regla = reglaMinimo(pr.categoria, uid)
+        if (regla.min <= 0) continue
+
+        if (regla.porProducto) {
+          // No-aceite: sumar todas las presentaciones del producto en esa ubicación
+          const total = presProd.reduce((a, p) => a + stockEn(p.id, uid), 0)
+          if (total >= Math.ceil(regla.min * 1.3)) continue
+          arr.push({
+            prod: pr, pres: null, ubicacionId: uid,
+            stock: total, minimo: regla.min,
+            nivel: total < regla.min ? 'rojo' : 'amarillo',
+          })
+        } else {
+          // Aceite: una alerta por presentación en esa ubicación
+          for (const p of presProd) {
+            const total = stockEn(p.id, uid)
+            if (total >= Math.ceil(regla.min * 1.3)) continue
+            arr.push({
+              prod: pr, pres: p, ubicacionId: uid,
+              stock: total, minimo: regla.min,
+              nivel: total < regla.min ? 'rojo' : 'amarillo',
+            })
+          }
+        }
       }
     }
-    // Ordenar por nivel (rojo primero) y producto
     return arr.sort((a, b) => {
       if (a.nivel !== b.nivel) return a.nivel === 'rojo' ? -1 : 1
-      return (a.prod.nombre + a.pres.nombre).localeCompare(b.prod.nombre + b.pres.nombre)
+      return (a.prod.nombre + (a.pres?.nombre ?? '')).localeCompare(b.prod.nombre + (b.pres?.nombre ?? ''))
     })
-  }, [pres, prod, stock, ubicIds, prodPorId, minimoPorPresUbic])
+  }, [prod, stock, ubicIds, presPorProd])
 
   const [expandido, setExpandido] = useState(false)
 
@@ -117,7 +141,7 @@ export function AlertasStockBajo() {
                 <span className={`inline-block w-2 h-2 rounded-full ${color.dot}`}></span>
                 <div className="flex-1 min-w-0">
                   <div className="text-xs text-oliva-900 truncate">
-                    <b>{a.prod.nombre}</b> · {a.pres.nombre}
+                    <b>{a.prod.nombre}</b>{a.pres ? ` · ${a.pres.nombre}` : ''}
                   </div>
                   <div className="flex items-center gap-2 mt-0.5">
                     <div className="flex-1 h-1 bg-oliva-100 rounded overflow-hidden">

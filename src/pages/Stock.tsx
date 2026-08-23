@@ -5,6 +5,7 @@ import { Dialog } from '../components/Dialog'
 import { num } from '../lib/format'
 import { colorProducto } from '../lib/colores'
 import { ubicacionesVisiblesPorSocio } from '../lib/permisos'
+import { reglaMinimo } from '../lib/minimos'
 
 interface Producto { id: number; nombre: string; categoria: string; granel: boolean }
 interface Presentacion {
@@ -441,6 +442,15 @@ function EnvasadoView({
     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
       {grupos.map(({ prod, presentaciones: pres, totalProducto }) => {
         const color = colorProducto(prod.nombre)
+        // Totales por ubicación para todo el producto (para alerta por-producto en no-aceites)
+        const totalProdPorUbic = new Map<number, number>()
+        for (const { porUbic } of pres) {
+          for (const [uid, n] of porUbic) totalProdPorUbic.set(uid, (totalProdPorUbic.get(uid) ?? 0) + n)
+        }
+        const productoBajo = ubicaciones.some((u) => {
+          const r = reglaMinimo(prod.categoria, u.id)
+          return r.porProducto && r.min > 0 && (totalProdPorUbic.get(u.id) ?? 0) < r.min
+        })
         return (
           <div key={prod.id} className={`rounded-xl border-2 ${color.card} overflow-hidden`}>
             {/* Header producto */}
@@ -448,19 +458,23 @@ function EnvasadoView({
               <div className="flex items-center gap-2 min-w-0">
                 <span className={`w-3 h-3 rounded-full ${color.dot} shrink-0`}></span>
                 <span className="font-semibold text-oliva-900 truncate">{prod.nombre}</span>
+                {productoBajo && <span className="text-[10px] rounded-full bg-red-100 text-red-800 px-1.5 py-[1px] uppercase tracking-wide">bajo</span>}
               </div>
               <span className="text-xs text-oliva-600 tabular-nums shrink-0">{totalProducto} u</span>
             </div>
             {/* Presentaciones */}
             <div className="divide-y divide-oliva-100/60">
               {pres.map(({ pres: p, porUbic, total }) => {
-                const bajo = total <= p.stock_minimo && p.stock_minimo > 0
+                const presBaja = ubicaciones.some((u) => {
+                  const r = reglaMinimo(prod.categoria, u.id)
+                  return !r.porProducto && r.min > 0 && (porUbic.get(u.id) ?? 0) < r.min
+                })
                 return (
                   <div key={p.id} className="px-3 py-2 bg-white/60">
                     <div className="flex items-center justify-between gap-2">
                       <div className="text-sm text-oliva-800 font-medium truncate">{p.nombre}</div>
                       <div className="flex items-center gap-2 shrink-0">
-                        {bajo && <span className="text-[10px] rounded-full bg-red-100 text-red-800 px-1.5 py-[1px] uppercase tracking-wide">bajo</span>}
+                        {presBaja && <span className="text-[10px] rounded-full bg-red-100 text-red-800 px-1.5 py-[1px] uppercase tracking-wide">bajo</span>}
                         <span className={`text-sm tabular-nums font-semibold ${total === 0 ? 'text-oliva-400' : 'text-oliva-900'}`}>{total}</span>
                         {puedeEditar && (
                           <button
@@ -478,11 +492,16 @@ function EnvasadoView({
                     <div className="flex flex-wrap gap-1 mt-1">
                       {ubicaciones.map((u) => {
                         const n = porUbic.get(u.id) ?? 0
+                        const r = reglaMinimo(prod.categoria, u.id)
+                        const chipBaja = !r.porProducto && r.min > 0 && n < r.min
+                        const cls = chipBaja
+                          ? 'bg-red-100 text-red-800'
+                          : n === 0 ? 'bg-oliva-100/60 text-oliva-400' : 'bg-oliva-100 text-oliva-800'
                         return (
                           <span
                             key={u.id}
-                            className={`text-[10px] px-1.5 py-[1px] rounded-full ${n === 0 ? 'bg-oliva-100/60 text-oliva-400' : 'bg-oliva-100 text-oliva-800'}`}
-                            title={u.nombre}
+                            className={`text-[10px] px-1.5 py-[1px] rounded-full ${cls}`}
+                            title={r.min > 0 ? `${u.nombre} · mín ${r.min}${r.porProducto ? ' (por producto)' : ''}` : u.nombre}
                           >
                             {u.nombre.slice(0, 3)} <span className="tabular-nums font-semibold">{n}</span>
                           </span>
