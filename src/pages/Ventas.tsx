@@ -372,7 +372,6 @@ function NuevaVentaDialog({
   const [productos, setProductos] = useState<Producto[]>([])
   const [presentaciones, setPresentaciones] = useState<Presentacion[]>([])
   const [stock, setStock] = useState<StockRow[]>([])
-  const [tanques, setTanques] = useState<Tanque[]>([])
   const [componentes, setComponentes] = useState<Componente[]>([])
   const [datosCargados, setDatosCargados] = useState(false)
 
@@ -420,16 +419,14 @@ function NuevaVentaDialog({
       supabase.from('productos').select('id,nombre,categoria'),
       supabase.from('presentaciones').select('id,producto_id,nombre,volumen_ml,precio_minorista,precio_mayorista,iva_pct,activo,es_pack').eq('activo', true),
       supabase.from('stock').select('id,tanque_id,presentacion_id,unidades,ubicacion_id').gt('unidades', 0),
-      supabase.from('tanques').select('*'),
       supabase.from('presentacion_componente').select('*'),
       ventaAEditar
         ? supabase.from('items_venta').select('*').eq('venta_id', ventaAEditar.id).order('id')
         : Promise.resolve({ data: [] as ItemVenta[] }),
-    ]).then(([p, pr, s, t, c, iv]) => {
+    ]).then(([p, pr, s, c, iv]) => {
       setProductos((p.data as Producto[]) ?? [])
       setPresentaciones((pr.data as Presentacion[]) ?? [])
       setStock((s.data as StockRow[]) ?? [])
-      setTanques((t.data as Tanque[]) ?? [])
       setComponentes((c.data as Componente[]) ?? [])
       if (ventaAEditar) {
         const itemsExist = ((iv.data as ItemVenta[] | null) ?? []).map((it) => ({
@@ -457,7 +454,6 @@ function NuevaVentaDialog({
   }, [clienteId])
   const presPorId = useMemo(() => new Map(presentaciones.map((p) => [p.id, p])), [presentaciones])
   const stockPorId = useMemo(() => new Map(stock.map((s) => [s.id, s])), [stock])
-  const tanquePorId = useMemo(() => new Map(tanques.map((t) => [t.id, t])), [tanques])
   const prodPorId = useMemo(() => new Map(productos.map((p) => [p.id, p])), [productos])
 
   // Al cambiar tipo cliente, re-defaultea precios de items que están en su precio de lista
