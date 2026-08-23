@@ -30,7 +30,7 @@ interface Venta {
   notas: string | null; creado_en: string
 }
 
-const CANALES = ['directa', 'feria', 'envio', 'whatsapp'] as const
+const CANALES = ['whatsapp', 'directa', 'feria'] as const
 const FORMAS_PAGO = ['efectivo', 'transferencia'] as const
 
 // ---------- Página ----------
@@ -486,7 +486,7 @@ function NuevaVentaDialog({
   // Al marcar envío por cadete: por default queda como pendiente de entrega y de cobro
   // (típicamente se entrega y cobra al día siguiente). Se puede corregir a mano igual.
   useEffect(() => {
-    if (envio) { setEntregado(false); setCobrado(false); setCanal('envio') }
+    if (envio) { setEntregado(false); setCobrado(false) }
   }, [envio])
 
   function actualizarItem(key: string, patch: Partial<Item>) {
@@ -734,6 +734,9 @@ function NuevaVentaDialog({
           <div>
             <label className="label">Canal</label>
             <select className="input" value={canal} onChange={(e) => setCanal(e.target.value)}>
+              {!CANALES.includes(canal as typeof CANALES[number]) && canal && (
+                <option value={canal}>{canal}</option>
+              )}
               {CANALES.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
@@ -1198,6 +1201,9 @@ function VentaDetalleDialog({
           <div>
             <label className="label">Canal</label>
             <select className="input" value={canal} onChange={(e) => setCanal(e.target.value)} disabled={!puedeEditar || anulada}>
+              {!CANALES.includes(canal as typeof CANALES[number]) && canal && (
+                <option value={canal}>{canal}</option>
+              )}
               {CANALES.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
