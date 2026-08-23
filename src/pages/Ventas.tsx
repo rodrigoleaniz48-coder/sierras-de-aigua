@@ -10,7 +10,7 @@ import { CADETE_MVD_WA, normalizarTelWA } from '../lib/config'
 import { guardarFlag, leerFlag } from '../lib/persistencia'
 
 // ---------- Tipos ----------
-interface Producto { id: number; nombre: string; categoria?: string }
+interface Producto { id: number; nombre: string }
 interface Presentacion {
   id: number; producto_id: number; nombre: string; volumen_ml: number | null
   precio_minorista: number; precio_mayorista: number; iva_pct: number; activo: boolean
@@ -18,6 +18,7 @@ interface Presentacion {
 }
 interface Componente { presentacion_pack_id: number; presentacion_componente_id: number; unidades: number }
 interface StockRow { id: number; tanque_id: number | null; presentacion_id: number; unidades: number; ubicacion_id: number }
+interface Tanque { id: number; nombre: string; producto_id: number | null; variedad_libre: string | null; campana: number | null }
 interface Ubicacion { id: number; nombre: string; activo: boolean }
 interface Venta {
   id: number; fecha: string; cliente_id: number | null; socio_id: string
@@ -301,6 +302,10 @@ interface Item {
   descuento_unitario: number
 }
 
+function nuevoItem(): Item {
+  return { key: crypto.randomUUID(), presentacion_id: null, stock_id: null, unidades: 1, precio_unitario: 0, descuento_unitario: 0 }
+}
+
 function ubicacionDefaultPorSocio(nombre: string | null | undefined): number {
   const n = (nombre ?? '').toLowerCase()
   if (n.includes('gonzalo')) return 2 // Maldonado
@@ -365,12 +370,12 @@ function NuevaVentaDialog({
   const [entregado, setEntregado] = useState(true)
   const [cobrado, setCobrado] = useState(true)
   const [notas, setNotas] = useState('')
-  const [items, setItems] = useState<Item[]>([])
-  const [buscaItem, setBuscaItem] = useState('')
+  const [items, setItems] = useState<Item[]>([nuevoItem()])
 
   const [productos, setProductos] = useState<Producto[]>([])
   const [presentaciones, setPresentaciones] = useState<Presentacion[]>([])
   const [stock, setStock] = useState<StockRow[]>([])
+  const [tanques, setTanques] = useState<Tanque[]>([])
   const [componentes, setComponentes] = useState<Componente[]>([])
   const [datosCargados, setDatosCargados] = useState(false)
 
@@ -401,31 +406,33 @@ function NuevaVentaDialog({
         setConFactura(b.conFactura); setEnvio(b.envio); setCostoEnvio(b.costoEnvio); setHorarioEntrega(b.horarioEntrega)
         setDireccionEnvio(b.direccionEnvio); setTelefonoEnvio(b.telefonoEnvio)
         setUbicacionId(b.ubicacionId); setEntregado(b.entregado); setCobrado(b.cobrado); setNotas(b.notas)
-        setItems(b.items && b.items.length > 0 ? b.items : [])
+        setItems(b.items && b.items.length > 0 ? b.items : [nuevoItem()])
       } else {
         setFecha(new Date().toISOString().slice(0, 10))
         setClienteId(''); setCanal('whatsapp'); setFormaPago('efectivo'); setConFactura(false)
         setEnvio(false); setCostoEnvio('190'); setHorarioEntrega('')
         setDireccionEnvio(''); setTelefonoEnvio('')
         setUbicacionId(String(ubicacionDefaultPorSocio(perfil?.nombre)))
-        setEntregado(false); setCobrado(false); setNotas(''); setItems([])
+        setEntregado(false); setCobrado(false); setNotas(''); setItems([nuevoItem()])
       }
     }
     setError(null)
 
     setDatosCargados(false)
     Promise.all([
-      supabase.from('productos').select('id,nombre,categoria'),
+      supabase.from('productos').select('id,nombre'),
       supabase.from('presentaciones').select('id,producto_id,nombre,volumen_ml,precio_minorista,precio_mayorista,iva_pct,activo,es_pack').eq('activo', true),
       supabase.from('stock').select('id,tanque_id,presentacion_id,unidades,ubicacion_id').gt('unidades', 0),
+      supabase.from('tanques').select('*'),
       supabase.from('presentacion_componente').select('*'),
       ventaAEditar
         ? supabase.from('items_venta').select('*').eq('venta_id', ventaAEditar.id).order('id')
         : Promise.resolve({ data: [] as ItemVenta[] }),
-    ]).then(([p, pr, s, c, iv]) => {
+    ]).then(([p, pr, s, t, c, iv]) => {
       setProductos((p.data as Producto[]) ?? [])
       setPresentaciones((pr.data as Presentacion[]) ?? [])
       setStock((s.data as StockRow[]) ?? [])
+      setTanques((t.data as Tanque[]) ?? [])
       setComponentes((c.data as Componente[]) ?? [])
       if (ventaAEditar) {
         const itemsExist = ((iv.data as ItemVenta[] | null) ?? []).map((it) => ({
@@ -436,7 +443,7 @@ function NuevaVentaDialog({
           precio_unitario: Number(it.precio_unitario),
           descuento_unitario: Number(it.descuento_unitario),
         } as Item))
-        setItems(itemsExist.length > 0 ? itemsExist : [])
+        setItems(itemsExist.length > 0 ? itemsExist : [nuevoItem()])
       }
       setDatosCargados(true)
     })
@@ -453,6 +460,7 @@ function NuevaVentaDialog({
   }, [clienteId])
   const presPorId = useMemo(() => new Map(presentaciones.map((p) => [p.id, p])), [presentaciones])
   const stockPorId = useMemo(() => new Map(stock.map((s) => [s.id, s])), [stock])
+  const tanquePorId = useMemo(() => new Map(tanques.map((t) => [t.id, t])), [tanques])
   const prodPorId = useMemo(() => new Map(productos.map((p) => [p.id, p])), [productos])
 
   // Al cambiar tipo cliente, re-defaultea precios de items que están en su precio de lista
@@ -481,43 +489,36 @@ function NuevaVentaDialog({
     if (envio) { setEntregado(false); setCobrado(false) }
   }, [envio])
 
-  // Agregar rápido una presentación como nuevo item (o sumar +1 si ya existe con misma pres+precio)
-  function agregarPresentacion(presId: number) {
-    const p = presPorId.get(presId)
-    if (!p) return
-    const precio = esMayorista && Number(p.precio_mayorista) ? Number(p.precio_mayorista) : Number(p.precio_minorista)
-    let stockElegido: { id: number } | undefined
-    if (!p.es_pack) {
-      const stocksPres = stock
-        .filter((s) => s.presentacion_id === presId && s.ubicacion_id === Number(ubicacionId))
-        .sort((a, b) => a.id - b.id)
-      stockElegido = stocksPres[0]
-    }
-    setItems((prev) => {
-      // Si ya está la misma presentación (mismo precio y sin descuento), sumo +1
-      const idx = prev.findIndex((x) => x.presentacion_id === presId && x.precio_unitario === precio && x.descuento_unitario === 0)
-      if (idx >= 0) {
-        const copy = [...prev]
-        copy[idx] = { ...copy[idx], unidades: copy[idx].unidades + 1 }
-        return copy
-      }
-      return [...prev, {
-        key: crypto.randomUUID(),
-        presentacion_id: presId,
-        stock_id: stockElegido?.id ?? null,
-        unidades: 1,
-        precio_unitario: precio,
-        descuento_unitario: 0,
-      }]
-    })
-    setBuscaItem('')
-  }
-
   function actualizarItem(key: string, patch: Partial<Item>) {
     setItems((prev) => prev.map((it) => (it.key === key ? { ...it, ...patch } : it)))
   }
   function borrarItem(key: string) {
-    setItems((prev) => prev.filter((it) => it.key !== key))
+    setItems((prev) => (prev.length === 1 ? prev : prev.filter((it) => it.key !== key)))
+  }
+  function elegirPresentacion(key: string, presId: number | null) {
+    if (!presId) return actualizarItem(key, { presentacion_id: null, stock_id: null, precio_unitario: 0 })
+    const p = presPorId.get(presId)
+    const precio = p ? (esMayorista && Number(p.precio_mayorista) ? Number(p.precio_mayorista) : Number(p.precio_minorista)) : 0
+    const esUltimoItem = items.length > 0 && items[items.length - 1].key === key
+    if (p?.es_pack) {
+      // Los packs no requieren stock_id: el trigger descuenta los componentes FIFO
+      actualizarItem(key, { presentacion_id: presId, stock_id: null, precio_unitario: precio })
+    } else {
+      // Auto-seleccionar stock FIFO SOLO de la ubicación elegida en la venta
+      const stocksPres = stock
+        .filter((s) => s.presentacion_id === presId && s.ubicacion_id === Number(ubicacionId))
+        .sort((a, b) => a.id - b.id)
+      const stockElegido = stocksPres[0]
+      actualizarItem(key, {
+        presentacion_id: presId,
+        stock_id: stockElegido?.id ?? null,
+        precio_unitario: precio,
+      })
+    }
+    // Si acabás de completar el último ítem, agregar una línea vacía nueva al final
+    if (esUltimoItem) {
+      setItems((prev) => [...prev, nuevoItem()])
+    }
   }
 
   // Cálculos
@@ -796,19 +797,100 @@ async function guardar(e: React.FormEvent) {
         </div>
 
         {/* Ítems */}
-        <ItemsPicker
-          presentaciones={presentaciones}
-          prodPorId={prodPorId}
-          stock={stock}
-          ubicacionId={Number(ubicacionId)}
-          buscaItem={buscaItem}
-          setBuscaItem={setBuscaItem}
-          agregarPresentacion={agregarPresentacion}
-          datosCargados={datosCargados}
-          filas={filas}
-          actualizarItem={actualizarItem}
-          borrarItem={borrarItem}
-        />
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-medium text-oliva-800">Ítems</div>
+            <button type="button" className="text-xs text-oliva-700 underline" onClick={() => setItems((p) => [...p, nuevoItem()])}>+ Agregar ítem</button>
+          </div>
+
+          {!datosCargados ? (
+            <div className="card p-4 text-sm text-oliva-700">Cargando catálogo…</div>
+          ) : (
+            <div className="space-y-3">
+              {filas.map((f) => {
+                return (
+                  <div key={f.it.key} className="rounded-xl border border-oliva-100 p-3 bg-oliva-50/60 space-y-3">
+                    <div>
+                      <label className="label">Presentación</label>
+                      <select
+                        className="input"
+                        value={f.it.presentacion_id ?? ''}
+                        onChange={(e) => elegirPresentacion(f.it.key, e.target.value ? Number(e.target.value) : null)}
+                        required
+                      >
+                        <option value="">— elegir —</option>
+                        {presentaciones.map((p) => {
+                          const prod = prodPorId.get(p.producto_id)
+                          if (prod?.categoria === 'envases_vacios') return null
+                          const stockEnUbic = p.es_pack ? 0 : stock
+                            .filter((s) => s.presentacion_id === p.id && s.ubicacion_id === Number(ubicacionId))
+                            .reduce((a, b) => a + b.unidades, 0)
+                          const hayStock = p.es_pack ? true : stockEnUbic > 0
+                          return (
+                            <option key={p.id} value={p.id} disabled={!hayStock}>
+                              {prod?.nombre} · {p.nombre}{p.es_pack ? ' · pack' : ''}{!hayStock ? ' · SIN STOCK AQUÍ' : ` · ${stockEnUbic} u`}
+                            </option>
+                          )
+                        })}
+                      </select>
+                      {f.it.presentacion_id && !f.p?.es_pack && !f.it.stock_id && (
+                        <p className="text-xs text-red-700 mt-1">Sin stock envasado en esta ubicación. Ir a Stock → Envasar o Ajuste envasado.</p>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
+                      <div>
+                        <label className="label">Unidades</label>
+                        <input
+                          className="input"
+                          type="number" min="1" step="1"
+                          value={f.it.unidades}
+                          onChange={(e) => actualizarItem(f.it.key, { unidades: Number(e.target.value) || 0 })}
+                          required
+                        />
+                        {f.it.stock_id && (
+                          <p className={`text-[11px] mt-1 ${f.it.unidades > f.disponible ? 'text-red-700' : 'text-oliva-600'}`}>
+                            disp: {f.disponible}
+                          </p>
+                        )}
+                      </div>
+                      <div>
+                        <label className="label">Precio u.</label>
+                        <input
+                          className="input tabular-nums"
+                          type="number" min="0" step="1"
+                          value={f.it.precio_unitario}
+                          onChange={(e) => actualizarItem(f.it.key, { precio_unitario: Number(e.target.value) || 0 })}
+                        />
+                      </div>
+                      <div>
+                        <label className="label">Desc. u.</label>
+                        <input
+                          className="input tabular-nums"
+                          type="number" min="0" step="1"
+                          value={f.it.descuento_unitario}
+                          onChange={(e) => actualizarItem(f.it.key, { descuento_unitario: Number(e.target.value) || 0 })}
+                        />
+                      </div>
+                      <div className="hidden sm:block">
+                        <label className="label">Subtotal</label>
+                        <div className="input tabular-nums text-right">{money(f.subtotal)}</div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between sm:hidden">
+                      <div className="text-sm">Subtotal: <b className="tabular-nums">{money(f.subtotal)}</b></div>
+                      <button type="button" className="text-xs text-red-700 underline" onClick={() => borrarItem(f.it.key)}>Quitar</button>
+                    </div>
+                    <div className="hidden sm:flex justify-end">
+                      <button type="button" className="text-xs text-red-700 underline" onClick={() => borrarItem(f.it.key)}>Quitar ítem</button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
 
         {/* Totales */}
         <div className="card p-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
@@ -919,7 +1001,7 @@ function VentaDetalleDialog({
     Promise.all([
       supabase.from('items_venta').select('*').eq('venta_id', venta.id).order('id'),
       supabase.from('presentaciones').select('id,nombre,producto_id,es_pack'),
-      supabase.from('productos').select('id,nombre,categoria'),
+      supabase.from('productos').select('id,nombre'),
     ]).then(([i, p, pr]) => {
       setItems((i.data as ItemVenta[]) ?? [])
       setPresMap(new Map(((p.data as PresentacionInfo[]) ?? []).map((x) => [x.id, x])))
@@ -1294,7 +1376,7 @@ function ListaCadeteDialog({
     Promise.all([
       supabase.from('items_venta').select('*').in('venta_id', ids),
       supabase.from('presentaciones').select('id,nombre,producto_id,es_pack'),
-      supabase.from('productos').select('id,nombre,categoria'),
+      supabase.from('productos').select('id,nombre'),
     ]).then(([i, p, pr]) => {
       setItems((i.data as ItemVenta[]) ?? [])
       setPresMap(new Map(((p.data as PresentacionInfo[]) ?? []).map((x) => [x.id, x])))
@@ -1446,200 +1528,5 @@ function ListaCadeteDialog({
         )}
       </div>
     </Dialog>
-  )
-}
-
-// ============================================================
-// Selector rápido de ítems: chips de aceites + buscador + filas compactas
-// ============================================================
-function ordenProductoVenta(nombre: string, categoria?: string): number {
-  if (categoria !== 'aceite' && categoria !== undefined) return 100
-  const n = nombre.toLowerCase()
-  if (n.includes('suave')) return 1
-  if (n.includes('intenso')) return 2
-  if (n.includes('picual')) return 3
-  if (n.includes('premiado')) return 4
-  if (n.includes('sin filtrar')) return 5
-  return 50
-}
-
-interface FilaCalc {
-  it: Item
-  p: Presentacion | undefined
-  st: StockRow | undefined
-  disponible: number
-  subtotal: number
-  ivaLinea: number
-}
-
-function ItemsPicker({
-  presentaciones, prodPorId, stock, ubicacionId,
-  buscaItem, setBuscaItem, agregarPresentacion,
-  datosCargados, filas, actualizarItem, borrarItem,
-}: {
-  presentaciones: Presentacion[]
-  prodPorId: Map<number, Producto>
-  stock: StockRow[]
-  ubicacionId: number
-  buscaItem: string
-  setBuscaItem: (s: string) => void
-  agregarPresentacion: (presId: number) => void
-  datosCargados: boolean
-  filas: FilaCalc[]
-  actualizarItem: (key: string, patch: Partial<Item>) => void
-  borrarItem: (key: string) => void
-}) {
-  const stockDe = (presId: number) =>
-    stock.filter((s) => s.presentacion_id === presId && s.ubicacion_id === ubicacionId).reduce((a, b) => a + b.unidades, 0)
-
-  // Presentaciones vendibles: no envases_vacios, activas, y con stock (o pack)
-  const vendibles = presentaciones.filter((p) => {
-    const prod = prodPorId.get(p.producto_id)
-    if (!prod) return false
-    if (prod.categoria === 'envases_vacios') return false
-    if (p.es_pack) return true
-    return stockDe(p.id) > 0
-  })
-
-  // Chips rápidos: solo aceites, ordenados por regla, hasta 12
-  const chips = [...vendibles]
-    .filter((p) => prodPorId.get(p.producto_id)?.categoria === 'aceite' && !p.es_pack)
-    .sort((a, b) => {
-      const pa = prodPorId.get(a.producto_id)!
-      const pb = prodPorId.get(b.producto_id)!
-      const oa = ordenProductoVenta(pa.nombre, pa.categoria)
-      const ob = ordenProductoVenta(pb.nombre, pb.categoria)
-      if (oa !== ob) return oa - ob
-      return (a.volumen_ml ?? 0) - (b.volumen_ml ?? 0)
-    })
-    .slice(0, 12)
-
-  // Sugerencias del buscador
-  const q = buscaItem.trim().toLowerCase()
-  const sugerencias = q
-    ? vendibles
-        .filter((p) => {
-          const prod = prodPorId.get(p.producto_id)!
-          return (`${prod.nombre} ${p.nombre}`).toLowerCase().includes(q)
-        })
-        .slice(0, 8)
-    : []
-
-  return (
-    <div className="space-y-3">
-      <div className="text-sm font-medium text-oliva-800">Ítems</div>
-
-      {!datosCargados ? (
-        <div className="card p-4 text-sm text-oliva-700">Cargando catálogo…</div>
-      ) : (
-        <>
-          {/* Chips rápidos */}
-          {chips.length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
-              {chips.map((p) => {
-                const prod = prodPorId.get(p.producto_id)!
-                const disp = stockDe(p.id)
-                return (
-                  <button
-                    key={p.id}
-                    type="button"
-                    className="text-xs px-2 py-1.5 rounded-full bg-oliva-100 hover:bg-oliva-200 text-oliva-800"
-                    onClick={() => agregarPresentacion(p.id)}
-                    title={`${disp} disponibles`}
-                  >
-                    + {prod.nombre.replace(/^Blend /, '')} · {p.nombre}
-                  </button>
-                )
-              })}
-            </div>
-          )}
-
-          {/* Buscador con sugerencias */}
-          <div className="relative">
-            <input
-              className="input"
-              placeholder="Buscar producto (miel, jabón, aceituna…) o escribir presentación"
-              value={buscaItem}
-              onChange={(e) => setBuscaItem(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && sugerencias[0]) {
-                  e.preventDefault()
-                  agregarPresentacion(sugerencias[0].id)
-                }
-              }}
-            />
-            {sugerencias.length > 0 && (
-              <div className="absolute left-0 right-0 top-full mt-1 z-20 bg-white border border-oliva-200 rounded-md shadow-lg max-h-64 overflow-y-auto">
-                {sugerencias.map((p) => {
-                  const prod = prodPorId.get(p.producto_id)!
-                  const disp = p.es_pack ? '—' : `${stockDe(p.id)} u`
-                  return (
-                    <button
-                      key={p.id}
-                      type="button"
-                      className="w-full text-left px-3 py-2 text-sm hover:bg-oliva-50 flex justify-between gap-2"
-                      onClick={() => agregarPresentacion(p.id)}
-                    >
-                      <span className="text-oliva-900"><b>{prod.nombre}</b> · {p.nombre}{p.es_pack ? ' · pack' : ''}</span>
-                      <span className="text-xs text-oliva-500 tabular-nums shrink-0">{disp}</span>
-                    </button>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* Filas compactas de items agregados */}
-          {filas.length === 0 ? (
-            <div className="text-xs text-oliva-600 italic">Todavía no agregaste productos. Tocá un chip o buscá arriba.</div>
-          ) : (
-            <div className="rounded-xl border border-oliva-100 overflow-hidden">
-              <div className="hidden sm:grid grid-cols-[1fr_110px_120px_100px_36px] gap-2 px-3 py-1.5 text-[11px] uppercase tracking-wide text-oliva-600 bg-oliva-50 border-b border-oliva-100">
-                <div>Producto</div>
-                <div className="text-center">Uds</div>
-                <div className="text-right">Precio u.</div>
-                <div className="text-right">Subtotal</div>
-                <div></div>
-              </div>
-              {filas.map((f) => {
-                const prod = f.p ? prodPorId.get(f.p.producto_id) : undefined
-                const nombre = f.p && prod ? `${prod.nombre} · ${f.p.nombre}${f.p.es_pack ? ' · pack' : ''}` : '—'
-                return (
-                  <div key={f.it.key} className="grid grid-cols-[1fr_110px_120px_100px_36px] gap-2 px-3 py-2 items-center border-b border-oliva-100/60 last:border-0 text-sm">
-                    <div className="min-w-0">
-                      <div className="text-oliva-900 truncate">{nombre}</div>
-                      {f.it.stock_id && f.it.unidades > f.disponible && (
-                        <div className="text-[11px] text-red-700">supera stock ({f.disponible} disp)</div>
-                      )}
-                      {f.p && !f.p.es_pack && !f.it.stock_id && (
-                        <div className="text-[11px] text-red-700">sin stock en esta ubicación</div>
-                      )}
-                    </div>
-                    <div className="flex items-center justify-center gap-1">
-                      <button type="button" className="w-7 h-7 rounded-md border border-oliva-200 hover:bg-oliva-100 text-oliva-800" onClick={() => actualizarItem(f.it.key, { unidades: Math.max(1, f.it.unidades - 1) })}>−</button>
-                      <input
-                        className="input w-12 text-center tabular-nums px-1"
-                        type="number" min="1" step="1"
-                        value={f.it.unidades}
-                        onChange={(e) => actualizarItem(f.it.key, { unidades: Number(e.target.value) || 0 })}
-                      />
-                      <button type="button" className="w-7 h-7 rounded-md border border-oliva-200 hover:bg-oliva-100 text-oliva-800" onClick={() => actualizarItem(f.it.key, { unidades: f.it.unidades + 1 })}>+</button>
-                    </div>
-                    <input
-                      className="input tabular-nums text-right"
-                      type="number" min="0" step="1"
-                      value={f.it.precio_unitario}
-                      onChange={(e) => actualizarItem(f.it.key, { precio_unitario: Number(e.target.value) || 0 })}
-                    />
-                    <div className="text-right tabular-nums text-oliva-900 font-medium">{money(f.subtotal)}</div>
-                    <button type="button" className="text-oliva-500 hover:text-red-700" title="Quitar" onClick={() => borrarItem(f.it.key)}>🗑</button>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </>
-      )}
-    </div>
   )
 }
