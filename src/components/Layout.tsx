@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../lib/auth'
 import type { Rol } from '../lib/types'
 import { rangoSemanal, reporteVisto } from '../lib/reporte'
+import { CambiarPasswordDialog } from './CambiarPasswordDialog'
 
 interface NavItem {
   to: string
@@ -32,6 +33,7 @@ export function Layout() {
     return rangoSemanal(s).semanaISO
   }, [])
   const [reporteNuevo, setReporteNuevo] = useState(() => !reporteVisto(semanaISOPasada))
+  const [cambiarPass, setCambiarPass] = useState(false)
   useEffect(() => {
     // Recalcular al cambiar de ruta (por si el user marcó el reporte como visto)
     setReporteNuevo(!reporteVisto(semanaISOPasada))
@@ -51,7 +53,10 @@ export function Layout() {
           </svg>
         </button>
         <img src={import.meta.env.BASE_URL + 'logo.webp'} alt="Sierras de Aiguá" className="h-16 w-auto" />
-        <button className="text-xs text-oliva-700 underline" onClick={signOut}>Salir</button>
+        <div className="flex items-center gap-3">
+          <button className="text-xs text-oliva-700 underline" onClick={() => setCambiarPass(true)}>Contraseña</button>
+          <button className="text-xs text-oliva-700 underline" onClick={signOut}>Salir</button>
+        </div>
       </header>
 
       {/* Sidebar */}
@@ -88,9 +93,17 @@ export function Layout() {
         <div className="hidden lg:block p-4 border-t border-oliva-100 mt-4">
           <div className="text-xs text-oliva-700">{perfil?.nombre}</div>
           <div className="text-[11px] text-oliva-500 uppercase tracking-wide">{perfil?.rol}</div>
-          <button className="mt-2 text-xs text-oliva-800 underline" onClick={signOut}>Cerrar sesión</button>
+          <div className="mt-2 flex flex-col gap-1">
+            <button className="text-left text-xs text-oliva-800 underline" onClick={() => setCambiarPass(true)}>
+              Cambiar contraseña
+            </button>
+            <button className="text-left text-xs text-oliva-800 underline" onClick={signOut}>
+              Cerrar sesión
+            </button>
+          </div>
         </div>
       </aside>
+      <CambiarPasswordDialog abierto={cambiarPass} onClose={() => setCambiarPass(false)} />
 
       {/* Contenido */}
       <main className="flex-1 p-4 lg:p-8 bg-oliva-50">
