@@ -13,7 +13,7 @@ export interface ReglaMinimo {
 }
 
 export function reglaMinimo(categoria: string, ubicacionId: number): ReglaMinimo {
-  if (categoria === 'envases_vacios') return { min: 0 }
+  if (categoria === 'envases_vacios' || categoria === 'servicio') return { min: 0 }
   const esAceite = categoria === 'aceite'
 
   if (ubicacionId === 2) return { min: 6 } // Maldonado

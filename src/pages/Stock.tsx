@@ -168,7 +168,7 @@ export function Stock() {
 
       {!cargando && tab === 'envasado' && (
         <EnvasadoView
-          productos={productos.filter((p) => p.categoria !== 'envases_vacios')}
+          productos={productos.filter((p) => p.categoria !== 'envases_vacios' && p.categoria !== 'servicio')}
           presentaciones={presentaciones.filter((p) => !p.es_pack)}
           stock={stock}
           ubicaciones={ubicaciones}
