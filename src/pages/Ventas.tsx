@@ -535,17 +535,7 @@ function NuevaVentaDialog({
   const cEnvio = envio ? (Number(costoEnvio) || 0) : 0
   const total = subtotal + iva + cEnvio
 
-  function stocksParaPresentacion(presId: number) {
-    return stock
-      .filter((s) => s.presentacion_id === presId && s.ubicacion_id === Number(ubicacionId))
-      .sort((a, b) => a.id - b.id)
-      .map((s) => {
-        const tanque = s.tanque_id ? tanquePorId.get(s.tanque_id) : null
-        return { s, tanque, prod: tanque?.producto_id ? prodPorId.get(tanque.producto_id) : null }
-      })
-  }
-
-  async function guardar(e: React.FormEvent) {
+async function guardar(e: React.FormEvent) {
     e.preventDefault()
 
     // Ignoramos ítems vacíos (líneas sin presentación que quedan al final por auto-add)
@@ -818,66 +808,34 @@ function NuevaVentaDialog({
           ) : (
             <div className="space-y-3">
               {filas.map((f) => {
-                const opcionesStock = f.it.presentacion_id ? stocksParaPresentacion(f.it.presentacion_id) : []
                 return (
                   <div key={f.it.key} className="rounded-xl border border-oliva-100 p-3 bg-oliva-50/60 space-y-3">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="label">Presentación</label>
-                        <select
-                          className="input"
-                          value={f.it.presentacion_id ?? ''}
-                          onChange={(e) => elegirPresentacion(f.it.key, e.target.value ? Number(e.target.value) : null)}
-                          required
-                        >
-                          <option value="">— elegir —</option>
-                          {presentaciones.map((p) => {
-                            const prod = prodPorId.get(p.producto_id)
-                            const stockEnUbic = p.es_pack ? 0 : stock
-                              .filter((s) => s.presentacion_id === p.id && s.ubicacion_id === Number(ubicacionId))
-                              .reduce((a, b) => a + b.unidades, 0)
-                            const hayStock = p.es_pack ? true : stockEnUbic > 0
-                            return (
-                              <option key={p.id} value={p.id} disabled={!hayStock}>
-                                {prod?.nombre} · {p.nombre}{p.es_pack ? ' · pack' : ''}{!hayStock ? ' · SIN STOCK AQUÍ' : ` · ${stockEnUbic} u`}
-                              </option>
-                            )
-                          })}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="label">Origen del stock</label>
-                        {f.p?.es_pack ? (
-                          <div className="input text-xs text-oliva-600 italic">
-                            pack — se descuenta 1 unidad de cada componente 250 ml (FIFO)
-                          </div>
-                        ) : (
-                          <>
-                            <select
-                              className="input"
-                              value={f.it.stock_id ?? ''}
-                              onChange={(e) => actualizarItem(f.it.key, { stock_id: e.target.value ? Number(e.target.value) : null })}
-                              disabled={!f.it.presentacion_id}
-                              required
-                            >
-                              <option value="">— elegir origen —</option>
-                              {opcionesStock.map(({ s, tanque }) => {
-                                const origen = tanque
-                                  ? `${tanque.nombre}${tanque.campana ? ` · ${tanque.campana}` : ''}`
-                                  : 'directo (sin tanque)'
-                                return (
-                                  <option key={s.id} value={s.id}>
-                                    {origen} · {s.unidades} u
-                                  </option>
-                                )
-                              })}
-                            </select>
-                            {f.it.presentacion_id && opcionesStock.length === 0 && (
-                              <p className="text-xs text-red-700 mt-1">Sin stock envasado. Ir a Stock → Envasar o Ajuste envasado.</p>
-                            )}
-                          </>
-                        )}
-                      </div>
+                    <div>
+                      <label className="label">Presentación</label>
+                      <select
+                        className="input"
+                        value={f.it.presentacion_id ?? ''}
+                        onChange={(e) => elegirPresentacion(f.it.key, e.target.value ? Number(e.target.value) : null)}
+                        required
+                      >
+                        <option value="">— elegir —</option>
+                        {presentaciones.map((p) => {
+                          const prod = prodPorId.get(p.producto_id)
+                          if (prod?.categoria === 'envases_vacios') return null
+                          const stockEnUbic = p.es_pack ? 0 : stock
+                            .filter((s) => s.presentacion_id === p.id && s.ubicacion_id === Number(ubicacionId))
+                            .reduce((a, b) => a + b.unidades, 0)
+                          const hayStock = p.es_pack ? true : stockEnUbic > 0
+                          return (
+                            <option key={p.id} value={p.id} disabled={!hayStock}>
+                              {prod?.nombre} · {p.nombre}{p.es_pack ? ' · pack' : ''}{!hayStock ? ' · SIN STOCK AQUÍ' : ` · ${stockEnUbic} u`}
+                            </option>
+                          )
+                        })}
+                      </select>
+                      {f.it.presentacion_id && !f.p?.es_pack && !f.it.stock_id && (
+                        <p className="text-xs text-red-700 mt-1">Sin stock envasado en esta ubicación. Ir a Stock → Envasar o Ajuste envasado.</p>
+                      )}
                     </div>
 
                     <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
