@@ -37,6 +37,7 @@ type Tab = 'tanques' | 'envasado' | 'envases' | 'movimientos'
 export function Stock() {
   const { perfil } = useAuth()
   const puedeEscribir = !!perfil?.puede_modificar_stock
+  const puedeTrasladar = puedeEscribir || !!perfil?.puede_trasladar_stock
   const ubicIdsVisibles = ubicacionesVisiblesPorSocio(perfil?.nombre)
 
   const [tab, setTab] = useState<Tab>('tanques')
@@ -116,14 +117,14 @@ export function Stock() {
             Tanques de granel y stock envasado. Cada venta descuenta unidades automáticamente.
           </p>
         </div>
-        {puedeEscribir && (
+        {(puedeEscribir || puedeTrasladar) && (
           <div className="flex gap-2 flex-wrap">
-            <button className="btn-secondary" onClick={() => setCargarCosecha(true)}>+ Cargar cosecha</button>
-            <button className="btn-secondary" onClick={() => setTrasegar(true)}>Trasegar / blend</button>
-            <button className="btn-secondary" onClick={() => setMermaMuestra(true)}>Merma / muestra</button>
-            <button className="btn-secondary" onClick={() => setTrasladar(true)}>Trasladar</button>
-            <button className="btn-secondary" onClick={() => setAjusteEnv(true)}>Ajuste envasado</button>
-            <button className="btn-primary" onClick={() => setEnvasar(true)}>Envasar</button>
+            {puedeEscribir && <button className="btn-secondary" onClick={() => setCargarCosecha(true)}>+ Cargar cosecha</button>}
+            {puedeEscribir && <button className="btn-secondary" onClick={() => setTrasegar(true)}>Trasegar / blend</button>}
+            {puedeEscribir && <button className="btn-secondary" onClick={() => setMermaMuestra(true)}>Merma / muestra</button>}
+            {puedeTrasladar && <button className="btn-secondary" onClick={() => setTrasladar(true)}>Trasladar</button>}
+            {puedeEscribir && <button className="btn-secondary" onClick={() => setAjusteEnv(true)}>Ajuste envasado</button>}
+            {puedeEscribir && <button className="btn-primary" onClick={() => setEnvasar(true)}>Envasar</button>}
           </div>
         )}
       </div>

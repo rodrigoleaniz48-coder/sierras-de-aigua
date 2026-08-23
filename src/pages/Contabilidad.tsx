@@ -14,6 +14,7 @@ interface Cuenta {
   moneda: 'UYU' | 'USD'
   numero_cuenta: string | null
   activo: boolean
+  tipo: 'cta_cte' | 'caja_ahorro' | null
 }
 interface MovBancario {
   id: number
@@ -300,7 +301,11 @@ function Conciliacion() {
         <div className="sm:col-span-2">
           <label className="label">Cuenta</label>
           <select className="input" value={cuentaId} onChange={(e) => setCuentaId(e.target.value)}>
-            {cuentas.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+            {cuentas.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.nombre}{c.tipo ? ` · ${c.tipo === 'cta_cte' ? 'cta cte' : 'caja ahorro'}` : ''}
+              </option>
+            ))}
           </select>
         </div>
         <div>
