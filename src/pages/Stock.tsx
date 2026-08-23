@@ -4,6 +4,7 @@ import { useAuth } from '../lib/auth'
 import { Dialog } from '../components/Dialog'
 import { num } from '../lib/format'
 import { colorProducto } from '../lib/colores'
+import { ubicacionesVisiblesPorSocio } from '../lib/permisos'
 
 interface Producto { id: number; nombre: string; categoria: string; granel: boolean }
 interface Presentacion {
@@ -36,6 +37,7 @@ type Tab = 'tanques' | 'envasado' | 'envases' | 'movimientos'
 export function Stock() {
   const { perfil } = useAuth()
   const puedeEscribir = !!perfil?.puede_modificar_stock
+  const ubicIdsVisibles = ubicacionesVisiblesPorSocio(perfil?.nombre)
 
   const [tab, setTab] = useState<Tab>('tanques')
   const [productos, setProductos] = useState<Producto[]>([])
@@ -74,10 +76,12 @@ export function Stock() {
     setProductos((p.data as Producto[]) ?? [])
     setPresentaciones((pr.data as Presentacion[]) ?? [])
     setTanques((t.data as Tanque[]) ?? [])
-    setStock((s.data as StockRow[]) ?? [])
+    setStock(((s.data as StockRow[]) ?? []).filter((x) => ubicIdsVisibles.includes(x.ubicacion_id)))
     setMovsStock((mS.data as MovStock[]) ?? [])
     setMovsGranel((mG.data as MovGranel[]) ?? [])
-    setUbicaciones((u.data as Ubicacion[]) ?? [])
+    // Filtrar ubicaciones que el socio puede ver (Gonzalo no ve Mvd)
+    const allUbic = (u.data as Ubicacion[]) ?? []
+    setUbicaciones(allUbic.filter((x) => ubicIdsVisibles.includes(x.id)))
     setTraslados((tr.data as Traslado[]) ?? [])
     setItemsTraslado((it.data as ItemTraslado[]) ?? [])
     setCargando(false)
