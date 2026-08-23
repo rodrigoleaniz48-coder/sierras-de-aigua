@@ -845,7 +845,21 @@ async function guardar(e: React.FormEvent) {
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <div className="text-sm font-medium text-oliva-800">Ítems</div>
-            <button type="button" className="text-xs text-oliva-700 underline" onClick={() => setItems((p) => [...p, nuevoItem()])}>+ Agregar ítem</button>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                className="text-xs text-oliva-700 underline"
+                onClick={() => {
+                  const cot = Number(cotizacionUsd) || 0
+                  setItems((prev) => prev.map((it) => {
+                    if (it.moneda === 'USD') return it
+                    const usd = cot > 0 ? Number(it.precio_unitario) / cot : 0
+                    return { ...it, moneda: 'USD', precio_usd: Number(usd.toFixed(2)), precio_unitario: usd * cot }
+                  }))
+                }}
+              >Cobrar en U$S</button>
+              <button type="button" className="text-xs text-oliva-700 underline" onClick={() => setItems((p) => [...p, nuevoItem()])}>+ Agregar ítem</button>
+            </div>
           </div>
 
           {!datosCargados ? (
@@ -904,7 +918,35 @@ async function guardar(e: React.FormEvent) {
                         )}
                       </div>
                       <div>
-                        <label className="label">Precio u. {f.it.moneda === 'USD' ? '(USD)' : ''}</label>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="label !mb-0">Precio u.</label>
+                          <div className="flex items-center gap-0.5 text-[10px] font-bold uppercase tracking-wide">
+                            <button
+                              type="button"
+                              className={`px-1.5 py-0.5 rounded ${f.it.moneda === 'UYU' ? 'bg-oliva-800 text-oliva-50' : 'text-oliva-500 hover:bg-oliva-100'}`}
+                              onClick={() => {
+                                const cot = Number(cotizacionUsd) || 0
+                                if (f.it.moneda === 'USD') {
+                                  // USD → UYU: mantengo precio en pesos ya calculado
+                                  actualizarItem(f.it.key, { moneda: 'UYU', precio_usd: 0 })
+                                }
+                                void cot
+                              }}
+                            >$</button>
+                            <button
+                              type="button"
+                              className={`px-1.5 py-0.5 rounded ${f.it.moneda === 'USD' ? 'bg-oliva-800 text-oliva-50' : 'text-oliva-500 hover:bg-oliva-100'}`}
+                              onClick={() => {
+                                const cot = Number(cotizacionUsd) || 0
+                                if (f.it.moneda === 'UYU') {
+                                  // UYU → USD: convierto precio pesos → USD si hay cotización
+                                  const usd = cot > 0 ? Number(f.it.precio_unitario) / cot : 0
+                                  actualizarItem(f.it.key, { moneda: 'USD', precio_usd: Number(usd.toFixed(2)), precio_unitario: usd * cot })
+                                }
+                              }}
+                            >U$S</button>
+                          </div>
+                        </div>
                         {f.it.moneda === 'USD' ? (
                           <input
                             className="input tabular-nums"
