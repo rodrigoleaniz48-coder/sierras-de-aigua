@@ -49,7 +49,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signIn: AuthState['signIn'] = async (email, password) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password })
-    return { error: error?.message ?? null }
+    if (!error) return { error: null }
+    // Traducir errores comunes al español + detalle útil para debug
+    const msg = error.message || ''
+    if (/invalid login/i.test(msg) || /invalid credentials/i.test(msg)) {
+      return { error: 'Email o contraseña incorrectos. Verificá que no haya espacios ni mayúsculas de más.' }
+    }
+    if (/email not confirmed/i.test(msg)) {
+      return { error: 'Este usuario no está confirmado. Contactá a Rodrigo.' }
+    }
+    if (/network|fetch|failed to fetch/i.test(msg)) {
+      return { error: 'Sin conexión a la base. Chequeá el internet y volvé a intentar.' }
+    }
+    console.error('[signIn] error:', error)
+    return { error: msg || `Error del servidor (${error.status ?? '?'}). Abrí la consola del navegador para más detalle.` }
   }
 
   const signOut = async () => {
