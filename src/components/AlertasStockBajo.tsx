@@ -57,11 +57,10 @@ export function AlertasStockBajo() {
 
   type Alerta = {
     prod: Producto
-    pres: Presentacion | null // null cuando la alerta es a nivel producto (no-aceite)
+    pres: Presentacion | null
     ubicacionId: number
     stock: number
     minimo: number
-    nivel: 'rojo' | 'amarillo'
   }
 
   const alertas: Alerta[] = useMemo(() => {
@@ -77,19 +76,15 @@ export function AlertasStockBajo() {
         if (regla.min <= 0) continue
         for (const p of presProd) {
           const total = stockEn(p.id, uid)
-          if (total >= Math.ceil(regla.min * 1.3)) continue
+          if (total >= regla.min) continue // sólo alertar cuando está estrictamente por debajo
           arr.push({
             prod: pr, pres: p, ubicacionId: uid,
             stock: total, minimo: regla.min,
-            nivel: total < regla.min ? 'rojo' : 'amarillo',
           })
         }
       }
     }
-    return arr.sort((a, b) => {
-      if (a.nivel !== b.nivel) return a.nivel === 'rojo' ? -1 : 1
-      return (a.prod.nombre + (a.pres?.nombre ?? '')).localeCompare(b.prod.nombre + (b.pres?.nombre ?? ''))
-    })
+    return arr.sort((a, b) => (a.prod.nombre + (a.pres?.nombre ?? '')).localeCompare(b.prod.nombre + (b.pres?.nombre ?? '')))
   }, [prod, stock, ubicIds, presPorProd])
 
   const [expandido, setExpandido] = useState(false)
@@ -97,11 +92,8 @@ export function AlertasStockBajo() {
   if (cargando) return null
   if (alertas.length === 0) return null
 
-  const rojas = alertas.filter((a) => a.nivel === 'rojo').length
-  const amar = alertas.filter((a) => a.nivel === 'amarillo').length
-
   return (
-    <div className={`rounded-lg border ${rojas > 0 ? 'border-red-300 bg-red-50/50' : 'border-aceite-500/40 bg-aceite-500/5'}`}>
+    <div className="rounded-lg border border-red-300 bg-red-50/50">
       <button
         type="button"
         className="w-full flex items-center gap-2 px-3 py-2 text-left"
@@ -110,9 +102,7 @@ export function AlertasStockBajo() {
         <span className="text-sm">⚠️</span>
         <span className="text-sm text-oliva-900 flex-1">
           <b>Stock bajo:</b>{' '}
-          {rojas > 0 && <span className="text-red-700">{rojas} bajo mín.</span>}
-          {rojas > 0 && amar > 0 && ' · '}
-          {amar > 0 && <span className="text-aceite-600">{amar} cerca</span>}
+          <span className="text-red-700">{alertas.length} bajo mín.</span>
         </span>
         <span className="text-xs text-oliva-600">{expandido ? '▲' : '▼'}</span>
       </button>
@@ -120,7 +110,7 @@ export function AlertasStockBajo() {
         <div className="space-y-1 px-3 pb-3 max-h-72 overflow-y-auto border-t border-oliva-100/70">
           {alertas.map((a, i) => {
             const color = colorProducto(a.prod.nombre)
-            const bar = a.nivel === 'rojo' ? 'bg-red-600' : 'bg-aceite-500'
+            const bar = 'bg-red-600'
             const pct = a.minimo > 0 ? Math.min(100, (a.stock / a.minimo) * 100) : 0
             return (
               <div key={i} className="flex items-center gap-2 py-1 border-b border-oliva-100/60 last:border-0">
