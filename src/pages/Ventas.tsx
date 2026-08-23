@@ -95,7 +95,10 @@ export function Ventas() {
     })
   }, [ventas, filtroSocio, filtroDesde, filtroHasta, soloEnvio])
 
-  const totalPeriodo = useMemo(() => filtradas.reduce((s, v) => s + Number(v.total ?? 0), 0), [filtradas])
+  const totalPeriodo = useMemo(
+    () => filtradas.reduce((s, v) => (v.estado === 'cancelado' ? s : s + Number(v.total ?? 0)), 0),
+    [filtradas],
+  )
 
   // Ventas pendientes de entrega o cobro (siempre visibles arriba, sin filtros)
   const pendientes = useMemo(
