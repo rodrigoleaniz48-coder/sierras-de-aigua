@@ -31,7 +31,7 @@ interface Traslado {
 }
 interface ItemTraslado { id: number; traslado_id: number; presentacion_id: number; unidades: number }
 
-type Tab = 'tanques' | 'envasado' | 'movimientos'
+type Tab = 'tanques' | 'envasado' | 'envases' | 'movimientos'
 
 export function Stock() {
   const { perfil } = useAuth()
@@ -141,7 +141,7 @@ export function Stock() {
       </div>
 
       <div className="flex gap-1 border-b border-oliva-100 overflow-x-auto">
-        {(['tanques', 'envasado', 'movimientos'] as Tab[]).map((t) => (
+        {(['tanques', 'envasado', 'envases', 'movimientos'] as Tab[]).map((t) => (
           <button
             key={t}
             className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition ${
@@ -149,7 +149,7 @@ export function Stock() {
             }`}
             onClick={() => setTab(t)}
           >
-            {t === 'tanques' ? 'Tanques (granel)' : t === 'envasado' ? 'Stock envasado' : 'Movimientos'}
+            {t === 'tanques' ? 'Tanques (granel)' : t === 'envasado' ? 'Stock envasado' : t === 'envases' ? 'Envases vacíos' : 'Movimientos'}
           </button>
         ))}
       </div>
@@ -162,8 +162,19 @@ export function Stock() {
 
       {!cargando && tab === 'envasado' && (
         <EnvasadoView
-          productos={productos}
+          productos={productos.filter((p) => p.categoria !== 'envases_vacios')}
           presentaciones={presentaciones.filter((p) => !p.es_pack)}
+          stock={stock}
+          ubicaciones={ubicaciones}
+          puedeEditar={puedeEscribir}
+          onEditar={(presId) => { setAjustePresId(presId); setAjusteEnv(true) }}
+        />
+      )}
+
+      {!cargando && tab === 'envases' && (
+        <EnvasadoView
+          productos={productos.filter((p) => p.categoria === 'envases_vacios')}
+          presentaciones={presentaciones}
           stock={stock}
           ubicaciones={ubicaciones}
           puedeEditar={puedeEscribir}
