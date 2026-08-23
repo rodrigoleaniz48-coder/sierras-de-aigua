@@ -18,7 +18,6 @@ interface Presentacion {
 }
 interface Componente { presentacion_pack_id: number; presentacion_componente_id: number; unidades: number }
 interface StockRow { id: number; tanque_id: number | null; presentacion_id: number; unidades: number; ubicacion_id: number }
-interface Tanque { id: number; nombre: string; producto_id: number | null; variedad_libre: string | null; campana: number | null }
 interface Ubicacion { id: number; nombre: string; activo: boolean }
 interface Venta {
   id: number; fecha: string; cliente_id: number | null; socio_id: string
