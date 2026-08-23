@@ -169,7 +169,11 @@ export function Stock() {
       {!cargando && tab === 'envasado' && (
         <EnvasadoView
           productos={productos.filter((p) => p.categoria !== 'envases_vacios' && p.categoria !== 'servicio')}
-          presentaciones={presentaciones.filter((p) => !p.es_pack)}
+          presentaciones={presentaciones.filter((p) => {
+            if (p.es_pack) return false
+            const prod = productos.find((x) => x.id === p.producto_id)
+            return prod?.categoria !== 'envases_vacios' && prod?.categoria !== 'servicio'
+          })}
           stock={stock}
           ubicaciones={ubicaciones}
           puedeEditar={puedeEscribir}
