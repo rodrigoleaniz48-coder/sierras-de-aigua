@@ -912,7 +912,12 @@ async function guardar(e: React.FormEvent) {
 
         {error && <div className="text-sm text-red-700">{error}</div>}
         <div className="flex justify-end gap-2 pt-2">
-          <button type="button" className="btn-secondary" onClick={onCerrar}>Cancelar</button>
+          <button type="button" className="btn-secondary" onClick={() => {
+            const hayContenido = items.some((it) => it.presentacion_id) || !!clienteId || !!notas.trim()
+            if (hayContenido && !confirm('¿Descartar esta venta? Se perderán los datos cargados.')) return
+            limpiarBorrador()
+            onCerrar()
+          }}>Cancelar</button>
           <button type="submit" className="btn-primary" disabled={guardando || !datosCargados}>{guardando ? 'Guardando…' : 'Guardar venta'}</button>
         </div>
       </form>
