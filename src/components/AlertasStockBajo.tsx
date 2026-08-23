@@ -76,27 +76,14 @@ export function AlertasStockBajo() {
       for (const uid of ubicIds) {
         const regla = reglaMinimo(pr.categoria, uid)
         if (regla.min <= 0) continue
-
-        if (regla.porProducto) {
-          // No-aceite: sumar todas las presentaciones del producto en esa ubicación
-          const total = presProd.reduce((a, p) => a + stockEn(p.id, uid), 0)
+        for (const p of presProd) {
+          const total = stockEn(p.id, uid)
           if (total >= Math.ceil(regla.min * 1.3)) continue
           arr.push({
-            prod: pr, pres: null, ubicacionId: uid,
+            prod: pr, pres: p, ubicacionId: uid,
             stock: total, minimo: regla.min,
             nivel: total < regla.min ? 'rojo' : 'amarillo',
           })
-        } else {
-          // Aceite: una alerta por presentación en esa ubicación
-          for (const p of presProd) {
-            const total = stockEn(p.id, uid)
-            if (total >= Math.ceil(regla.min * 1.3)) continue
-            arr.push({
-              prod: pr, pres: p, ubicacionId: uid,
-              stock: total, minimo: regla.min,
-              nivel: total < regla.min ? 'rojo' : 'amarillo',
-            })
-          }
         }
       }
     }

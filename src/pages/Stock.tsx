@@ -442,15 +442,6 @@ function EnvasadoView({
     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
       {grupos.map(({ prod, presentaciones: pres, totalProducto }) => {
         const color = colorProducto(prod.nombre)
-        // Totales por ubicación para todo el producto (para alerta por-producto en no-aceites)
-        const totalProdPorUbic = new Map<number, number>()
-        for (const { porUbic } of pres) {
-          for (const [uid, n] of porUbic) totalProdPorUbic.set(uid, (totalProdPorUbic.get(uid) ?? 0) + n)
-        }
-        const productoBajo = ubicaciones.some((u) => {
-          const r = reglaMinimo(prod.categoria, u.id)
-          return r.porProducto && r.min > 0 && (totalProdPorUbic.get(u.id) ?? 0) < r.min
-        })
         return (
           <div key={prod.id} className={`rounded-xl border-2 ${color.card} overflow-hidden`}>
             {/* Header producto */}
@@ -458,7 +449,6 @@ function EnvasadoView({
               <div className="flex items-center gap-2 min-w-0">
                 <span className={`w-3 h-3 rounded-full ${color.dot} shrink-0`}></span>
                 <span className="font-semibold text-oliva-900 truncate">{prod.nombre}</span>
-                {productoBajo && <span className="text-[10px] rounded-full bg-red-100 text-red-800 px-1.5 py-[1px] uppercase tracking-wide">bajo</span>}
               </div>
               <span className="text-xs text-oliva-600 tabular-nums shrink-0">{totalProducto} u</span>
             </div>
@@ -467,7 +457,7 @@ function EnvasadoView({
               {pres.map(({ pres: p, porUbic, total }) => {
                 const presBaja = ubicaciones.some((u) => {
                   const r = reglaMinimo(prod.categoria, u.id)
-                  return !r.porProducto && r.min > 0 && (porUbic.get(u.id) ?? 0) < r.min
+                  return r.min > 0 && (porUbic.get(u.id) ?? 0) < r.min
                 })
                 return (
                   <div key={p.id} className="px-3 py-2 bg-white/60">
@@ -493,7 +483,7 @@ function EnvasadoView({
                       {ubicaciones.map((u) => {
                         const n = porUbic.get(u.id) ?? 0
                         const r = reglaMinimo(prod.categoria, u.id)
-                        const chipBaja = !r.porProducto && r.min > 0 && n < r.min
+                        const chipBaja = r.min > 0 && n < r.min
                         const cls = chipBaja
                           ? 'bg-red-100 text-red-800'
                           : n === 0 ? 'bg-oliva-100/60 text-oliva-400' : 'bg-oliva-100 text-oliva-800'
@@ -501,7 +491,7 @@ function EnvasadoView({
                           <span
                             key={u.id}
                             className={`text-[10px] px-1.5 py-[1px] rounded-full ${cls}`}
-                            title={r.min > 0 ? `${u.nombre} · mín ${r.min}${r.porProducto ? ' (por producto)' : ''}` : u.nombre}
+                            title={r.min > 0 ? `${u.nombre} · mín ${r.min}` : u.nombre}
                           >
                             {u.nombre.slice(0, 3)} <span className="tabular-nums font-semibold">{n}</span>
                           </span>
