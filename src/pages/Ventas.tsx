@@ -10,7 +10,7 @@ import { CADETE_MVD_WA, normalizarTelWA } from '../lib/config'
 import { guardarFlag, leerFlag } from '../lib/persistencia'
 
 // ---------- Tipos ----------
-interface Producto { id: number; nombre: string }
+interface Producto { id: number; nombre: string; categoria?: string }
 interface Presentacion {
   id: number; producto_id: number; nombre: string; volumen_ml: number | null
   precio_minorista: number; precio_mayorista: number; iva_pct: number; activo: boolean
@@ -18,7 +18,6 @@ interface Presentacion {
 }
 interface Componente { presentacion_pack_id: number; presentacion_componente_id: number; unidades: number }
 interface StockRow { id: number; tanque_id: number | null; presentacion_id: number; unidades: number; ubicacion_id: number }
-interface Tanque { id: number; nombre: string; producto_id: number | null; variedad_libre: string | null; campana: number | null }
 interface Ubicacion { id: number; nombre: string; activo: boolean }
 interface Venta {
   id: number; fecha: string; cliente_id: number | null; socio_id: string
@@ -375,7 +374,6 @@ function NuevaVentaDialog({
   const [productos, setProductos] = useState<Producto[]>([])
   const [presentaciones, setPresentaciones] = useState<Presentacion[]>([])
   const [stock, setStock] = useState<StockRow[]>([])
-  const [tanques, setTanques] = useState<Tanque[]>([])
   const [componentes, setComponentes] = useState<Componente[]>([])
   const [datosCargados, setDatosCargados] = useState(false)
 
@@ -420,19 +418,17 @@ function NuevaVentaDialog({
 
     setDatosCargados(false)
     Promise.all([
-      supabase.from('productos').select('id,nombre'),
+      supabase.from('productos').select('id,nombre,categoria'),
       supabase.from('presentaciones').select('id,producto_id,nombre,volumen_ml,precio_minorista,precio_mayorista,iva_pct,activo,es_pack').eq('activo', true),
       supabase.from('stock').select('id,tanque_id,presentacion_id,unidades,ubicacion_id').gt('unidades', 0),
-      supabase.from('tanques').select('*'),
       supabase.from('presentacion_componente').select('*'),
       ventaAEditar
         ? supabase.from('items_venta').select('*').eq('venta_id', ventaAEditar.id).order('id')
         : Promise.resolve({ data: [] as ItemVenta[] }),
-    ]).then(([p, pr, s, t, c, iv]) => {
+    ]).then(([p, pr, s, c, iv]) => {
       setProductos((p.data as Producto[]) ?? [])
       setPresentaciones((pr.data as Presentacion[]) ?? [])
       setStock((s.data as StockRow[]) ?? [])
-      setTanques((t.data as Tanque[]) ?? [])
       setComponentes((c.data as Componente[]) ?? [])
       if (ventaAEditar) {
         const itemsExist = ((iv.data as ItemVenta[] | null) ?? []).map((it) => ({
@@ -460,7 +456,6 @@ function NuevaVentaDialog({
   }, [clienteId])
   const presPorId = useMemo(() => new Map(presentaciones.map((p) => [p.id, p])), [presentaciones])
   const stockPorId = useMemo(() => new Map(stock.map((s) => [s.id, s])), [stock])
-  const tanquePorId = useMemo(() => new Map(tanques.map((t) => [t.id, t])), [tanques])
   const prodPorId = useMemo(() => new Map(productos.map((p) => [p.id, p])), [productos])
 
   // Al cambiar tipo cliente, re-defaultea precios de items que están en su precio de lista
@@ -999,7 +994,7 @@ function VentaDetalleDialog({
     Promise.all([
       supabase.from('items_venta').select('*').eq('venta_id', venta.id).order('id'),
       supabase.from('presentaciones').select('id,nombre,producto_id,es_pack'),
-      supabase.from('productos').select('id,nombre'),
+      supabase.from('productos').select('id,nombre,categoria'),
     ]).then(([i, p, pr]) => {
       setItems((i.data as ItemVenta[]) ?? [])
       setPresMap(new Map(((p.data as PresentacionInfo[]) ?? []).map((x) => [x.id, x])))
@@ -1374,7 +1369,7 @@ function ListaCadeteDialog({
     Promise.all([
       supabase.from('items_venta').select('*').in('venta_id', ids),
       supabase.from('presentaciones').select('id,nombre,producto_id,es_pack'),
-      supabase.from('productos').select('id,nombre'),
+      supabase.from('productos').select('id,nombre,categoria'),
     ]).then(([i, p, pr]) => {
       setItems((i.data as ItemVenta[]) ?? [])
       setPresMap(new Map(((p.data as PresentacionInfo[]) ?? []).map((x) => [x.id, x])))
