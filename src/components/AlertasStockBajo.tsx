@@ -41,7 +41,6 @@ export function AlertasStockBajo() {
     })
   }, [])
 
-  const prodPorId = useMemo(() => new Map(prod.map((p) => [p.id, p])), [prod])
   const ubicPorId = useMemo(() => new Map(ubic.map((u) => [u.id, u])), [ubic])
   const presPorProd = useMemo(() => {
     const m = new Map<number, Presentacion[]>()
