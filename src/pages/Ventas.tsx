@@ -866,13 +866,19 @@ async function guardar(e: React.FormEvent) {
                         {presentaciones.map((p) => {
                           const prod = prodPorId.get(p.producto_id)
                           if (prod?.categoria === 'envases_vacios') return null
-                          const stockEnUbic = p.es_pack ? 0 : stock
+                          const esServicio = prod?.categoria === 'servicio'
+                          const stockEnUbic = (p.es_pack || esServicio) ? 0 : stock
                             .filter((s) => s.presentacion_id === p.id && s.ubicacion_id === Number(ubicacionId))
                             .reduce((a, b) => a + b.unidades, 0)
-                          const hayStock = p.es_pack ? true : stockEnUbic > 0
+                          const hayStock = p.es_pack || esServicio ? true : stockEnUbic > 0
+                          const sufijo = p.es_pack
+                            ? ' · pack'
+                            : esServicio
+                              ? ' · servicio'
+                              : !hayStock ? ' · SIN STOCK AQUÍ' : ` · ${stockEnUbic} u`
                           return (
                             <option key={p.id} value={p.id} disabled={!hayStock}>
-                              {prod?.nombre} · {p.nombre}{p.es_pack ? ' · pack' : ''}{!hayStock ? ' · SIN STOCK AQUÍ' : ` · ${stockEnUbic} u`}
+                              {prod?.nombre} · {p.nombre}{sufijo}
                             </option>
                           )
                         })}
