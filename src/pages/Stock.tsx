@@ -379,6 +379,18 @@ function TanqueCard({
   )
 }
 
+// Orden pedido: blend suave → intenso → picual → premiado → sin filtrar → resto (no-aceite al final)
+function ordenProducto(p: Producto): number {
+  if (p.categoria !== 'aceite') return 100
+  const n = p.nombre.toLowerCase()
+  if (n.includes('suave')) return 1
+  if (n.includes('intenso')) return 2
+  if (n.includes('picual')) return 3
+  if (n.includes('premiado')) return 4
+  if (n.includes('sin filtrar')) return 5
+  return 50 // aceites no listados: antes de no-aceite pero después de los conocidos
+}
+
 function EnvasadoView({
   productos, presentaciones, stock, ubicaciones, puedeEditar, onEditar,
 }: {
@@ -412,7 +424,12 @@ function EnvasadoView({
     for (const [, e] of map) {
       e.presentaciones.sort((a, b) => (a.pres.volumen_ml ?? 0) - (b.pres.volumen_ml ?? 0))
     }
-    return [...map.values()].sort((a, b) => a.prod.nombre.localeCompare(b.prod.nombre))
+    return [...map.values()].sort((a, b) => {
+      const oa = ordenProducto(a.prod)
+      const ob = ordenProducto(b.prod)
+      if (oa !== ob) return oa - ob
+      return a.prod.nombre.localeCompare(b.prod.nombre)
+    })
   }, [productos, presentaciones, stock])
 
   if (grupos.length === 0) {
