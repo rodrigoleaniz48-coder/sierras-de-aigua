@@ -553,6 +553,15 @@ function NuevaVentaDialog({
   })
   const subtotal = filas.reduce((s, f) => s + (f.it.presentacion_id ? f.subtotal : 0), 0)
   const iva = filas.reduce((s, f) => s + (f.it.presentacion_id ? f.ivaLinea : 0), 0)
+  // Desglose de IVA por tasa (para que el usuario vea cuánto va al 10% y cuánto al 22%)
+  const ivaPorTasa = new Map<number, number>()
+  for (const f of filas) {
+    if (!f.it.presentacion_id || !conFactura || !f.p) continue
+    const pct = Number(f.p.iva_pct) || 0
+    if (pct <= 0) continue
+    ivaPorTasa.set(pct, (ivaPorTasa.get(pct) ?? 0) + f.ivaLinea)
+  }
+  const tasasIva = [...ivaPorTasa.entries()].sort((a, b) => a[0] - b[0])
   // costoEnvio se ingresa en pesos siempre; si venta es USD, se muestra convertido
   const cEnvioUyu = envio ? (Number(costoEnvio) || 0) : 0
   const cEnvio = monedaVenta === 'USD' && cotVenta > 0 ? cEnvioUyu / cotVenta : cEnvioUyu
@@ -1022,6 +1031,13 @@ async function guardar(e: React.FormEvent) {
           <div>
             <div className="text-xs uppercase tracking-wide text-oliva-600">IVA</div>
             <div className="tabular-nums font-medium text-oliva-900">{conFactura ? money(iva, monedaVenta) : <span className="text-oliva-400">—</span>}</div>
+            {conFactura && tasasIva.length > 1 && (
+              <div className="text-[11px] text-oliva-500 mt-1 space-y-0.5">
+                {tasasIva.map(([pct, monto]) => (
+                  <div key={pct}>{pct}%: {money(monto, monedaVenta)}</div>
+                ))}
+              </div>
+            )}
           </div>
           <div>
             <div className="text-xs uppercase tracking-wide text-oliva-600">Envío</div>
