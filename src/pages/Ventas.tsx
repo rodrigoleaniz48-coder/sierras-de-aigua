@@ -28,6 +28,8 @@ interface Venta {
   ubicacion_id: number
   entregado: boolean; cobrado: boolean
   notas: string | null; creado_en: string
+  moneda?: 'UYU' | 'USD' | null
+  cotizacion?: number | null
 }
 
 const CANALES = ['whatsapp', 'directa', 'feria'] as const
@@ -246,7 +248,8 @@ function TablaVentas({
           <th className="py-2 px-4 text-center">Entrega</th>
           <th className="py-2 px-4 text-center">Cobro</th>
           <th className="py-2 px-4">Factura</th>
-          <th className="py-2 px-4 text-right">Total</th>
+          <th className="py-2 px-4 text-right">Total UYU</th>
+          <th className="py-2 px-4 text-right">Total U$S</th>
         </tr>
       </thead>
       <tbody>
@@ -283,7 +286,17 @@ function TablaVentas({
               </>
             )}
             <td className="py-2 px-4 text-xs">{v.con_factura ? 'Sí' : '—'}</td>
-            <td className="py-2 px-4 text-right tabular-nums font-medium text-oliva-900">{money(v.total)}</td>
+            {v.moneda === 'USD' ? (
+              <>
+                <td className="py-2 px-4 text-right tabular-nums text-oliva-400">—</td>
+                <td className="py-2 px-4 text-right tabular-nums font-medium text-oliva-900">{money(Number(v.cotizacion) > 0 ? Number(v.total) / Number(v.cotizacion) : 0, 'USD')}</td>
+              </>
+            ) : (
+              <>
+                <td className="py-2 px-4 text-right tabular-nums font-medium text-oliva-900">{money(v.total)}</td>
+                <td className="py-2 px-4 text-right tabular-nums text-oliva-400">—</td>
+              </>
+            )}
           </tr>
         ))}
       </tbody>
