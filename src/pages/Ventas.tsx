@@ -1253,6 +1253,22 @@ function VentaDetalleDialog({
     if (venta!.con_factura) partes.push(`IVA (10%): ${money(venta!.iva)}`)
     partes.push(`*Total: ${money(venta!.total)}*`)
     if (venta!.horario_entrega) partes.push(`🕐 ${venta!.horario_entrega}`)
+    // Datos bancarios para pagar (según si es venta con factura o no)
+    partes.push('')
+    partes.push('*Datos para transferencia:*')
+    if (venta!.con_factura) {
+      partes.push('*BROU*')
+      partes.push('Caja de ahorro en pesos')
+      partes.push('001529985-00002')
+      partes.push('HARRIA SRL')
+    } else {
+      partes.push('BROU')
+      partes.push('Caja de ahorro en pesos')
+      partes.push('110854026-00001')
+      partes.push('RODRIGO LEANIZ')
+    }
+    partes.push('')
+    partes.push('Te agradezco me envíes el comprobante de pago!')
     partes.push('')
     partes.push('Cualquier duda avisanos 🙌')
     partes.push('_Sierras de Aiguá · Producción familiar_')
