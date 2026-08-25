@@ -787,7 +787,17 @@ async function guardar(e: React.FormEvent) {
     }
 
     setGuardando(false)
-    if (!ventaAEditar) limpiarBorrador()
+    if (!ventaAEditar) {
+      limpiarBorrador()
+      // Reset inmediato para evitar que el useEffect de guardarBorrador re-persista los datos viejos
+      setFecha(new Date().toISOString().slice(0, 10))
+      setClienteId(''); setCanal('whatsapp'); setFormaPago('efectivo'); setConFactura(false)
+      setEnvio(false); setCostoEnvio('190'); setHorarioEntrega('')
+      setDireccionEnvio(''); setTelefonoEnvio('')
+      setUbicacionId(String(ubicacionDefaultPorSocio(perfil?.nombre)))
+      setEntregado(false); setCobrado(false); setNotas(''); setItems([nuevoItem()])
+      setMonedaVenta('UYU'); setCotizacionUsd('')
+    }
     onOk()
   }
 
