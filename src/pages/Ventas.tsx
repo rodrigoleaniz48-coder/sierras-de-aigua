@@ -326,6 +326,8 @@ interface Borrador {
   direccionEnvio: string; telefonoEnvio: string
   ubicacionId: string; entregado: boolean; cobrado: boolean; notas: string
   items: Item[]
+  monedaVenta?: 'UYU' | 'USD'
+  cotizacionUsd?: string
 }
 
 function leerBorrador(): Borrador | null {
@@ -373,7 +375,8 @@ function NuevaVentaDialog({
   const [cobrado, setCobrado] = useState(true)
   const [notas, setNotas] = useState('')
   const [items, setItems] = useState<Item[]>([nuevoItem()])
-  const [cotizacionUsd, setCotizacionUsd] = useState<string>('') // pesos por 1 USD; se completa cuando hay un item USD
+  const [monedaVenta, setMonedaVenta] = useState<'UYU' | 'USD'>('UYU')
+  const [cotizacionUsd, setCotizacionUsd] = useState<string>('') // pesos por 1 USD; obligatoria si venta USD
 
   const [productos, setProductos] = useState<Producto[]>([])
   const [presentaciones, setPresentaciones] = useState<Presentacion[]>([])
@@ -409,6 +412,8 @@ function NuevaVentaDialog({
         setDireccionEnvio(b.direccionEnvio); setTelefonoEnvio(b.telefonoEnvio)
         setUbicacionId(b.ubicacionId); setEntregado(b.entregado); setCobrado(b.cobrado); setNotas(b.notas)
         setItems(b.items && b.items.length > 0 ? b.items : [nuevoItem()])
+        setMonedaVenta(b.monedaVenta ?? 'UYU')
+        setCotizacionUsd(b.cotizacionUsd ?? '')
       } else {
         setFecha(new Date().toISOString().slice(0, 10))
         setClienteId(''); setCanal('whatsapp'); setFormaPago('efectivo'); setConFactura(false)
@@ -416,6 +421,7 @@ function NuevaVentaDialog({
         setDireccionEnvio(''); setTelefonoEnvio('')
         setUbicacionId(String(ubicacionDefaultPorSocio(perfil?.nombre)))
         setEntregado(false); setCobrado(false); setNotas(''); setItems([nuevoItem()])
+        setMonedaVenta('UYU'); setCotizacionUsd('')
       }
     }
     setError(null)
@@ -495,52 +501,61 @@ function NuevaVentaDialog({
     setItems((prev) => (prev.length === 1 ? prev : prev.filter((it) => it.key !== key)))
   }
   function elegirPresentacion(key: string, presId: number | null) {
-    if (!presId) return actualizarItem(key, { presentacion_id: null, stock_id: null, precio_unitario: 0 })
+    if (!presId) return actualizarItem(key, { presentacion_id: null, stock_id: null, precio_unitario: 0, precio_usd: 0 })
     const p = presPorId.get(presId)
     const prod = p ? prodPorId.get(p.producto_id) : undefined
     const esServicio = prod?.categoria === 'servicio'
-    const precioBase = p ? (esMayorista && Number(p.precio_mayorista) ? Number(p.precio_mayorista) : Number(p.precio_minorista)) : 0
-    const monedaP: 'UYU' | 'USD' = p?.moneda_default === 'USD' ? 'USD' : 'UYU'
+    const precioCatalogo = p ? (esMayorista && Number(p.precio_mayorista) ? Number(p.precio_mayorista) : Number(p.precio_minorista)) : 0
+    const monedaDefaultProd: 'UYU' | 'USD' = p?.moneda_default === 'USD' ? 'USD' : 'UYU'
     const cot = Number(cotizacionUsd) || 0
-    const precioEnPesos = monedaP === 'USD' ? precioBase * cot : precioBase
-    const esUltimoItem = items.length > 0 && items[items.length - 1].key === key
-    if (p?.es_pack) {
-      actualizarItem(key, { presentacion_id: presId, stock_id: null, precio_unitario: precioEnPesos, moneda: monedaP, precio_usd: monedaP === 'USD' ? precioBase : 0 })
-    } else if (esServicio) {
-      // Servicios (aceite a granel, envasado): no descuentan stock; stock_id queda null
-      actualizarItem(key, { presentacion_id: presId, stock_id: null, precio_unitario: precioEnPesos, moneda: monedaP, precio_usd: monedaP === 'USD' ? precioBase : 0 })
+
+    // Convertir precio del catálogo a la moneda de la VENTA
+    let precioUyu = 0
+    let precioUsdVal = 0
+    if (monedaVenta === 'UYU') {
+      // Precio final en pesos
+      precioUyu = monedaDefaultProd === 'USD' ? precioCatalogo * cot : precioCatalogo
+      precioUsdVal = 0
     } else {
-      // Auto-seleccionar stock FIFO SOLO de la ubicación elegida en la venta
+      // Venta en USD: precio_usd es lo que ve el usuario; precio_unitario en pesos usando cot
+      precioUsdVal = monedaDefaultProd === 'USD' ? precioCatalogo : (cot > 0 ? precioCatalogo / cot : 0)
+      precioUyu = precioUsdVal * cot
+    }
+
+    const esUltimoItem = items.length > 0 && items[items.length - 1].key === key
+    let stockElegidoId: number | null = null
+    if (!p?.es_pack && !esServicio) {
       const stocksPres = stock
         .filter((s) => s.presentacion_id === presId && s.ubicacion_id === Number(ubicacionId))
         .sort((a, b) => a.id - b.id)
-      const stockElegido = stocksPres[0]
-      actualizarItem(key, {
-        presentacion_id: presId,
-        stock_id: stockElegido?.id ?? null,
-        precio_unitario: precioEnPesos,
-        moneda: monedaP,
-        precio_usd: monedaP === 'USD' ? precioBase : 0,
-      })
+      stockElegidoId = stocksPres[0]?.id ?? null
     }
-    // Si acabás de completar el último ítem, agregar una línea vacía nueva al final
-    if (esUltimoItem) {
-      setItems((prev) => [...prev, nuevoItem()])
-    }
+    actualizarItem(key, {
+      presentacion_id: presId,
+      stock_id: stockElegidoId,
+      precio_unitario: precioUyu,
+      precio_usd: precioUsdVal,
+      moneda: monedaVenta,
+    })
+    if (esUltimoItem) setItems((prev) => [...prev, nuevoItem()])
   }
 
-  // Cálculos
+  // Cálculos (en la moneda de la venta para mostrar; en pesos para persistir)
+  const cotVenta = Number(cotizacionUsd) || 0
   const filas = items.map((it) => {
     const p = it.presentacion_id ? presPorId.get(it.presentacion_id) : undefined
     const st = it.stock_id ? stockPorId.get(it.stock_id) : undefined
     const disponible = st?.unidades ?? 0
-    const subtotal = Math.max(0, (Number(it.precio_unitario) - Number(it.descuento_unitario)) * Number(it.unidades))
+    const precioEnMonedaVenta = monedaVenta === 'USD' ? Number(it.precio_usd) : Number(it.precio_unitario)
+    const subtotal = Math.max(0, (precioEnMonedaVenta - Number(it.descuento_unitario)) * Number(it.unidades))
     const ivaLinea = conFactura && p ? subtotal * (Number(p.iva_pct) / 100) : 0
     return { it, p, st, disponible, subtotal, ivaLinea }
   })
   const subtotal = filas.reduce((s, f) => s + (f.it.presentacion_id ? f.subtotal : 0), 0)
   const iva = filas.reduce((s, f) => s + (f.it.presentacion_id ? f.ivaLinea : 0), 0)
-  const cEnvio = envio ? (Number(costoEnvio) || 0) : 0
+  // costoEnvio se ingresa en pesos siempre; si venta es USD, se muestra convertido
+  const cEnvioUyu = envio ? (Number(costoEnvio) || 0) : 0
+  const cEnvio = monedaVenta === 'USD' && cotVenta > 0 ? cEnvioUyu / cotVenta : cEnvioUyu
   const total = subtotal + iva + cEnvio
 
 async function guardar(e: React.FormEvent) {
@@ -557,10 +572,9 @@ async function guardar(e: React.FormEvent) {
       setError('Ingresá una dirección de entrega para el envío.')
       return
     }
-    // Validar cotización si hay items USD
-    const hayItemsUsd = filasValidas.some((f) => f.it.moneda === 'USD')
+    // Validar cotización si la venta es en USD
     const cot = Number(cotizacionUsd) || 0
-    if (hayItemsUsd && cot <= 0) { setError('Ingresá la cotización del USD (pesos por 1 USD) para los ítems en dólares.'); return }
+    if (monedaVenta === 'USD' && cot <= 0) { setError('Ingresá la cotización del USD (pesos por 1 USD) para registrar la venta en dólares.'); return }
 
     // Preacumular stock necesitado por presentación (para validar packs contra sus componentes)
     const necesidad = new Map<number, number>()
@@ -632,18 +646,26 @@ async function guardar(e: React.FormEvent) {
     // 1) Insert venta O update si es edición
     // estado se sincroniza con los booleans para mantener compat con datos viejos
     const estadoSync = cobrado ? 'cobrado' : (entregado ? 'entregado' : 'pendiente')
+    // Totales SIEMPRE se persisten en pesos (para que Dashboard/Contabilidad no rompan).
+    // Si la venta es USD, convertimos con la cotización.
+    const factorAUyu = monedaVenta === 'USD' ? cotVenta : 1
+    const subtotalUyu = subtotal * factorAUyu
+    const ivaUyu = iva * factorAUyu
+    const totalUyu = total * factorAUyu
     const cabecera = {
       fecha,
       cliente_id: clienteId ? Number(clienteId) : null,
       socio_id: socioId,
       canal, estado: estadoSync, forma_pago: formaPago,
       con_factura: conFactura,
-      envio, costo_envio: cEnvio,
+      envio, costo_envio: cEnvioUyu, // envío siempre se ingresa en pesos
       horario_entrega: envio ? (horarioEntrega.trim() || null) : null,
       ubicacion_id: Number(ubicacionId),
       entregado, cobrado,
-      subtotal, descuento: 0, iva, total,
+      subtotal: subtotalUyu, descuento: 0, iva: ivaUyu, total: totalUyu,
       notas: notas.trim() || null,
+      moneda: monedaVenta,
+      cotizacion: monedaVenta === 'USD' ? cotVenta : null,
     }
 
     let ventaId: number
@@ -676,17 +698,20 @@ async function guardar(e: React.FormEvent) {
       const prodF = f.p ? prodPorId.get(f.p.producto_id) : undefined
       const esServicio = prodF?.categoria === 'servicio'
       const sinStock = f.p?.es_pack || esServicio
+      // precio_unitario y subtotal SIEMPRE en pesos para BD
+      const precioUyu = monedaVenta === 'USD' ? Number(f.it.precio_usd) * cot : Number(f.it.precio_unitario)
+      const subtotalUyu = monedaVenta === 'USD' ? Number(f.subtotal) * cot : Number(f.subtotal)
       return {
         venta_id: ventaId,
         stock_id: sinStock ? null : f.it.stock_id,
         presentacion_id: f.it.presentacion_id!,
         unidades: Number(f.it.unidades),
-        precio_unitario: Number(f.it.precio_unitario),
+        precio_unitario: precioUyu,
         descuento_unitario: Number(f.it.descuento_unitario),
-        subtotal: f.subtotal,
-        moneda: f.it.moneda,
-        precio_usd: f.it.moneda === 'USD' ? Number(f.it.precio_usd) : null,
-        cotizacion: f.it.moneda === 'USD' ? cot : null,
+        subtotal: subtotalUyu,
+        moneda: monedaVenta,
+        precio_usd: monedaVenta === 'USD' ? Number(f.it.precio_usd) : null,
+        cotizacion: monedaVenta === 'USD' ? cot : null,
       }
     })
     const { error: eI } = await supabase.from('items_venta').insert(payloadItems)
@@ -716,8 +741,9 @@ async function guardar(e: React.FormEvent) {
       fecha, clienteId, canal, formaPago, conFactura,
       envio, costoEnvio, horarioEntrega, direccionEnvio, telefonoEnvio,
       ubicacionId, entregado, cobrado, notas, items,
+      monedaVenta, cotizacionUsd,
     })
-  }, [abierto, ventaAEditar, fecha, clienteId, canal, formaPago, conFactura, envio, costoEnvio, horarioEntrega, direccionEnvio, telefonoEnvio, ubicacionId, entregado, cobrado, notas, items])
+  }, [abierto, ventaAEditar, fecha, clienteId, canal, formaPago, conFactura, envio, costoEnvio, horarioEntrega, direccionEnvio, telefonoEnvio, ubicacionId, entregado, cobrado, notas, items, monedaVenta, cotizacionUsd])
 
   return (
     <Dialog abierto={abierto} onCerrar={onCerrar} titulo={ventaAEditar ? `Editar venta #${ventaAEditar.id}` : 'Nueva venta'} ancho="lg">
@@ -763,7 +789,36 @@ async function guardar(e: React.FormEvent) {
               {FORMAS_PAGO.map((f) => <option key={f} value={f}>{f.replace('_', ' ')}</option>)}
             </select>
           </div>
-          {items.some((it) => it.moneda === 'USD') && (
+          <div>
+            <label className="label">Moneda</label>
+            <div className="flex rounded-md border border-oliva-200 overflow-hidden text-sm font-semibold">
+              <button
+                type="button"
+                className={`flex-1 py-2 ${monedaVenta === 'UYU' ? 'bg-oliva-800 text-oliva-50' : 'bg-white text-oliva-700 hover:bg-oliva-100'}`}
+                onClick={() => {
+                  if (monedaVenta === 'UYU') return
+                  setMonedaVenta('UYU')
+                  const cot = Number(cotizacionUsd) || 0
+                  setItems((prev) => prev.map((it) => it.presentacion_id ? { ...it, moneda: 'UYU', precio_unitario: (Number(it.precio_usd) || 0) * cot || Number(it.precio_unitario) || 0, precio_usd: 0 } : it))
+                }}
+              >$ UYU</button>
+              <button
+                type="button"
+                className={`flex-1 py-2 ${monedaVenta === 'USD' ? 'bg-oliva-800 text-oliva-50' : 'bg-white text-oliva-700 hover:bg-oliva-100'}`}
+                onClick={() => {
+                  if (monedaVenta === 'USD') return
+                  setMonedaVenta('USD')
+                  const cot = Number(cotizacionUsd) || 0
+                  setItems((prev) => prev.map((it) => {
+                    if (!it.presentacion_id) return { ...it, moneda: 'USD' }
+                    const usd = cot > 0 ? Number(it.precio_unitario) / cot : Number(it.precio_usd) || 0
+                    return { ...it, moneda: 'USD', precio_usd: Number(usd.toFixed(2)), precio_unitario: usd * cot }
+                  }))
+                }}
+              >U$S</button>
+            </div>
+          </div>
+          {monedaVenta === 'USD' && (
             <div>
               <label className="label">Cotización U$S ($/USD)</label>
               <input
@@ -775,7 +830,6 @@ async function guardar(e: React.FormEvent) {
                   const val = e.target.value
                   setCotizacionUsd(val)
                   const cot = Number(val) || 0
-                  // Recalcular precio_unitario en pesos de los ítems USD
                   setItems((prev) => prev.map((it) => it.moneda === 'USD' ? { ...it, precio_unitario: (Number(it.precio_usd) || 0) * cot } : it))
                 }}
               />
@@ -845,21 +899,7 @@ async function guardar(e: React.FormEvent) {
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <div className="text-sm font-medium text-oliva-800">Ítems</div>
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                className="text-xs text-oliva-700 underline"
-                onClick={() => {
-                  const cot = Number(cotizacionUsd) || 0
-                  setItems((prev) => prev.map((it) => {
-                    if (it.moneda === 'USD') return it
-                    const usd = cot > 0 ? Number(it.precio_unitario) / cot : 0
-                    return { ...it, moneda: 'USD', precio_usd: Number(usd.toFixed(2)), precio_unitario: usd * cot }
-                  }))
-                }}
-              >Cobrar en U$S</button>
-              <button type="button" className="text-xs text-oliva-700 underline" onClick={() => setItems((p) => [...p, nuevoItem()])}>+ Agregar ítem</button>
-            </div>
+            <button type="button" className="text-xs text-oliva-700 underline" onClick={() => setItems((p) => [...p, nuevoItem()])}>+ Agregar ítem</button>
           </div>
 
           {!datosCargados ? (
@@ -897,9 +937,14 @@ async function guardar(e: React.FormEvent) {
                           )
                         })}
                       </select>
-                      {f.it.presentacion_id && !f.p?.es_pack && !f.it.stock_id && (
-                        <p className="text-xs text-red-700 mt-1">Sin stock envasado en esta ubicación. Ir a Stock → Envasar o Ajuste envasado.</p>
-                      )}
+                      {(() => {
+                        const prodF = f.p ? prodPorId.get(f.p.producto_id) : undefined
+                        const esServicio = prodF?.categoria === 'servicio'
+                        if (!f.it.presentacion_id) return null
+                        if (f.p?.es_pack || esServicio) return null
+                        if (f.it.stock_id) return null
+                        return <p className="text-xs text-red-700 mt-1">Sin stock envasado en esta ubicación. Ir a Stock → Envasar o Ajuste envasado.</p>
+                      })()}
                     </div>
 
                     <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
@@ -918,36 +963,8 @@ async function guardar(e: React.FormEvent) {
                         )}
                       </div>
                       <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <label className="label !mb-0">Precio u.</label>
-                          <div className="flex items-center gap-0.5 text-[10px] font-bold uppercase tracking-wide">
-                            <button
-                              type="button"
-                              className={`px-1.5 py-0.5 rounded ${f.it.moneda === 'UYU' ? 'bg-oliva-800 text-oliva-50' : 'text-oliva-500 hover:bg-oliva-100'}`}
-                              onClick={() => {
-                                const cot = Number(cotizacionUsd) || 0
-                                if (f.it.moneda === 'USD') {
-                                  // USD → UYU: mantengo precio en pesos ya calculado
-                                  actualizarItem(f.it.key, { moneda: 'UYU', precio_usd: 0 })
-                                }
-                                void cot
-                              }}
-                            >$</button>
-                            <button
-                              type="button"
-                              className={`px-1.5 py-0.5 rounded ${f.it.moneda === 'USD' ? 'bg-oliva-800 text-oliva-50' : 'text-oliva-500 hover:bg-oliva-100'}`}
-                              onClick={() => {
-                                const cot = Number(cotizacionUsd) || 0
-                                if (f.it.moneda === 'UYU') {
-                                  // UYU → USD: convierto precio pesos → USD si hay cotización
-                                  const usd = cot > 0 ? Number(f.it.precio_unitario) / cot : 0
-                                  actualizarItem(f.it.key, { moneda: 'USD', precio_usd: Number(usd.toFixed(2)), precio_unitario: usd * cot })
-                                }
-                              }}
-                            >U$S</button>
-                          </div>
-                        </div>
-                        {f.it.moneda === 'USD' ? (
+                        <label className="label">Precio u. {monedaVenta === 'USD' ? '(U$S)' : ''}</label>
+                        {monedaVenta === 'USD' ? (
                           <input
                             className="input tabular-nums"
                             type="number" min="0" step="0.01"
@@ -966,9 +983,6 @@ async function guardar(e: React.FormEvent) {
                             onChange={(e) => actualizarItem(f.it.key, { precio_unitario: Number(e.target.value) || 0 })}
                           />
                         )}
-                        {f.it.moneda === 'USD' && (
-                          <p className="text-[10px] text-oliva-500 mt-1">≈ {money(f.it.precio_unitario)} · cotización arriba</p>
-                        )}
                       </div>
                       <div>
                         <label className="label">Desc. u.</label>
@@ -981,12 +995,12 @@ async function guardar(e: React.FormEvent) {
                       </div>
                       <div className="hidden sm:block">
                         <label className="label">Subtotal</label>
-                        <div className="input tabular-nums text-right">{money(f.subtotal)}</div>
+                        <div className="input tabular-nums text-right">{money(f.subtotal, monedaVenta)}</div>
                       </div>
                     </div>
 
                     <div className="flex items-center justify-between sm:hidden">
-                      <div className="text-sm">Subtotal: <b className="tabular-nums">{money(f.subtotal)}</b></div>
+                      <div className="text-sm">Subtotal: <b className="tabular-nums">{money(f.subtotal, monedaVenta)}</b></div>
                       <button type="button" className="text-xs text-red-700 underline" onClick={() => borrarItem(f.it.key)}>Quitar</button>
                     </div>
                     <div className="hidden sm:flex justify-end">
@@ -1003,19 +1017,22 @@ async function guardar(e: React.FormEvent) {
         <div className="card p-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
           <div>
             <div className="text-xs uppercase tracking-wide text-oliva-600">Subtotal</div>
-            <div className="tabular-nums font-medium text-oliva-900">{money(subtotal)}</div>
+            <div className="tabular-nums font-medium text-oliva-900">{money(subtotal, monedaVenta)}</div>
           </div>
           <div>
             <div className="text-xs uppercase tracking-wide text-oliva-600">IVA</div>
-            <div className="tabular-nums font-medium text-oliva-900">{conFactura ? money(iva) : <span className="text-oliva-400">—</span>}</div>
+            <div className="tabular-nums font-medium text-oliva-900">{conFactura ? money(iva, monedaVenta) : <span className="text-oliva-400">—</span>}</div>
           </div>
           <div>
             <div className="text-xs uppercase tracking-wide text-oliva-600">Envío</div>
-            <div className="tabular-nums font-medium text-oliva-900">{envio ? money(cEnvio) : <span className="text-oliva-400">—</span>}</div>
+            <div className="tabular-nums font-medium text-oliva-900">{envio ? money(cEnvio, monedaVenta) : <span className="text-oliva-400">—</span>}</div>
           </div>
           <div>
             <div className="text-xs uppercase tracking-wide text-oliva-600">Total</div>
-            <div className="tabular-nums font-semibold text-oliva-900 text-lg">{money(total)}</div>
+            <div className="tabular-nums font-semibold text-oliva-900 text-lg">{money(total, monedaVenta)}</div>
+            {monedaVenta === 'USD' && cotVenta > 0 && (
+              <div className="text-[11px] text-oliva-500 mt-1">≈ {money(total * cotVenta)} · cot {cotVenta}</div>
+            )}
           </div>
         </div>
 
