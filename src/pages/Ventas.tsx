@@ -108,6 +108,37 @@ export function Ventas() {
     [ventas],
   )
 
+  // Resumen del pedido (items en 1 línea) para las ventas pendientes
+  const [resumenPendientes, setResumenPendientes] = useState<Map<number, string>>(new Map())
+  useEffect(() => {
+    const ids = pendientes.map((v) => v.id)
+    if (ids.length === 0) { setResumenPendientes(new Map()); return }
+    let cancel = false
+    ;(async () => {
+      const [it, pr, pd] = await Promise.all([
+        supabase.from('items_venta').select('venta_id,presentacion_id,unidades').in('venta_id', ids),
+        supabase.from('presentaciones').select('id,nombre,producto_id'),
+        supabase.from('productos').select('id,nombre'),
+      ])
+      if (cancel) return
+      const prMap = new Map((pr.data ?? []).map((x) => [x.id as number, x as { id: number; nombre: string; producto_id: number }]))
+      const pdMap = new Map((pd.data ?? []).map((x) => [x.id as number, (x as { id: number; nombre: string }).nombre]))
+      const acc = new Map<number, string[]>()
+      for (const x of (it.data as { venta_id: number; presentacion_id: number; unidades: number }[]) ?? []) {
+        const p = prMap.get(x.presentacion_id)
+        const prodN = p ? pdMap.get(p.producto_id) : undefined
+        const label = `${x.unidades}× ${prodN ?? '?'}${p ? ` · ${p.nombre}` : ''}`
+        const arr = acc.get(x.venta_id) ?? []
+        arr.push(label)
+        acc.set(x.venta_id, arr)
+      }
+      const out = new Map<number, string>()
+      for (const [vid, arr] of acc) out.set(vid, arr.join('  ·  '))
+      setResumenPendientes(out)
+    })()
+    return () => { cancel = true }
+  }, [pendientes])
+
   return (
     <div className="space-y-5">
       <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -136,6 +167,7 @@ export function Ventas() {
             clientePorId={clientePorId}
             socioPorId={socioPorId}
             ubicaciones={ubicaciones}
+            resumenPorId={resumenPendientes}
             onClic={(v) => setVentaDetalleId(v.id)}
           />
         </div>
@@ -228,13 +260,14 @@ export function Ventas() {
 
 // ---------- Tabla de ventas (reutilizada en Pendientes y Histórico) ----------
 function TablaVentas({
-  ventas, clientePorId, socioPorId, ubicaciones, onClic,
+  ventas, clientePorId, socioPorId, ubicaciones, onClic, resumenPorId,
 }: {
   ventas: Venta[]
   clientePorId: Map<number, Cliente>
   socioPorId: Map<string, Socio>
   ubicaciones: Ubicacion[]
   onClic: (v: Venta) => void
+  resumenPorId?: Map<number, string>
 }) {
   return (
     <table className="w-full text-sm min-w-[860px]">
@@ -260,7 +293,14 @@ function TablaVentas({
             onClick={() => onClic(v)}
           >
             <td className="py-2 px-4 tabular-nums text-oliva-700">{v.fecha}</td>
-            <td className="py-2 px-4 text-oliva-900">{clientePorId.get(v.cliente_id ?? 0)?.nombre ?? <span className="italic text-oliva-500">sin cliente</span>}</td>
+            <td className="py-2 px-4 text-oliva-900">
+              <div>{clientePorId.get(v.cliente_id ?? 0)?.nombre ?? <span className="italic text-oliva-500">sin cliente</span>}</div>
+              {resumenPorId?.get(v.id) && (
+                <div className="text-[11px] text-oliva-600 font-normal mt-0.5 leading-snug">
+                  {resumenPorId.get(v.id)}
+                </div>
+              )}
+            </td>
             <td className="py-2 px-4 text-oliva-700 text-xs">{socioPorId.get(v.socio_id)?.nombre ?? '—'}</td>
             <td className="py-2 px-4 text-oliva-700 text-xs">{ubicaciones.find((u) => u.id === v.ubicacion_id)?.nombre?.slice(0, 3) ?? '—'}</td>
             <td className="py-2 px-4 text-oliva-700 text-xs">
