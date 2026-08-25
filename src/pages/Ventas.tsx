@@ -1005,11 +1005,23 @@ async function guardar(e: React.FormEvent) {
                       <div className="hidden sm:block">
                         <label className="label">Subtotal</label>
                         <div className="input tabular-nums text-right">{money(f.subtotal, monedaVenta)}</div>
+                        {conFactura && f.p && Number(f.p.iva_pct) > 0 && (
+                          <p className="text-[11px] text-oliva-500 mt-1 text-right">
+                            IVA {Number(f.p.iva_pct)}%: {money(f.ivaLinea, monedaVenta)}
+                          </p>
+                        )}
                       </div>
                     </div>
 
                     <div className="flex items-center justify-between sm:hidden">
-                      <div className="text-sm">Subtotal: <b className="tabular-nums">{money(f.subtotal, monedaVenta)}</b></div>
+                      <div className="text-sm">
+                        Subtotal: <b className="tabular-nums">{money(f.subtotal, monedaVenta)}</b>
+                        {conFactura && f.p && Number(f.p.iva_pct) > 0 && (
+                          <span className="text-[11px] text-oliva-500 ml-2">
+                            · IVA {Number(f.p.iva_pct)}%: {money(f.ivaLinea, monedaVenta)}
+                          </span>
+                        )}
+                      </div>
                       <button type="button" className="text-xs text-red-700 underline" onClick={() => borrarItem(f.it.key)}>Quitar</button>
                     </div>
                     <div className="hidden sm:flex justify-end">
