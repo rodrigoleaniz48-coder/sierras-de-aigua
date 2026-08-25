@@ -1176,6 +1176,20 @@ interface ItemVenta {
 interface PresentacionInfo { id: number; nombre: string; producto_id: number; es_pack: boolean }
 interface ProdInfo { id: number; nombre: string }
 
+function usuarioDatosBancarios(nombre: string | null | undefined, conFactura: boolean): string[] | null {
+  const n = (nombre ?? '').toLowerCase()
+  const cuentaHarria = ['*Datos para transferencia:*', '*BROU*', 'Caja de ahorro en pesos', '001529985-00002', 'HARRIA SRL', '', 'Te agradezco me envíes el comprobante de pago!']
+  const cuentaRodrigo = ['*Datos para transferencia:*', 'BROU', 'Caja de ahorro en pesos', '110854026-00001', 'RODRIGO LEANIZ', '', 'Te agradezco me envíes el comprobante de pago!']
+  if (n.includes('rodrigo') || n.includes('ayelen') || n.includes('ayelén')) {
+    return conFactura ? cuentaHarria : cuentaRodrigo
+  }
+  if (n.includes('santi')) {
+    return conFactura ? cuentaHarria : null // sin factura: sin datos (compartida solo la Harria)
+  }
+  // Gonzalo (pendiente config) y otros: sin datos por ahora
+  return null
+}
+
 function VentaDetalleDialog({
   venta, clientes, socios, ubicaciones, puedeEditar, onEditarItems, onCerrar, onCambio, onAnulada,
 }: {
@@ -1189,6 +1203,7 @@ function VentaDetalleDialog({
   onCambio: () => void
   onAnulada: () => void
 }) {
+  const { perfil } = useAuth()
   const [items, setItems] = useState<ItemVenta[]>([])
   const [presMap, setPresMap] = useState<Map<number, PresentacionInfo>>(new Map())
   const [prodMap, setProdMap] = useState<Map<number, ProdInfo>>(new Map())
@@ -1253,22 +1268,12 @@ function VentaDetalleDialog({
     if (venta!.con_factura) partes.push(`IVA (10%): ${money(venta!.iva)}`)
     partes.push(`*Total: ${money(venta!.total)}*`)
     if (venta!.horario_entrega) partes.push(`🕐 ${venta!.horario_entrega}`)
-    // Datos bancarios para pagar (según si es venta con factura o no)
-    partes.push('')
-    partes.push('*Datos para transferencia:*')
-    if (venta!.con_factura) {
-      partes.push('*BROU*')
-      partes.push('Caja de ahorro en pesos')
-      partes.push('001529985-00002')
-      partes.push('HARRIA SRL')
-    } else {
-      partes.push('BROU')
-      partes.push('Caja de ahorro en pesos')
-      partes.push('110854026-00001')
-      partes.push('RODRIGO LEANIZ')
+    // Datos bancarios: sólo si el usuario logueado los tiene configurados para este tipo de venta
+    const datosBanco = usuarioDatosBancarios(perfil?.nombre, !!venta!.con_factura)
+    if (datosBanco) {
+      partes.push('')
+      partes.push(...datosBanco)
     }
-    partes.push('')
-    partes.push('Te agradezco me envíes el comprobante de pago!')
     partes.push('')
     partes.push('Cualquier duda avisanos 🙌')
     partes.push('_Sierras de Aiguá · Producción familiar_')
