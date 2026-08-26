@@ -350,6 +350,7 @@ interface Item {
   key: string
   presentacion_id: number | null
   stock_id: number | null
+  tanque_id: number | null // solo para "Aceite a granel"
   unidades: number
   precio_unitario: number // siempre en UYU (calculado si moneda=USD)
   descuento_unitario: number
@@ -358,8 +359,10 @@ interface Item {
 }
 
 function nuevoItem(): Item {
-  return { key: crypto.randomUUID(), presentacion_id: null, stock_id: null, unidades: 1, precio_unitario: 0, descuento_unitario: 0, moneda: 'UYU', precio_usd: 0 }
+  return { key: crypto.randomUUID(), presentacion_id: null, stock_id: null, tanque_id: null, unidades: 1, precio_unitario: 0, descuento_unitario: 0, moneda: 'UYU', precio_usd: 0 }
 }
+
+interface TanqueMin { id: number; nombre: string; producto_id: number | null; variedad_libre: string | null; campana: number | null; litros_actuales: number; activo: boolean }
 
 function ubicacionDefaultPorSocio(nombre: string | null | undefined): number {
   const n = (nombre ?? '').toLowerCase()
@@ -431,6 +434,7 @@ function NuevaVentaDialog({
   const [monedaVenta, setMonedaVenta] = useState<'UYU' | 'USD'>('UYU')
   const [cotizacionUsd, setCotizacionUsd] = useState<string>('') // pesos por 1 USD; obligatoria si venta USD
 
+  const [tanques, setTanques] = useState<TanqueMin[]>([])
   const [productos, setProductos] = useState<Producto[]>([])
   const [presentaciones, setPresentaciones] = useState<Presentacion[]>([])
   const [stock, setStock] = useState<StockRow[]>([])
@@ -485,22 +489,27 @@ function NuevaVentaDialog({
       supabase.from('presentaciones').select('id,producto_id,nombre,volumen_ml,precio_minorista,precio_mayorista,iva_pct,activo,es_pack,moneda_default').eq('activo', true),
       supabase.from('stock').select('id,tanque_id,presentacion_id,unidades,ubicacion_id').gt('unidades', 0),
       supabase.from('presentacion_componente').select('*'),
+      supabase.from('tanques').select('id,nombre,producto_id,variedad_libre,campana,litros_actuales,activo').eq('activo', true).order('id'),
       ventaAEditar
         ? supabase.from('items_venta').select('*').eq('venta_id', ventaAEditar.id).order('id')
         : Promise.resolve({ data: [] as ItemVenta[] }),
-    ]).then(([p, pr, s, c, iv]) => {
+    ]).then(([p, pr, s, c, tq, iv]) => {
       setProductos((p.data as Producto[]) ?? [])
       setPresentaciones((pr.data as Presentacion[]) ?? [])
       setStock((s.data as StockRow[]) ?? [])
       setComponentes((c.data as Componente[]) ?? [])
+      setTanques((tq.data as TanqueMin[]) ?? [])
       if (ventaAEditar) {
-        const itemsExist = ((iv.data as ItemVenta[] | null) ?? []).map((it) => ({
+        const itemsExist = ((iv.data as (ItemVenta & { tanque_id: number | null; moneda: 'UYU' | 'USD' | null; precio_usd: number | null })[] | null) ?? []).map((it) => ({
           key: crypto.randomUUID(),
           presentacion_id: it.presentacion_id,
           stock_id: it.stock_id,
+          tanque_id: it.tanque_id ?? null,
           unidades: Number(it.unidades),
           precio_unitario: Number(it.precio_unitario),
           descuento_unitario: Number(it.descuento_unitario),
+          moneda: (it.moneda ?? 'UYU') as 'UYU' | 'USD',
+          precio_usd: Number(it.precio_usd ?? 0),
         } as Item))
         setItems(itemsExist.length > 0 ? itemsExist : [nuevoItem()])
       }
@@ -640,11 +649,25 @@ async function guardar(e: React.FormEvent) {
 
     // Preacumular stock necesitado por presentación (para validar packs contra sus componentes)
     const necesidad = new Map<number, number>()
+    const litrosPorTanque = new Map<number, number>()
     for (const f of filasValidas) {
       if (!f.it.presentacion_id) { setError('Todos los ítems necesitan una presentación.'); return }
       if (f.it.unidades <= 0) { setError('Las unidades deben ser mayores a 0.'); return }
       const prodF = f.p ? prodPorId.get(f.p.producto_id) : undefined
       const esServicio = prodF?.categoria === 'servicio'
+      const esGranel = (prodF?.nombre ?? '').toLowerCase().includes('aceite a granel')
+      if (esGranel) {
+        if (!f.it.tanque_id) { setError(`Elegí un tanque para "${prodF?.nombre}".`); return }
+        const acum = (litrosPorTanque.get(f.it.tanque_id) ?? 0) + Number(f.it.unidades)
+        litrosPorTanque.set(f.it.tanque_id, acum)
+        const tq = tanques.find((t) => t.id === f.it.tanque_id)
+        if (!tq) { setError('Tanque no encontrado.'); return }
+        if (acum > Number(tq.litros_actuales)) {
+          setError(`Litros insuficientes en ${tq.nombre}: pedís ${acum} L y quedan ${Number(tq.litros_actuales).toFixed(0)} L.`)
+          return
+        }
+        continue
+      }
       if (esServicio) {
         // no descuenta stock
         continue
@@ -745,6 +768,17 @@ async function guardar(e: React.FormEvent) {
           nota: `Reversion por edicion de venta #${ventaAEditar.id}`,
         })
       }
+      // Revertir movs granel previos de esta venta (devolver litros al tanque)
+      const { data: movsGranPrev } = await supabase.from('movimientos_granel').select('id,tanque_origen_id,litros').eq('venta_id', ventaAEditar.id)
+      for (const m of (movsGranPrev ?? [])) {
+        if (!m.tanque_origen_id) continue
+        const { data: tqPrev } = await supabase.from('tanques').select('litros_actuales').eq('id', m.tanque_origen_id).maybeSingle()
+        if (!tqPrev) continue
+        // litros guardado es negativo → sumar el abs para devolver
+        const devolver = Math.abs(Number(m.litros))
+        await supabase.from('tanques').update({ litros_actuales: Number(tqPrev.litros_actuales) + devolver, actualizado_en: new Date().toISOString() }).eq('id', m.tanque_origen_id)
+      }
+      await supabase.from('movimientos_granel').delete().eq('venta_id', ventaAEditar.id)
       await supabase.from('items_venta').delete().eq('venta_id', ventaAEditar.id)
       const { error: eU } = await supabase.from('ventas').update(cabecera).eq('id', ventaAEditar.id)
       if (eU) { setError('Error actualizando venta: ' + eU.message); setGuardando(false); return }
@@ -760,12 +794,12 @@ async function guardar(e: React.FormEvent) {
       const prodF = f.p ? prodPorId.get(f.p.producto_id) : undefined
       const esServicio = prodF?.categoria === 'servicio'
       const sinStock = f.p?.es_pack || esServicio
-      // precio_unitario y subtotal SIEMPRE en pesos para BD
       const precioUyu = monedaVenta === 'USD' ? Number(f.it.precio_usd) * cot : Number(f.it.precio_unitario)
       const subtotalUyu = monedaVenta === 'USD' ? Number(f.subtotal) * cot : Number(f.subtotal)
       return {
         venta_id: ventaId,
         stock_id: sinStock ? null : f.it.stock_id,
+        tanque_id: f.it.tanque_id,
         presentacion_id: f.it.presentacion_id!,
         unidades: Number(f.it.unidades),
         precio_unitario: precioUyu,
@@ -778,12 +812,28 @@ async function guardar(e: React.FormEvent) {
     })
     const { error: eI } = await supabase.from('items_venta').insert(payloadItems)
     if (eI) {
-      if (!ventaAEditar) {
-        // Rollback manual: borrar la venta creada
-        await supabase.from('ventas').delete().eq('id', ventaId)
-      }
+      if (!ventaAEditar) await supabase.from('ventas').delete().eq('id', ventaId)
       setError('Error cargando ítems: ' + eI.message)
       setGuardando(false); return
+    }
+
+    // 3) Aceite a granel: descontar litros de cada tanque + registrar movimiento
+    if (litrosPorTanque.size > 0) {
+      const { data: { user } } = await supabase.auth.getUser()
+      for (const [tqId, litros] of litrosPorTanque) {
+        const tq = tanques.find((t) => t.id === tqId)
+        if (!tq) continue
+        const nuevos = Number(tq.litros_actuales) - litros
+        await supabase.from('tanques').update({ litros_actuales: nuevos, actualizado_en: new Date().toISOString() }).eq('id', tqId)
+        await supabase.from('movimientos_granel').insert({
+          tipo: 'venta_granel',
+          tanque_origen_id: tqId,
+          litros: -litros,
+          venta_id: ventaId,
+          usuario_id: user?.id ?? null,
+          nota: `Venta a granel · venta #${ventaId}`,
+        })
+      }
     }
 
     setGuardando(false)
@@ -1012,7 +1062,36 @@ async function guardar(e: React.FormEvent) {
                       {(() => {
                         const prodF = f.p ? prodPorId.get(f.p.producto_id) : undefined
                         const esServicio = prodF?.categoria === 'servicio'
+                        const esGranel = (prodF?.nombre ?? '').toLowerCase().includes('aceite a granel')
                         if (!f.it.presentacion_id) return null
+                        // Selector de tanque solo para "Aceite a granel"
+                        if (esGranel) {
+                          const tanqueSel = f.it.tanque_id ? tanques.find((t) => t.id === f.it.tanque_id) : null
+                          const litrosDisp = Number(tanqueSel?.litros_actuales ?? 0)
+                          const excede = f.it.tanque_id && f.it.unidades > litrosDisp
+                          return (
+                            <div className="mt-2">
+                              <label className="label">Tanque desde el que sale el granel</label>
+                              <select
+                                className="input"
+                                value={f.it.tanque_id ?? ''}
+                                onChange={(e) => actualizarItem(f.it.key, { tanque_id: e.target.value ? Number(e.target.value) : null })}
+                              >
+                                <option value="">— elegir tanque —</option>
+                                {tanques.map((t) => {
+                                  const prodT = t.producto_id ? prodPorId.get(t.producto_id) : null
+                                  const label = `${t.nombre}${prodT ? ' · ' + prodT.nombre : ''}${t.variedad_libre ? ' (' + t.variedad_libre + ')' : ''}${t.campana ? ' · zafra ' + t.campana : ''} · ${Number(t.litros_actuales).toFixed(0)} L disp`
+                                  return <option key={t.id} value={t.id} disabled={Number(t.litros_actuales) <= 0}>{label}</option>
+                                })}
+                              </select>
+                              {f.it.tanque_id && (
+                                <p className={`text-[11px] mt-1 ${excede ? 'text-red-700' : 'text-oliva-600'}`}>
+                                  Descontará {f.it.unidades} L del tanque · quedan {litrosDisp.toFixed(0)} L
+                                </p>
+                              )}
+                            </div>
+                          )
+                        }
                         if (f.p?.es_pack || esServicio) return null
                         if (f.it.stock_id) return null
                         return <p className="text-xs text-red-700 mt-1">Sin stock envasado en esta ubicación. Ir a Stock → Envasar o Ajuste envasado.</p>
@@ -1180,13 +1259,16 @@ function usuarioDatosBancarios(nombre: string | null | undefined, conFactura: bo
   const n = (nombre ?? '').toLowerCase()
   const cuentaHarria = ['*Datos para transferencia:*', '*BROU*', 'Caja de ahorro en pesos', '001529985-00002', 'HARRIA SRL', '', 'Te agradezco me envíes el comprobante de pago!']
   const cuentaRodrigo = ['*Datos para transferencia:*', 'BROU', 'Caja de ahorro en pesos', '110854026-00001', 'RODRIGO LEANIZ', '', 'Te agradezco me envíes el comprobante de pago!']
+  const cuentaGonzalo = ['*Datos para transferencia:*', 'BROU', '000247689-00002', 'Gonzalo Leániz', '', 'Te agradezco me envíes el comprobante de pago!']
   if (n.includes('rodrigo') || n.includes('ayelen') || n.includes('ayelén')) {
     return conFactura ? cuentaHarria : cuentaRodrigo
   }
   if (n.includes('santi')) {
     return conFactura ? cuentaHarria : null // sin factura: sin datos (compartida solo la Harria)
   }
-  // Gonzalo (pendiente config) y otros: sin datos por ahora
+  if (n.includes('gonzalo')) {
+    return conFactura ? cuentaHarria : cuentaGonzalo
+  }
   return null
 }
 
@@ -1340,6 +1422,23 @@ function VentaDetalleDialog({
         stock_id: m.stock_id, tipo: 'devolucion', unidades: -Number(m.unidades),
         venta_id: venta!.id, usuario_id: user?.id ?? null,
         nota: `Anulacion de venta #${venta!.id}`,
+      })
+    }
+    // 2b) Reversar movimientos de granel (ventas a granel): devolver litros al tanque y marcar como reversion
+    const { data: movsGr } = await supabase.from('movimientos_granel').select('id,tanque_origen_id,litros').eq('venta_id', venta!.id)
+    for (const m of (movsGr ?? [])) {
+      if (!m.tanque_origen_id) continue
+      const { data: tqPrev } = await supabase.from('tanques').select('litros_actuales').eq('id', m.tanque_origen_id).maybeSingle()
+      if (!tqPrev) continue
+      const devolver = Math.abs(Number(m.litros))
+      await supabase.from('tanques').update({ litros_actuales: Number(tqPrev.litros_actuales) + devolver, actualizado_en: new Date().toISOString() }).eq('id', m.tanque_origen_id)
+      await supabase.from('movimientos_granel').insert({
+        tipo: 'devolucion_granel',
+        tanque_destino_id: m.tanque_origen_id,
+        litros: devolver,
+        venta_id: venta!.id,
+        usuario_id: user?.id ?? null,
+        nota: `Devolucion por anulacion venta #${venta!.id}`,
       })
     }
     // 3) Marcar venta cancelado
