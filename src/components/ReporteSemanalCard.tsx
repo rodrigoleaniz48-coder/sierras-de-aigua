@@ -13,9 +13,11 @@ interface Props {
   autoMarcarVisto?: boolean
   /** Callback cuando se marca como visto (para refrescar el badge en Layout). */
   onVisto?: () => void
+  /** Versión compacta (1 fila) para el dashboard. */
+  compact?: boolean
 }
 
-export function ReporteSemanalCard({ autoMarcarVisto = true, onVisto }: Props) {
+export function ReporteSemanalCard({ autoMarcarVisto = true, onVisto, compact }: Props) {
   const [rep, setRep] = useState<ReporteSemanal | null>(null)
   const [cargando, setCargando] = useState(true)
   const [modal, setModal] = useState(false)
@@ -44,6 +46,28 @@ export function ReporteSemanalCard({ autoMarcarVisto = true, onVisto }: Props) {
 
   return (
     <>
+      {compact ? (
+        <button
+          type="button"
+          onClick={abrir}
+          className={`w-full flex items-center gap-3 text-left rounded-lg border px-3 py-2.5 transition ${nuevo ? 'border-aceite-500/60 bg-aceite-500/10 hover:bg-aceite-500/20' : 'border-oliva-100 bg-white hover:bg-oliva-50'}`}
+        >
+          <span className="text-[10px] font-bold uppercase tracking-widest text-oliva-500 shrink-0">Reporte sem.</span>
+          <span className="text-xs text-oliva-600 shrink-0 hidden sm:inline">{rep.desde}–{rep.hasta}</span>
+          <span className="text-sm font-bold text-oliva-900 tabular-nums">{money(rep.totalFacturado)}</span>
+          <span className="text-[11px] text-oliva-500">·</span>
+          <span className="text-xs text-oliva-700">{rep.cantidadVentas} vta.</span>
+          {rep.totalSemanaAnterior > 0 && (
+            <span className={`text-xs font-semibold tabular-nums ${deltaClase}`}>
+              {deltaSigno} {Math.abs(rep.deltaPct).toFixed(0)}%
+            </span>
+          )}
+          {nuevo && (
+            <span className="text-[9px] uppercase tracking-wide rounded-full bg-aceite-500 text-white px-1.5 py-0.5 font-bold">nuevo</span>
+          )}
+          <span className="ml-auto text-xs text-oliva-700 font-semibold">Ver detalle →</span>
+        </button>
+      ) : (
       <div className={`card p-4 ${nuevo ? 'border-2 border-aceite-500/60 bg-aceite-500/5' : ''}`}>
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
@@ -75,6 +99,7 @@ export function ReporteSemanalCard({ autoMarcarVisto = true, onVisto }: Props) {
           </button>
         </div>
       </div>
+      )}
 
       <Dialog abierto={modal} onCerrar={() => setModal(false)} titulo={`Reporte semanal · ${rep.desde} → ${rep.hasta}`} ancho="lg">
         <div className="space-y-5">
