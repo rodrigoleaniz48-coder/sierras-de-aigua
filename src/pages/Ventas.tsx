@@ -433,6 +433,22 @@ function NuevaVentaDialog({
   const [items, setItems] = useState<Item[]>([nuevoItem()])
   const [monedaVenta, setMonedaVenta] = useState<'UYU' | 'USD'>('UYU')
   const [cotizacionUsd, setCotizacionUsd] = useState<string>('') // pesos por 1 USD; obligatoria si venta USD
+  const [cotizacionBcuInfo, setCotizacionBcuInfo] = useState<{ fecha: string; cotizacion: number } | null>(null)
+  const [cargandoBcu, setCargandoBcu] = useState(false)
+
+  async function fetchCotizacionBcu(): Promise<number | null> {
+    setCargandoBcu(true)
+    try {
+      const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/bcu-cotizacion`, {
+        headers: { 'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` },
+      })
+      const j = await resp.json()
+      if (!resp.ok || j.error) throw new Error(j.error || `Error ${resp.status}`)
+      setCotizacionBcuInfo({ fecha: j.fecha, cotizacion: Number(j.cotizacion) })
+      return Number(j.cotizacion)
+    } catch { return null }
+    finally { setCargandoBcu(false) }
+  }
 
   const [tanques, setTanques] = useState<TanqueMin[]>([])
   const [productos, setProductos] = useState<Producto[]>([])
@@ -464,7 +480,9 @@ function NuevaVentaDialog({
       // Intentar cargar borrador de localStorage (últimas 24h)
       const b = leerBorrador()
       if (b) {
-        setFecha(b.fecha); setClienteId(b.clienteId); setCanal(b.canal); setFormaPago(b.formaPago)
+        // Fecha SIEMPRE hoy (aunque el borrador tenga una vieja)
+        setFecha(new Date().toISOString().slice(0, 10))
+        setClienteId(b.clienteId); setCanal(b.canal); setFormaPago(b.formaPago)
         setConFactura(b.conFactura); setEnvio(b.envio); setCostoEnvio(b.costoEnvio); setHorarioEntrega(b.horarioEntrega)
         setDireccionEnvio(b.direccionEnvio); setTelefonoEnvio(b.telefonoEnvio)
         setUbicacionId(b.ubicacionId); setEntregado(b.entregado); setCobrado(b.cobrado); setNotas(b.notas)
@@ -927,10 +945,15 @@ async function guardar(e: React.FormEvent) {
               <button
                 type="button"
                 className={`flex-1 py-2 ${monedaVenta === 'USD' ? 'bg-oliva-800 text-oliva-50' : 'bg-white text-oliva-700 hover:bg-oliva-100'}`}
-                onClick={() => {
+                onClick={async () => {
                   if (monedaVenta === 'USD') return
                   setMonedaVenta('USD')
-                  const cot = Number(cotizacionUsd) || 0
+                  // Cotización BCU auto si no hay una cargada
+                  let cot = Number(cotizacionUsd) || 0
+                  if (cot <= 0) {
+                    const bcu = await fetchCotizacionBcu()
+                    if (bcu) { cot = bcu; setCotizacionUsd(String(bcu)) }
+                  }
                   setItems((prev) => prev.map((it) => {
                     if (!it.presentacion_id) return { ...it, moneda: 'USD' }
                     const usd = cot > 0 ? Number(it.precio_unitario) / cot : Number(it.precio_usd) || 0
@@ -942,7 +965,21 @@ async function guardar(e: React.FormEvent) {
           </div>
           {monedaVenta === 'USD' && (
             <div>
-              <label className="label">Cotización U$S ($/USD)</label>
+              <label className="label flex items-center justify-between">
+                <span>Cotización U$S ($/USD)</span>
+                <button
+                  type="button"
+                  className="text-[10px] text-oliva-700 underline hover:text-oliva-900"
+                  onClick={async () => {
+                    const bcu = await fetchCotizacionBcu()
+                    if (bcu) {
+                      setCotizacionUsd(String(bcu))
+                      setItems((prev) => prev.map((it) => it.moneda === 'USD' ? { ...it, precio_unitario: (Number(it.precio_usd) || 0) * bcu } : it))
+                    }
+                  }}
+                  disabled={cargandoBcu}
+                >{cargandoBcu ? 'consultando…' : '🏦 BCU'}</button>
+              </label>
               <input
                 className="input tabular-nums"
                 type="number" min="0" step="0.01"
@@ -955,6 +992,11 @@ async function guardar(e: React.FormEvent) {
                   setItems((prev) => prev.map((it) => it.moneda === 'USD' ? { ...it, precio_unitario: (Number(it.precio_usd) || 0) * cot } : it))
                 }}
               />
+              {cotizacionBcuInfo && (
+                <p className="text-[10px] text-oliva-500 mt-1">
+                  BCU interbancario · cierre {cotizacionBcuInfo.fecha} · $ {cotizacionBcuInfo.cotizacion}
+                </p>
+              )}
             </div>
           )}
           <div className="sm:col-span-3 grid grid-cols-1 sm:grid-cols-3 gap-3 rounded-xl border border-oliva-100 bg-oliva-50/60 p-3">
