@@ -16,8 +16,11 @@ interface Gasto {
   metodo_pago: string | null
   reembolsable: boolean
   reembolsado: boolean
+  es_adelanto: boolean
   comprobante_url: string | null
 }
+
+type TipoGasto = 'normal' | 'reembolsable' | 'adelanto'
 
 interface Socio { id: string; nombre: string }
 
@@ -98,11 +101,24 @@ export function Gastos() {
     })
   }, [gastos, desde, hasta, filtroCategoria, veTodos, filtroSocio])
 
-  // KPIs
-  const totalUYU = filtrados.filter((g) => g.moneda === 'UYU').reduce((s, g) => s + Number(g.monto), 0)
-  const totalUSD = filtrados.filter((g) => g.moneda === 'USD').reduce((s, g) => s + Number(g.monto), 0)
+  // KPIs (excluyendo adelantos del total operativo)
+  const operativos = filtrados.filter((g) => !g.es_adelanto)
+  const totalUYU = operativos.filter((g) => g.moneda === 'UYU').reduce((s, g) => s + Number(g.monto), 0)
+  const totalUSD = operativos.filter((g) => g.moneda === 'USD').reduce((s, g) => s + Number(g.monto), 0)
   const reembPendUYU = filtrados.filter((g) => g.moneda === 'UYU' && g.reembolsable && !g.reembolsado).reduce((s, g) => s + Number(g.monto), 0)
   const reembPendUSD = filtrados.filter((g) => g.moneda === 'USD' && g.reembolsable && !g.reembolsado).reduce((s, g) => s + Number(g.monto), 0)
+
+  // Cuenta socio (por socio filtrado, o solo el propio si no ve todos)
+  const socioFocoId = veTodos ? (filtroSocio !== 'todos' ? filtroSocio : soyYo) : soyYo
+  const socioFocoNombre = socioPorId.get(socioFocoId)?.nombre ?? 'vos'
+  const misGastos = filtrados.filter((g) => g.socio_id === socioFocoId)
+  const reembYoUYU = misGastos.filter((g) => g.moneda === 'UYU' && g.reembolsable && !g.reembolsado).reduce((s, g) => s + Number(g.monto), 0)
+  const reembYoUSD = misGastos.filter((g) => g.moneda === 'USD' && g.reembolsable && !g.reembolsado).reduce((s, g) => s + Number(g.monto), 0)
+  const adelYoUYU  = misGastos.filter((g) => g.moneda === 'UYU' && g.es_adelanto).reduce((s, g) => s + Number(g.monto), 0)
+  const adelYoUSD  = misGastos.filter((g) => g.moneda === 'USD' && g.es_adelanto).reduce((s, g) => s + Number(g.monto), 0)
+  const netoUYU = reembYoUYU - adelYoUYU
+  const netoUSD = reembYoUSD - adelYoUSD
+  const hayCtaSocio = reembYoUYU + reembYoUSD + adelYoUYU + adelYoUSD > 0
 
   return (
     <div className="space-y-5">
@@ -156,11 +172,46 @@ export function Gastos() {
 
       {/* KPIs */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <Kpi titulo="Total UYU" valor={money(totalUYU)} />
-        <Kpi titulo="Total U$S" valor={'U$S ' + Number(totalUSD).toLocaleString('es-UY')} />
+        <Kpi titulo="Total UYU (operativo)" valor={money(totalUYU)} />
+        <Kpi titulo="Total U$S (operativo)" valor={'U$S ' + Number(totalUSD).toLocaleString('es-UY')} />
         <Kpi titulo="A reembolsar UYU" valor={money(reembPendUYU)} tono="aceite" />
         <Kpi titulo="A reembolsar U$S" valor={'U$S ' + Number(reembPendUSD).toLocaleString('es-UY')} tono="aceite" />
       </div>
+
+      {/* Cuenta socio (reembolsables vs adelantos) */}
+      {hayCtaSocio && (
+        <div className="card p-4 border-2 border-oliva-200 bg-oliva-50/40">
+          <div className="text-xs uppercase tracking-widest text-oliva-700 font-bold mb-2">
+            🧾 Cuenta con la empresa · {socioFocoNombre}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+            <div>
+              <div className="text-[11px] uppercase tracking-wide text-oliva-600">A favor tuyo (reembolsables)</div>
+              <div className="tabular-nums font-semibold text-green-700 mt-0.5">
+                {reembYoUYU > 0 && <div>+ {money(reembYoUYU)}</div>}
+                {reembYoUSD > 0 && <div>+ U$S {Number(reembYoUSD).toLocaleString('es-UY')}</div>}
+                {reembYoUYU === 0 && reembYoUSD === 0 && <div className="text-oliva-400">—</div>}
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px] uppercase tracking-wide text-oliva-600">Adelantos que te llevaste</div>
+              <div className="tabular-nums font-semibold text-red-700 mt-0.5">
+                {adelYoUYU > 0 && <div>− {money(adelYoUYU)}</div>}
+                {adelYoUSD > 0 && <div>− U$S {Number(adelYoUSD).toLocaleString('es-UY')}</div>}
+                {adelYoUYU === 0 && adelYoUSD === 0 && <div className="text-oliva-400">—</div>}
+              </div>
+            </div>
+            <div className="sm:border-l border-oliva-200 sm:pl-4">
+              <div className="text-[11px] uppercase tracking-wide text-oliva-600 font-bold">Ajuste a cobrar del sueldo</div>
+              <div className="tabular-nums font-bold text-oliva-900 text-lg mt-0.5">
+                {netoUYU !== 0 && <div className={netoUYU >= 0 ? 'text-green-800' : 'text-red-800'}>{netoUYU >= 0 ? '+' : '−'} {money(Math.abs(netoUYU))}</div>}
+                {netoUSD !== 0 && <div className={netoUSD >= 0 ? 'text-green-800' : 'text-red-800'}>{netoUSD >= 0 ? '+' : '−'} U$S {Number(Math.abs(netoUSD)).toLocaleString('es-UY')}</div>}
+                {netoUYU === 0 && netoUSD === 0 && <div className="text-oliva-500 text-base">Cero (todo saldado)</div>}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Lista */}
       {cargando ? (
@@ -179,7 +230,7 @@ export function Gastos() {
                 {veTodos && <th className="py-2 px-4">Socio</th>}
                 <th className="py-2 px-4">Descripción</th>
                 <th className="py-2 px-4">Método</th>
-                <th className="py-2 px-4">Reemb.</th>
+                <th className="py-2 px-4">Tipo</th>
                 <th className="py-2 px-4 text-right">Monto</th>
               </tr>
             </thead>
@@ -196,13 +247,15 @@ export function Gastos() {
                   <td className="py-2 px-4 text-oliva-700 text-xs truncate max-w-[280px]">{g.descripcion ?? '—'}</td>
                   <td className="py-2 px-4 text-oliva-700 text-xs">{g.metodo_pago?.replace('_', ' ') ?? '—'}</td>
                   <td className="py-2 px-4">
-                    {g.reembolsable ? (
+                    {g.es_adelanto ? (
+                      <span className="text-[11px] uppercase tracking-wide rounded-full bg-red-100 text-red-800 px-2 py-[1px]">adelanto</span>
+                    ) : g.reembolsable ? (
                       g.reembolsado
                         ? <span className="text-[11px] uppercase tracking-wide rounded-full bg-oliva-100 text-oliva-700 px-2 py-[1px]">reembolsado</span>
-                        : <span className="text-[11px] uppercase tracking-wide rounded-full bg-aceite-500/20 text-aceite-600 ring-1 ring-aceite-500/30 px-2 py-[1px]">pendiente</span>
+                        : <span className="text-[11px] uppercase tracking-wide rounded-full bg-aceite-500/20 text-aceite-600 ring-1 ring-aceite-500/30 px-2 py-[1px]">reembolsable</span>
                     ) : '—'}
                   </td>
-                  <td className="py-2 px-4 text-right tabular-nums font-medium text-oliva-900 whitespace-nowrap">
+                  <td className={`py-2 px-4 text-right tabular-nums font-medium whitespace-nowrap ${g.es_adelanto ? 'text-red-800' : 'text-oliva-900'}`}>
                     {formatMonto(g.monto, g.moneda)}
                   </td>
                 </tr>
@@ -261,7 +314,7 @@ function GastoDialog({
   const [moneda, setMoneda] = useState<'UYU' | 'USD'>('UYU')
   const [descripcion, setDescripcion] = useState('')
   const [metodoPago, setMetodoPago] = useState<string>('efectivo')
-  const [reembolsable, setReembolsable] = useState(false)
+  const [tipo, setTipo] = useState<TipoGasto>('normal')
   const [reembolsado, setReembolsado] = useState(false)
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -273,19 +326,19 @@ function GastoDialog({
       setFecha(editar.fecha); setCategoria(editar.categoria)
       setMonto(String(editar.monto)); setMoneda(editar.moneda)
       setDescripcion(editar.descripcion ?? ''); setMetodoPago(editar.metodo_pago ?? 'efectivo')
-      setReembolsable(editar.reembolsable); setReembolsado(editar.reembolsado)
+      setTipo(editar.es_adelanto ? 'adelanto' : editar.reembolsable ? 'reembolsable' : 'normal')
+      setReembolsado(editar.reembolsado)
     } else {
-      // Intento cargar borrador
-      const b = leerObj<{ fecha: string; categoria: string; monto: string; moneda: 'UYU' | 'USD'; descripcion: string; metodoPago: string; reembolsable: boolean; reembolsado: boolean }>('borrador:nuevo-gasto')
+      const b = leerObj<{ fecha: string; categoria: string; monto: string; moneda: 'UYU' | 'USD'; descripcion: string; metodoPago: string; tipo?: TipoGasto; reembolsado: boolean }>('borrador:nuevo-gasto')
       if (b) {
         setFecha(b.fecha); setCategoria(b.categoria); setMonto(b.monto); setMoneda(b.moneda)
         setDescripcion(b.descripcion); setMetodoPago(b.metodoPago)
-        setReembolsable(b.reembolsable); setReembolsado(b.reembolsado)
+        setTipo(b.tipo ?? 'normal'); setReembolsado(b.reembolsado)
       } else {
         setFecha(new Date().toISOString().slice(0, 10))
         setCategoria('otros'); setMonto(''); setMoneda('UYU')
         setDescripcion(''); setMetodoPago('efectivo')
-        setReembolsable(false); setReembolsado(false)
+        setTipo('normal'); setReembolsado(false)
       }
     }
     setError(null); setConfirmEliminar(false)
@@ -294,8 +347,8 @@ function GastoDialog({
   // Guardar borrador al escribir (solo en modo nuevo)
   useEffect(() => {
     if (!abierto || editar) return
-    guardarObj('borrador:nuevo-gasto', { fecha, categoria, monto, moneda, descripcion, metodoPago, reembolsable, reembolsado })
-  }, [abierto, editar, fecha, categoria, monto, moneda, descripcion, metodoPago, reembolsable, reembolsado])
+    guardarObj('borrador:nuevo-gasto', { fecha, categoria, monto, moneda, descripcion, metodoPago, tipo, reembolsado })
+  }, [abierto, editar, fecha, categoria, monto, moneda, descripcion, metodoPago, tipo, reembolsado])
 
   const propio = !editar || editar.socio_id === socioId
   const soloLectura = editar !== null && editar !== undefined && !propio && !veTodos
@@ -311,8 +364,9 @@ function GastoDialog({
       moneda,
       descripcion: descripcion.trim() || null,
       metodo_pago: metodoPago,
-      reembolsable,
-      reembolsado: reembolsable ? reembolsado : false,
+      reembolsable: tipo === 'reembolsable',
+      reembolsado: tipo === 'reembolsable' ? reembolsado : false,
+      es_adelanto: tipo === 'adelanto',
       actualizado_en: new Date().toISOString(),
     }
     const q = editar
@@ -364,16 +418,34 @@ function GastoDialog({
           </select>
         </div>
         <div className="rounded-xl border border-oliva-100 bg-oliva-50/60 p-3 space-y-2">
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" className="h-4 w-4 accent-oliva-700" checked={reembolsable} onChange={(e) => setReembolsable(e.target.checked)} disabled={soloLectura} />
-            <span className="text-sm text-oliva-800">Es reembolsable (lo puse de mi bolsillo y me lo tienen que devolver)</span>
+          <div className="text-[11px] uppercase tracking-wide text-oliva-600 font-semibold mb-1">Tipo</div>
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input type="radio" name="tipoGasto" className="h-4 w-4 mt-0.5 accent-oliva-700" checked={tipo === 'normal'} onChange={() => setTipo('normal')} disabled={soloLectura} />
+            <div>
+              <div className="text-sm text-oliva-800 font-medium">Gasto normal</div>
+              <div className="text-[11px] text-oliva-600">Gasto operativo pagado por la empresa.</div>
+            </div>
           </label>
-          {reembolsable && (
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input type="radio" name="tipoGasto" className="h-4 w-4 mt-0.5 accent-oliva-700" checked={tipo === 'reembolsable'} onChange={() => setTipo('reembolsable')} disabled={soloLectura} />
+            <div>
+              <div className="text-sm text-oliva-800 font-medium">Reembolsable</div>
+              <div className="text-[11px] text-oliva-600">Lo puse de mi bolsillo, la empresa me lo tiene que devolver.</div>
+            </div>
+          </label>
+          {tipo === 'reembolsable' && (
             <label className="flex items-center gap-2 cursor-pointer pl-6">
               <input type="checkbox" className="h-4 w-4 accent-oliva-700" checked={reembolsado} onChange={(e) => setReembolsado(e.target.checked)} disabled={soloLectura} />
               <span className="text-sm text-oliva-800">Ya me lo reembolsaron</span>
             </label>
           )}
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input type="radio" name="tipoGasto" className="h-4 w-4 mt-0.5 accent-oliva-700" checked={tipo === 'adelanto'} onChange={() => setTipo('adelanto')} disabled={soloLectura} />
+            <div>
+              <div className="text-sm text-oliva-800 font-medium">Adelanto a cuenta de sueldo</div>
+              <div className="text-[11px] text-oliva-600">Me llevé plata de la caja/cobros. Se descuenta de mi sueldo, no cuenta como gasto operativo.</div>
+            </div>
+          </label>
         </div>
 
         {error && <div className="text-sm text-red-700">{error}</div>}

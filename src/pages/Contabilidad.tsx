@@ -100,7 +100,7 @@ function EstadoResultados() {
     setCargando(true)
     Promise.all([
       supabase.from('ventas').select('id,fecha,total,con_factura,ubicacion_id,cliente_id').gte('fecha', desde).lte('fecha', hasta).neq('estado', 'cancelado'),
-      supabase.from('gastos').select('id,fecha,monto,moneda,descripcion,categoria,socio_id').gte('fecha', desde).lte('fecha', hasta),
+      supabase.from('gastos').select('id,fecha,monto,moneda,descripcion,categoria,socio_id').gte('fecha', desde).lte('fecha', hasta).eq('es_adelanto', false),
     ]).then(([v, g]) => {
       setVentas((v.data as Venta[]) ?? [])
       setGastos((g.data as Gasto[]) ?? [])
@@ -229,7 +229,7 @@ function Conciliacion() {
     const [mb, v, g, cl] = await Promise.all([
       supabase.from('movimientos_bancarios').select('*').eq('cuenta_id', Number(cuentaId)).gte('fecha', desde).lte('fecha', hasta).order('fecha'),
       supabase.from('ventas').select('id,fecha,total,con_factura,ubicacion_id,cliente_id').gte('fecha', desde).lte('fecha', hasta).neq('estado', 'cancelado'),
-      supabase.from('gastos').select('id,fecha,monto,moneda,descripcion,categoria,socio_id').gte('fecha', desde).lte('fecha', hasta),
+      supabase.from('gastos').select('id,fecha,monto,moneda,descripcion,categoria,socio_id').gte('fecha', desde).lte('fecha', hasta).eq('es_adelanto', false),
       supabase.from('clientes').select('id,nombre'),
     ])
     setMovs((mb.data as MovBancario[]) ?? [])
