@@ -55,22 +55,26 @@ export async function generarReporteSemanaPasada(): Promise<ReporteSemanal> {
   anterior.setDate(semanaPasada.getDate() - 7)
   const rangoAnt = rangoSemanal(anterior)
 
-  const [vRes, socioRes, cliRes, itemsRes, presRes, prodRes] = await Promise.all([
-    supabase.from('ventas').select('id,fecha,cliente_id,socio_id,total,envio,estado')
-      .gte('fecha', rangoAnt.desde).lte('fecha', rango.hasta)
-      .neq('estado', 'cancelado'),
-    supabase.from('perfiles').select('id,nombre'),
-    supabase.from('clientes').select('id,nombre'),
-    supabase.from('items_venta').select('venta_id,presentacion_id,unidades,subtotal'),
-    supabase.from('presentaciones').select('id,nombre,producto_id'),
-    supabase.from('productos').select('id,nombre'),
-  ])
-  const ventas = (vRes.data ?? []) as Array<{ id: number; fecha: string; cliente_id: number | null; socio_id: string; total: number; envio: boolean }>
-  const socios = new Map((socioRes.data ?? []).map((s: { id: string; nombre: string }) => [s.id, s.nombre]))
-  const clientes = new Map((cliRes.data ?? []).map((c: { id: number; nombre: string }) => [c.id, c.nombre]))
-  const items = (itemsRes.data ?? []) as Array<{ venta_id: number; presentacion_id: number; unidades: number; subtotal: number }>
-  const pres = new Map((presRes.data ?? []).map((p: { id: number; nombre: string; producto_id: number }) => [p.id, p]))
-  const prods = new Map((prodRes.data ?? []).map((p: { id: number; nombre: string }) => [p.id, p.nombre]))
+  // Traer datos vía RPC (SECURITY DEFINER) para que Ayelén / Gonzalo también vean el total de todos los socios
+  const { data: rpcData, error: rpcErr } = await supabase.rpc('reporte_semanal_data', {
+    p_desde: rangoAnt.desde,
+    p_hasta: rango.hasta,
+  })
+  if (rpcErr) throw new Error('Error cargando reporte: ' + rpcErr.message)
+  const dataAll = rpcData as {
+    ventas: Array<{ id: number; fecha: string; cliente_id: number | null; socio_id: string; total: number; envio: boolean; estado: string }>
+    items: Array<{ venta_id: number; presentacion_id: number; unidades: number; subtotal: number }>
+    clientes: Array<{ id: number; nombre: string }>
+    perfiles: Array<{ id: string; nombre: string }>
+    presentaciones: Array<{ id: number; nombre: string; producto_id: number }>
+    productos: Array<{ id: number; nombre: string }>
+  }
+  const ventas = dataAll.ventas ?? []
+  const socios = new Map((dataAll.perfiles ?? []).map((s) => [s.id, s.nombre]))
+  const clientes = new Map((dataAll.clientes ?? []).map((c) => [c.id, c.nombre]))
+  const items = dataAll.items ?? []
+  const pres = new Map((dataAll.presentaciones ?? []).map((p) => [p.id, p]))
+  const prods = new Map((dataAll.productos ?? []).map((p) => [p.id, p.nombre]))
 
   const ventasSemana = ventas.filter((v) => v.fecha >= rango.desde && v.fecha <= rango.hasta)
   const ventasAnt = ventas.filter((v) => v.fecha >= rangoAnt.desde && v.fecha <= rangoAnt.hasta)

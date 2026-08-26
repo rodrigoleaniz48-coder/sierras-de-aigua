@@ -88,6 +88,9 @@ export function Dashboard() {
   const hoy = new Date().toLocaleDateString('es-UY', { day: 'numeric', month: 'long', year: 'numeric' })
   const ticketProm = r.cantVentasMes > 0 ? r.totalMes / r.cantVentasMes : 0
   const deltaMes = r.totalMesAnterior > 0 ? ((r.totalMes - r.totalMesAnterior) / r.totalMesAnterior) * 100 : null
+  // Ayelén no ve la parte operativa (alertas de stock y pendientes) — solo reporte semanal + KPIs
+  const nombreLower = (perfil?.nombre ?? '').toLowerCase()
+  const soloReporte = nombreLower.includes('ayelen') || nombreLower.includes('ayelén')
 
   return (
     <div className="space-y-4 max-w-[1200px]">
@@ -109,7 +112,7 @@ export function Dashboard() {
         )}
       </div>
 
-      <AlertasStockBajo />
+      {!soloReporte && <AlertasStockBajo />}
 
       {/* KPIs del mes */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -125,30 +128,32 @@ export function Dashboard() {
         <KpiCard titulo="Mes anterior" valor={cargando ? '…' : money(r.totalMesAnterior)} sub="para comparar" />
       </div>
 
-      {/* Qué hacer ahora */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-        <AccionCard
-          titulo="Pendientes de entrega"
-          valor={cargando ? '…' : String(r.pendEntrega)}
-          sub={r.pendEntrega > 0 ? 'clic para ver' : 'todo entregado ✓'}
-          onClick={() => nav('/ventas')}
-          tono={r.pendEntrega > 0 ? 'ambar' : 'ok'}
-        />
-        <AccionCard
-          titulo="Pendientes de cobro"
-          valor={cargando ? '…' : String(r.pendCobro)}
-          sub={r.pendCobro > 0 ? money(r.pendCobroMonto) + ' pendiente' : 'todo cobrado ✓'}
-          onClick={() => nav('/ventas')}
-          tono={r.pendCobro > 0 ? 'rojo' : 'ok'}
-        />
-        <AccionCard
-          titulo="Clientes en riesgo"
-          valor={cargando ? '…' : String(r.enRiesgo)}
-          sub={r.enRiesgo > 0 ? 'no compran hace 60–120 d' : 'sin alertas'}
-          onClick={() => nav('/clientes')}
-          tono={r.enRiesgo > 0 ? 'ambar' : 'ok'}
-        />
-      </div>
+      {/* Qué hacer ahora (oculto para Ayelén) */}
+      {!soloReporte && (
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+          <AccionCard
+            titulo="Pendientes de entrega"
+            valor={cargando ? '…' : String(r.pendEntrega)}
+            sub={r.pendEntrega > 0 ? 'clic para ver' : 'todo entregado ✓'}
+            onClick={() => nav('/ventas')}
+            tono={r.pendEntrega > 0 ? 'ambar' : 'ok'}
+          />
+          <AccionCard
+            titulo="Pendientes de cobro"
+            valor={cargando ? '…' : String(r.pendCobro)}
+            sub={r.pendCobro > 0 ? money(r.pendCobroMonto) + ' pendiente' : 'todo cobrado ✓'}
+            onClick={() => nav('/ventas')}
+            tono={r.pendCobro > 0 ? 'rojo' : 'ok'}
+          />
+          <AccionCard
+            titulo="Clientes en riesgo"
+            valor={cargando ? '…' : String(r.enRiesgo)}
+            sub={r.enRiesgo > 0 ? 'no compran hace 60–120 d' : 'sin alertas'}
+            onClick={() => nav('/clientes')}
+            tono={r.enRiesgo > 0 ? 'ambar' : 'ok'}
+          />
+        </div>
+      )}
 
       <ReporteSemanalCard compact />
     </div>
