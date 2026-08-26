@@ -1260,11 +1260,12 @@ function usuarioDatosBancarios(nombre: string | null | undefined, conFactura: bo
   const cuentaHarria = ['*Datos para transferencia:*', '*BROU*', 'Caja de ahorro en pesos', '001529985-00002', 'HARRIA SRL', '', 'Te agradezco me envíes el comprobante de pago!']
   const cuentaRodrigo = ['*Datos para transferencia:*', 'BROU', 'Caja de ahorro en pesos', '110854026-00001', 'RODRIGO LEANIZ', '', 'Te agradezco me envíes el comprobante de pago!']
   const cuentaGonzalo = ['*Datos para transferencia:*', 'BROU', '000247689-00002', 'Gonzalo Leániz', '', 'Te agradezco me envíes el comprobante de pago!']
+  const cuentaSanti   = ['*Datos para transferencia:*', 'BROU', '001773207-00001', 'Santiago Leániz', '', 'Te agradezco me envíes el comprobante de pago!']
   if (n.includes('rodrigo') || n.includes('ayelen') || n.includes('ayelén')) {
     return conFactura ? cuentaHarria : cuentaRodrigo
   }
   if (n.includes('santi')) {
-    return conFactura ? cuentaHarria : null // sin factura: sin datos (compartida solo la Harria)
+    return conFactura ? cuentaHarria : cuentaSanti
   }
   if (n.includes('gonzalo')) {
     return conFactura ? cuentaHarria : cuentaGonzalo
