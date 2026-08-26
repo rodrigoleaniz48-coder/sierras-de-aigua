@@ -25,3 +25,4 @@ pnpm-debug.log*
 
 # repo scaffolding
 repo/
+supabase/.temp/
