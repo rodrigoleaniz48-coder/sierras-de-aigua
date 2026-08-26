@@ -38,8 +38,8 @@ export function Dashboard() {
       supabase.from('ventas').select('id, total, entregado, cobrado').gte('fecha', mesInicio).neq('estado', 'cancelado'),
       // Total del mes anterior
       supabase.from('ventas').select('total').gte('fecha', mesAntInicio).lte('fecha', mesAntFin).neq('estado', 'cancelado'),
-      // Items del mes con producto y presentación, para calcular litros de aceite
-      supabase.from('items_venta').select('unidades, presentacion:presentaciones(volumen_ml, producto:productos(categoria)), venta:ventas!inner(fecha, estado)').gte('venta.fecha', mesInicio).neq('venta.estado', 'cancelado'),
+      // Items del mes con producto y presentación, para calcular litros de aceite (envasado + granel)
+      supabase.from('items_venta').select('unidades, presentacion:presentaciones(volumen_ml, producto:productos(nombre, categoria)), venta:ventas!inner(fecha, estado)').gte('venta.fecha', mesInicio).neq('venta.estado', 'cancelado'),
       // Ventas con última compra vieja (para "en riesgo") — traemos fechas de última venta por cliente
       supabase.from('ventas').select('cliente_id, fecha').neq('estado', 'cancelado').order('fecha', { ascending: false }),
     ])
@@ -56,8 +56,11 @@ export function Dashboard() {
         let litros = 0
         for (const it of (iRes.data as any[]) ?? []) {
           const cat = it.presentacion?.producto?.categoria
+          const nombreProd = String(it.presentacion?.producto?.nombre ?? '').toLowerCase()
           const vol = Number(it.presentacion?.volumen_ml ?? 0)
-          if (cat === 'aceite' && vol > 0) litros += (Number(it.unidades) * vol) / 1000
+          // Envasado (categoría 'aceite') + granel (producto 'Aceite a granel' con volumen 1000)
+          const esAceite = cat === 'aceite' || nombreProd.includes('aceite a granel')
+          if (esAceite && vol > 0) litros += (Number(it.unidades) * vol) / 1000
         }
 
         // En riesgo: clientes cuya última compra fue hace entre 60 y 120 días
