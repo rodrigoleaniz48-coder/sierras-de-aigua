@@ -197,7 +197,7 @@ export function Clientes() {
                       </span>
                     </td>
                     <td className="py-2 px-4 text-oliva-700">
-                      {c.telefono && <div>{c.telefono}</div>}
+                      {(c.whatsapp || c.telefono) && <div>{c.whatsapp ?? c.telefono}</div>}
                       {c.email && <div className="text-xs text-oliva-500">{c.email}</div>}
                     </td>
                     <td className="py-2 px-4 text-oliva-700">{c.localidad ?? '—'}</td>

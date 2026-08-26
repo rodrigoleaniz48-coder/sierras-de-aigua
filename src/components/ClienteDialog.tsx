@@ -61,7 +61,6 @@ export function ClienteDialog({
   const [eliminando, setEliminando] = useState(false)
   const [nombre, setNombre] = useState('')
   const [tipo, setTipo] = useState<Cliente['tipo']>('minorista')
-  const [telefono, setTelefono] = useState('')
   const [email, setEmail] = useState('')
   const [whatsapp, setWhatsapp] = useState('')
   const [direccion, setDireccion] = useState('')
@@ -76,20 +75,20 @@ export function ClienteDialog({
   useEffect(() => {
     if (!abierto) return
     if (editar) {
-      setNombre(editar.nombre); setTipo(editar.tipo); setTelefono(editar.telefono ?? '')
-      setEmail(editar.email ?? ''); setWhatsapp(editar.whatsapp ?? '')
+      setNombre(editar.nombre); setTipo(editar.tipo)
+      setEmail(editar.email ?? ''); setWhatsapp(editar.whatsapp ?? editar.telefono ?? '')
       setDireccion(editar.direccion ?? ''); setLocalidad(editar.localidad ?? '')
       setRut(editar.rut ?? ''); setPago(editar.condiciones_pago ?? '')
       setSocioAsig(editar.socio_asignado ?? ''); setNotas(editar.notas ?? '')
     } else {
-      const b = leerObj<{ nombre: string; tipo: Cliente['tipo']; telefono: string; email: string; whatsapp: string; direccion: string; localidad: string; rut: string; pago: string; socioAsig: string; notas: string }>(BORRADOR_CLIENTE)
+      const b = leerObj<{ nombre: string; tipo: Cliente['tipo']; email: string; whatsapp: string; direccion: string; localidad: string; rut: string; pago: string; socioAsig: string; notas: string }>(BORRADOR_CLIENTE)
       if (b) {
-        setNombre(b.nombre); setTipo(b.tipo); setTelefono(b.telefono); setEmail(b.email); setWhatsapp(b.whatsapp)
+        setNombre(b.nombre); setTipo(b.tipo); setEmail(b.email); setWhatsapp(b.whatsapp)
         setDireccion(b.direccion); setLocalidad(b.localidad); setRut(b.rut); setPago(b.pago)
         setSocioAsig(b.socioAsig || (defaultSocioAsignado ?? ''))
         setNotas(b.notas)
       } else {
-        setNombre(''); setTipo('minorista'); setTelefono(''); setEmail(''); setWhatsapp('')
+        setNombre(''); setTipo('minorista'); setEmail(''); setWhatsapp('')
         setDireccion(''); setLocalidad(''); setRut(''); setPago('')
         setSocioAsig(defaultSocioAsignado ?? '')
         setNotas('')
@@ -101,8 +100,8 @@ export function ClienteDialog({
   // Guardar borrador al escribir (solo en modo nuevo)
   useEffect(() => {
     if (!abierto || editar) return
-    guardarObj(BORRADOR_CLIENTE, { nombre, tipo, telefono, email, whatsapp, direccion, localidad, rut, pago, socioAsig, notas })
-  }, [abierto, editar, nombre, tipo, telefono, email, whatsapp, direccion, localidad, rut, pago, socioAsig, notas])
+    guardarObj(BORRADOR_CLIENTE, { nombre, tipo, email, whatsapp, direccion, localidad, rut, pago, socioAsig, notas })
+  }, [abierto, editar, nombre, tipo, email, whatsapp, direccion, localidad, rut, pago, socioAsig, notas])
 
   async function eliminar() {
     if (!editar || !onEliminar) return
@@ -141,7 +140,7 @@ export function ClienteDialog({
     const payload = {
       nombre: nombre.trim(),
       tipo,
-      telefono: telefono.trim() || null,
+      telefono: null,
       email: email.trim() || null,
       whatsapp: whatsapp.trim() || null,
       direccion: direccion.trim() || null,
@@ -180,7 +179,7 @@ export function ClienteDialog({
           </div>
           <div>
             <label className="label">Teléfono</label>
-            <input className="input" value={telefono} onChange={(e) => setTelefono(e.target.value)} disabled={soloLectura} />
+            <input className="input" placeholder="+598 9X XXX XXX" value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} disabled={soloLectura} />
           </div>
           {!rapido && (
             <>
@@ -190,10 +189,6 @@ export function ClienteDialog({
                   <option value="">— sin asignar —</option>
                   {socios.map((s) => <option key={s.id} value={s.id}>{s.nombre}</option>)}
                 </select>
-              </div>
-              <div>
-                <label className="label">WhatsApp</label>
-                <input className="input" value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} disabled={soloLectura} />
               </div>
               <div className="sm:col-span-2">
                 <label className="label">Email</label>
