@@ -213,11 +213,20 @@ async function callGemini(payload: any) {
   return j
 }
 
-async function correrAgente(mensajes: Array<{ role: string; content: string }>, systemPrompt: string, supabase: any, userId: string) {
-  const contents: any[] = mensajes.map((m) => ({
-    role: m.role === 'assistant' ? 'model' : 'user',
-    parts: [{ text: m.content }],
-  }))
+async function correrAgente(mensajes: Array<{ role: string; content: string; audio_base64?: string; audio_mime?: string }>, systemPrompt: string, supabase: any, userId: string) {
+  const contents: any[] = mensajes.map((m) => {
+    const parts: any[] = []
+    if (m.audio_base64) {
+      const mime = m.audio_mime || 'audio/webm'
+      parts.push({ inline_data: { mime_type: mime.split(';')[0], data: m.audio_base64 } })
+    }
+    if (m.content && m.content.trim() && m.content !== '🎤 (audio)') {
+      parts.push({ text: m.content })
+    } else if (parts.length === 0) {
+      parts.push({ text: m.content || '' })
+    }
+    return { role: m.role === 'assistant' ? 'model' : 'user', parts }
+  })
   const tools_decl = [{ functionDeclarations: asGeminiFunctionDeclarations() }]
   const accionesEjecutadas: any[] = []
 

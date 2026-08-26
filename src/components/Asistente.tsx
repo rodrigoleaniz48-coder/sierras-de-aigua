@@ -5,6 +5,8 @@ import { useAuth } from '../lib/auth'
 interface Mensaje {
   role: 'user' | 'assistant'
   content: string
+  audio_base64?: string
+  audio_mime?: string
   acciones?: Array<{ tool: string; args: unknown; resultado: unknown }>
 }
 
@@ -34,7 +36,10 @@ export function Asistente({ abierto, onCerrar }: Props) {
   const [entrada, setEntrada] = useState('')
   const [enviando, setEnviando] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [grabando, setGrabando] = useState(false)
   const bottomRef = useRef<HTMLDivElement | null>(null)
+  const recorderRef = useRef<MediaRecorder | null>(null)
+  const chunksRef = useRef<Blob[]>([])
 
   useEffect(() => {
     if (userId) setMensajes(leerHistorial(userId))
@@ -44,14 +49,11 @@ export function Asistente({ abierto, onCerrar }: Props) {
     if (abierto) bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [abierto, mensajes])
 
-  async function enviar() {
-    const texto = entrada.trim()
-    if (!texto || enviando) return
+  async function enviarMensaje(msg: Mensaje) {
     setError(null)
-    const nuevos: Mensaje[] = [...mensajes, { role: 'user', content: texto }]
+    const nuevos: Mensaje[] = [...mensajes, msg]
     setMensajes(nuevos)
     guardarHistorial(userId, nuevos)
-    setEntrada('')
     setEnviando(true)
     try {
       const { data: { session: s } } = await supabase.auth.getSession()
@@ -59,12 +61,12 @@ export function Asistente({ abierto, onCerrar }: Props) {
       if (!token) throw new Error('Sesión no encontrada. Refrescá la página.')
       const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/agente`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({
-          mensajes: nuevos.map((m) => ({ role: m.role, content: m.content })),
+          mensajes: nuevos.map((m) => ({
+            role: m.role, content: m.content,
+            audio_base64: m.audio_base64, audio_mime: m.audio_mime,
+          })),
         }),
       })
       const j = await resp.json()
@@ -77,6 +79,49 @@ export function Asistente({ abierto, onCerrar }: Props) {
     } finally {
       setEnviando(false)
     }
+  }
+
+  async function enviar() {
+    const texto = entrada.trim()
+    if (!texto || enviando) return
+    setEntrada('')
+    await enviarMensaje({ role: 'user', content: texto })
+  }
+
+  async function iniciarGrabacion() {
+    if (grabando || enviando) return
+    setError(null)
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setError('Este navegador no soporta grabación de audio.'); return
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus'
+        : MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm'
+        : MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4'
+        : ''
+      const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined)
+      chunksRef.current = []
+      rec.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data) }
+      rec.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop())
+        const blob = new Blob(chunksRef.current, { type: rec.mimeType || 'audio/webm' })
+        const b64 = await blobABase64(blob)
+        setGrabando(false)
+        await enviarMensaje({ role: 'user', content: '🎤 (audio)', audio_base64: b64, audio_mime: blob.type })
+      }
+      recorderRef.current = rec
+      rec.start()
+      setGrabando(true)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      setGrabando(false)
+    }
+  }
+
+  function detenerGrabacion() {
+    const rec = recorderRef.current
+    if (rec && rec.state !== 'inactive') rec.stop()
   }
 
   function limpiar() {
@@ -134,27 +179,61 @@ export function Asistente({ abierto, onCerrar }: Props) {
         </div>
 
         <div className="p-3 border-t border-oliva-100 bg-white">
-          <div className="flex gap-2">
-            <textarea
-              className="input flex-1 resize-none"
-              rows={2}
-              placeholder="Preguntá o pedile algo…"
-              value={entrada}
-              onChange={(e) => setEntrada(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enviar() }
-              }}
-              disabled={enviando}
-            />
-            <button className="btn-primary shrink-0 self-end" onClick={enviar} disabled={enviando || !entrada.trim()}>
-              Enviar
-            </button>
-          </div>
-          <div className="text-[10px] text-oliva-500 mt-1">Enter para enviar · Shift+Enter para nueva línea</div>
+          {grabando ? (
+            <div className="flex items-center gap-2">
+              <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-md border border-red-300 bg-red-50">
+                <div className="h-2 w-2 rounded-full bg-red-600 animate-pulse" />
+                <span className="text-sm text-red-800 font-medium">Grabando… hablá y tocá "Enviar"</span>
+              </div>
+              <button className="btn-primary shrink-0" onClick={detenerGrabacion}>Enviar</button>
+            </div>
+          ) : (
+            <div className="flex gap-2">
+              <textarea
+                className="input flex-1 resize-none"
+                rows={2}
+                placeholder="Preguntá o pedile algo…"
+                value={entrada}
+                onChange={(e) => setEntrada(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enviar() }
+                }}
+                disabled={enviando}
+              />
+              <div className="flex flex-col gap-1 shrink-0 self-end">
+                <button
+                  type="button"
+                  className="h-10 w-10 rounded-md bg-oliva-100 hover:bg-oliva-200 text-oliva-800 flex items-center justify-center transition"
+                  onClick={iniciarGrabacion}
+                  disabled={enviando}
+                  title="Grabar audio"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 18v4M8 22h8"/></svg>
+                </button>
+                <button className="btn-primary" onClick={enviar} disabled={enviando || !entrada.trim()}>
+                  Enviar
+                </button>
+              </div>
+            </div>
+          )}
+          <div className="text-[10px] text-oliva-500 mt-1">Enter para enviar · Shift+Enter nueva línea · 🎤 grabar</div>
         </div>
       </div>
     </div>
   )
+}
+
+function blobABase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onloadend = () => {
+      const dataUrl = r.result as string // "data:audio/webm;base64,..."
+      const idx = dataUrl.indexOf(',')
+      resolve(idx >= 0 ? dataUrl.slice(idx + 1) : dataUrl)
+    }
+    r.onerror = () => reject(r.error)
+    r.readAsDataURL(blob)
+  })
 }
 
 function Burbuja({ m }: { m: Mensaje }) {
