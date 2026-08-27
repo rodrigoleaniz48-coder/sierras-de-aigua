@@ -5,6 +5,7 @@
  * Almazara (1):   aceite 24 · no-aceite 24
  * Maldonado (2):  6 para todo
  * Montevideo (3): aceite 18 · no-aceite 12
+ * Posada    (4):  6 para todo (default hasta ajustar)
  * Envases vacíos: sin alerta
  */
 export interface ReglaMinimo {
@@ -19,6 +20,7 @@ export function reglaMinimo(categoria: string, ubicacionId: number): ReglaMinimo
   if (ubicacionId === 2) return { min: 6 } // Maldonado
   if (ubicacionId === 1) return { min: 24 } // Almazara
   if (ubicacionId === 3) return { min: esAceite ? 18 : 12 } // Montevideo
+  if (ubicacionId === 4) return { min: 6 } // Posada
 
   return { min: 0 }
 }
