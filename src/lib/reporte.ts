@@ -62,14 +62,14 @@ export async function generarReporteSemanaPasada(): Promise<ReporteSemanal> {
   })
   if (rpcErr) throw new Error('Error cargando reporte: ' + rpcErr.message)
   const dataAll = rpcData as {
-    ventas: Array<{ id: number; fecha: string; cliente_id: number | null; socio_id: string; total: number; envio: boolean; estado: string }>
+    ventas: Array<{ id: number; fecha: string; cliente_id: number | null; socio_id: string; total: number; envio: boolean; estado: string; promocion_comercial?: boolean }>
     items: Array<{ venta_id: number; presentacion_id: number; unidades: number; subtotal: number }>
     clientes: Array<{ id: number; nombre: string }>
     perfiles: Array<{ id: string; nombre: string }>
     presentaciones: Array<{ id: number; nombre: string; producto_id: number }>
     productos: Array<{ id: number; nombre: string }>
   }
-  const ventas = dataAll.ventas ?? []
+  const ventas = (dataAll.ventas ?? []).filter((v) => !v.promocion_comercial)
   const socios = new Map((dataAll.perfiles ?? []).map((s) => [s.id, s.nombre]))
   const clientes = new Map((dataAll.clientes ?? []).map((c) => [c.id, c.nombre]))
   const items = dataAll.items ?? []

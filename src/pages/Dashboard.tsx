@@ -6,6 +6,8 @@ import { money, num } from '../lib/format'
 import { ReporteSemanalCard } from '../components/ReporteSemanalCard'
 import { AlertasStockBajo } from '../components/AlertasStockBajo'
 
+interface AvisoCadete { socio: string; cantidad: number; ubicacion: string }
+
 interface Resumen {
   totalMes: number
   cantVentasMes: number
@@ -26,6 +28,35 @@ export function Dashboard() {
     pendEntrega: 0, pendCobro: 0, pendCobroMonto: 0, enRiesgo: 0,
   })
   const [cargando, setCargando] = useState(true)
+  const [avisosCadete, setAvisosCadete] = useState<AvisoCadete[]>([])
+  const soyYo = perfil?.id ?? ''
+  const nombreLower0 = (perfil?.nombre ?? '').toLowerCase()
+  const usaCadete = nombreLower0.includes('rodrigo') || nombreLower0.includes('santi')
+
+  // Aviso: pedidos con cadete pendientes de OTROS socios (para unificar el envío)
+  useEffect(() => {
+    if (!usaCadete || !soyYo) { setAvisosCadete([]); return }
+    let cancel = false
+    ;(async () => {
+      const [v, s, u] = await Promise.all([
+        supabase.from('ventas').select('id,socio_id,ubicacion_id').eq('envio', true).eq('entregado', false).neq('estado', 'cancelado').neq('socio_id', soyYo),
+        supabase.from('perfiles').select('id,nombre'),
+        supabase.from('ubicaciones').select('id,nombre'),
+      ])
+      if (cancel) return
+      const socios = new Map((s.data ?? []).map((x: { id: string; nombre: string }) => [x.id, x.nombre]))
+      const ubics = new Map((u.data ?? []).map((x: { id: number; nombre: string }) => [x.id, x.nombre]))
+      const map = new Map<string, AvisoCadete>()
+      for (const vv of (v.data ?? []) as { socio_id: string; ubicacion_id: number }[]) {
+        const key = `${vv.socio_id}:${vv.ubicacion_id}`
+        const prev = map.get(key)
+        if (prev) prev.cantidad++
+        else map.set(key, { socio: socios.get(vv.socio_id) ?? '?', cantidad: 1, ubicacion: ubics.get(vv.ubicacion_id) ?? '?' })
+      }
+      setAvisosCadete([...map.values()].sort((a, b) => b.cantidad - a.cantidad))
+    })()
+    return () => { cancel = true }
+  }, [soyYo, usaCadete])
 
   useEffect(() => {
     const hoy = new Date()
@@ -35,9 +66,9 @@ export function Dashboard() {
 
     Promise.all([
       // Ventas del mes (con estado)
-      supabase.from('ventas').select('id, total, entregado, cobrado').gte('fecha', mesInicio).neq('estado', 'cancelado'),
+      supabase.from('ventas').select('id, total, entregado, cobrado').gte('fecha', mesInicio).neq('estado', 'cancelado').eq('promocion_comercial', false),
       // Total del mes anterior
-      supabase.from('ventas').select('total').gte('fecha', mesAntInicio).lte('fecha', mesAntFin).neq('estado', 'cancelado'),
+      supabase.from('ventas').select('total').gte('fecha', mesAntInicio).lte('fecha', mesAntFin).neq('estado', 'cancelado').eq('promocion_comercial', false),
       // Items del mes con producto y presentación, para calcular litros de aceite (envasado + granel)
       supabase.from('items_venta').select('unidades, presentacion:presentaciones(volumen_ml, producto:productos(nombre, categoria)), venta:ventas!inner(fecha, estado)').gte('venta.fecha', mesInicio).neq('venta.estado', 'cancelado'),
       // Ventas con última compra vieja (para "en riesgo") — traemos fechas de última venta por cliente
@@ -113,6 +144,26 @@ export function Dashboard() {
       </div>
 
       {!soloReporte && <AlertasStockBajo />}
+
+      {avisosCadete.length > 0 && (
+        <div className="rounded-lg border-2 border-blue-300 bg-blue-50 p-3 flex items-start gap-3">
+          <div className="text-xl">🛵</div>
+          <div className="flex-1 text-sm text-blue-900">
+            <div className="font-bold">Coordinar cadete con otro socio</div>
+            <div className="mt-0.5 text-blue-800">
+              {avisosCadete.map((a, i) => (
+                <div key={i}>
+                  <b>{a.socio}</b> tiene <b>{a.cantidad}</b> {a.cantidad === 1 ? 'pedido pendiente' : 'pedidos pendientes'} con envío en <b>{a.ubicacion}</b>.
+                </div>
+              ))}
+              <div className="mt-1 text-[11px] text-blue-700">Considerá unificar el mensaje al cadete desde la lista.</div>
+            </div>
+          </div>
+          <button className="btn-secondary text-xs shrink-0" onClick={() => nav('/ventas')}>
+            Ir a Ventas →
+          </button>
+        </div>
+      )}
 
       {/* KPIs del mes */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">

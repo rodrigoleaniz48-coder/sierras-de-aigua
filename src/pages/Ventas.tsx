@@ -30,6 +30,7 @@ interface Venta {
   notas: string | null; creado_en: string
   moneda?: 'UYU' | 'USD' | null
   cotizacion?: number | null
+  promocion_comercial?: boolean
 }
 
 const CANALES = ['whatsapp', 'directa', 'feria'] as const
@@ -98,7 +99,7 @@ export function Ventas() {
   }, [ventas, filtroSocio, filtroDesde, filtroHasta, soloEnvio])
 
   const totalPeriodo = useMemo(
-    () => filtradas.reduce((s, v) => (v.estado === 'cancelado' ? s : s + Number(v.total ?? 0)), 0),
+    () => filtradas.reduce((s, v) => (v.estado === 'cancelado' || v.promocion_comercial ? s : s + Number(v.total ?? 0)), 0),
     [filtradas],
   )
 
@@ -294,7 +295,12 @@ function TablaVentas({
           >
             <td className="py-2 px-4 tabular-nums text-oliva-700">{v.fecha}</td>
             <td className="py-2 px-4 text-oliva-900">
-              <div>{clientePorId.get(v.cliente_id ?? 0)?.nombre ?? <span className="italic text-oliva-500">sin cliente</span>}</div>
+              <div className="flex items-center gap-2">
+                <span>{clientePorId.get(v.cliente_id ?? 0)?.nombre ?? <span className="italic text-oliva-500">sin cliente</span>}</span>
+                {v.promocion_comercial && (
+                  <span className="text-[10px] uppercase tracking-wide rounded-full bg-purple-100 text-purple-800 px-1.5 py-[1px] font-semibold">🎁 promo</span>
+                )}
+              </div>
               {resumenPorId?.get(v.id) && (
                 <div className="text-[11px] text-oliva-600 font-normal mt-0.5 leading-snug">
                   {resumenPorId.get(v.id)}
@@ -384,6 +390,7 @@ interface Borrador {
   items: Item[]
   monedaVenta?: 'UYU' | 'USD'
   cotizacionUsd?: string
+  promocion?: boolean
 }
 
 function leerBorrador(): Borrador | null {
@@ -421,6 +428,7 @@ function NuevaVentaDialog({
   const [canal, setCanal] = useState<string>('directa')
   const [formaPago, setFormaPago] = useState<string>('efectivo')
   const [conFactura, setConFactura] = useState(false)
+  const [promocion, setPromocion] = useState(false)
   const [envio, setEnvio] = useState(false)
   const [costoEnvio, setCostoEnvio] = useState<string>('190')
   const [horarioEntrega, setHorarioEntrega] = useState('')
@@ -468,6 +476,7 @@ function NuevaVentaDialog({
       setCanal(ventaAEditar.canal ?? 'directa')
       setFormaPago(ventaAEditar.forma_pago ?? 'efectivo')
       setConFactura(ventaAEditar.con_factura)
+      setPromocion(!!(ventaAEditar as { promocion_comercial?: boolean }).promocion_comercial)
       setEnvio(ventaAEditar.envio)
       setCostoEnvio(String(ventaAEditar.costo_envio ?? '190'))
       setHorarioEntrega(ventaAEditar.horario_entrega ?? '')
@@ -484,6 +493,7 @@ function NuevaVentaDialog({
         setFecha(new Date().toISOString().slice(0, 10))
         setClienteId(b.clienteId); setCanal(b.canal); setFormaPago(b.formaPago)
         setConFactura(b.conFactura); setEnvio(b.envio); setCostoEnvio(b.costoEnvio); setHorarioEntrega(b.horarioEntrega)
+        setPromocion(!!(b as { promocion?: boolean }).promocion)
         setDireccionEnvio(b.direccionEnvio); setTelefonoEnvio(b.telefonoEnvio)
         setUbicacionId(b.ubicacionId); setEntregado(b.entregado); setCobrado(b.cobrado); setNotas(b.notas)
         setItems(b.items && b.items.length > 0 ? b.items : [nuevoItem()])
@@ -491,7 +501,7 @@ function NuevaVentaDialog({
         setCotizacionUsd(b.cotizacionUsd ?? '')
       } else {
         setFecha(new Date().toISOString().slice(0, 10))
-        setClienteId(''); setCanal('whatsapp'); setFormaPago('efectivo'); setConFactura(false)
+        setClienteId(''); setCanal('whatsapp'); setFormaPago('efectivo'); setConFactura(false); setPromocion(false)
         setEnvio(false); setCostoEnvio('190'); setHorarioEntrega('')
         setDireccionEnvio(''); setTelefonoEnvio('')
         setUbicacionId(String(ubicacionDefaultPorSocio(perfil?.nombre)))
@@ -761,6 +771,7 @@ async function guardar(e: React.FormEvent) {
       socio_id: socioId,
       canal, estado: estadoSync, forma_pago: formaPago,
       con_factura: conFactura,
+      promocion_comercial: promocion,
       envio, costo_envio: cEnvioUyu, // envío siempre se ingresa en pesos
       horario_entrega: envio ? (horarioEntrega.trim() || null) : null,
       ubicacion_id: Number(ubicacionId),
@@ -881,9 +892,9 @@ async function guardar(e: React.FormEvent) {
       fecha, clienteId, canal, formaPago, conFactura,
       envio, costoEnvio, horarioEntrega, direccionEnvio, telefonoEnvio,
       ubicacionId, entregado, cobrado, notas, items,
-      monedaVenta, cotizacionUsd,
+      monedaVenta, cotizacionUsd, promocion,
     })
-  }, [abierto, ventaAEditar, fecha, clienteId, canal, formaPago, conFactura, envio, costoEnvio, horarioEntrega, direccionEnvio, telefonoEnvio, ubicacionId, entregado, cobrado, notas, items, monedaVenta, cotizacionUsd])
+  }, [abierto, ventaAEditar, fecha, clienteId, canal, formaPago, conFactura, envio, costoEnvio, horarioEntrega, direccionEnvio, telefonoEnvio, ubicacionId, entregado, cobrado, notas, items, monedaVenta, cotizacionUsd, promocion])
 
   return (
     <Dialog abierto={abierto} onCerrar={onCerrar} titulo={ventaAEditar ? `Editar venta #${ventaAEditar.id}` : 'Nueva venta'} ancho="lg">
@@ -1011,6 +1022,10 @@ async function guardar(e: React.FormEvent) {
             <label className="flex items-center gap-2 cursor-pointer">
               <input id="cf" type="checkbox" checked={conFactura} onChange={(e) => setConFactura(e.target.checked)} className="h-4 w-4 accent-oliva-700" />
               <span className="text-sm text-oliva-800">🧾 Con factura <span className="text-xs text-oliva-600">(agrega 10% IVA)</span></span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input id="pc" type="checkbox" checked={promocion} onChange={(e) => setPromocion(e.target.checked)} className="h-4 w-4 accent-oliva-700" />
+              <span className="text-sm text-oliva-800">🎁 Promoción comercial <span className="text-xs text-oliva-600">(regalo, no ingreso)</span></span>
             </label>
           </div>
 
