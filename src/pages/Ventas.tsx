@@ -104,8 +104,13 @@ export function Ventas() {
   )
 
   // Ventas pendientes de entrega o cobro (siempre visibles arriba, sin filtros)
+  // Pendientes: entrega o cobro. Las promos no tienen cobro (se ignoran por cobro; sí quedan si falta entregar).
   const pendientes = useMemo(
-    () => ventas.filter((v) => v.estado !== 'cancelado' && (!v.entregado || !v.cobrado)),
+    () => ventas.filter((v) => {
+      if (v.estado === 'cancelado') return false
+      if (v.promocion_comercial) return !v.entregado // promo: solo pendiente si falta entregar
+      return !v.entregado || !v.cobrado
+    }),
     [ventas],
   )
 
@@ -325,9 +330,13 @@ function TablaVentas({
                   </span>
                 </td>
                 <td className="py-2 px-4 text-center">
-                  <span className={`text-[11px] uppercase tracking-wide rounded-full px-2 py-[1px] ${v.cobrado ? 'bg-aceite-500/20 text-aceite-600' : 'bg-red-100 text-red-800'}`}>
-                    {v.cobrado ? '💰 cobrado' : '⚠ sin cobrar'}
-                  </span>
+                  {v.promocion_comercial ? (
+                    <span className="text-[11px] text-oliva-400">—</span>
+                  ) : (
+                    <span className={`text-[11px] uppercase tracking-wide rounded-full px-2 py-[1px] ${v.cobrado ? 'bg-aceite-500/20 text-aceite-600' : 'bg-red-100 text-red-800'}`}>
+                      {v.cobrado ? '💰 cobrado' : '⚠ sin cobrar'}
+                    </span>
+                  )}
                 </td>
               </>
             )}
@@ -1015,17 +1024,31 @@ async function guardar(e: React.FormEvent) {
               <input type="checkbox" checked={entregado} onChange={(e) => setEntregado(e.target.checked)} className="h-4 w-4 accent-oliva-700" />
               <span className="text-sm text-oliva-800">🚚 Ya entregado</span>
             </label>
+            {!promocion && (
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={cobrado} onChange={(e) => setCobrado(e.target.checked)} className="h-4 w-4 accent-oliva-700" />
+                <span className="text-sm text-oliva-800">💰 Ya cobrado</span>
+              </label>
+            )}
+            {!promocion && (
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input id="cf" type="checkbox" checked={conFactura} onChange={(e) => setConFactura(e.target.checked)} className="h-4 w-4 accent-oliva-700" />
+                <span className="text-sm text-oliva-800">🧾 Con factura <span className="text-xs text-oliva-600">(agrega 10% IVA)</span></span>
+              </label>
+            )}
             <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={cobrado} onChange={(e) => setCobrado(e.target.checked)} className="h-4 w-4 accent-oliva-700" />
-              <span className="text-sm text-oliva-800">💰 Ya cobrado</span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input id="cf" type="checkbox" checked={conFactura} onChange={(e) => setConFactura(e.target.checked)} className="h-4 w-4 accent-oliva-700" />
-              <span className="text-sm text-oliva-800">🧾 Con factura <span className="text-xs text-oliva-600">(agrega 10% IVA)</span></span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input id="pc" type="checkbox" checked={promocion} onChange={(e) => setPromocion(e.target.checked)} className="h-4 w-4 accent-oliva-700" />
-              <span className="text-sm text-oliva-800">🎁 Promoción comercial <span className="text-xs text-oliva-600">(regalo, no ingreso)</span></span>
+              <input
+                id="pc"
+                type="checkbox"
+                checked={promocion}
+                onChange={(e) => {
+                  const on = e.target.checked
+                  setPromocion(on)
+                  if (on) { setCobrado(true); setConFactura(false) }
+                }}
+                className="h-4 w-4 accent-oliva-700"
+              />
+              <span className="text-sm text-oliva-800">🎁 Promoción comercial <span className="text-xs text-oliva-600">(regalo, no se cobra)</span></span>
             </label>
           </div>
 
@@ -1515,8 +1538,8 @@ function VentaDetalleDialog({
           </div>
         )}
 
-        {/* Entrega y cobro — toggles grandes clickeables */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {/* Entrega y cobro — toggles grandes clickeables (cobro oculto si es promoción) */}
+        <div className={`grid grid-cols-1 gap-3 ${venta.promocion_comercial ? '' : 'sm:grid-cols-2'}`}>
           <button
             type="button"
             disabled={!puedeEditar || anulada || guardando}
@@ -1530,19 +1553,21 @@ function VentaDetalleDialog({
             <div className="text-lg font-semibold">{entregado ? '🚚 Entregado' : '⏳ Pendiente de entrega'}</div>
             <div className="text-xs mt-1 opacity-80">Clic para {entregado ? 'marcar como pendiente' : 'marcar como entregado'}</div>
           </button>
-          <button
-            type="button"
-            disabled={!puedeEditar || anulada || guardando}
-            onClick={toggleCobrado}
-            className={`rounded-xl border-2 p-4 text-left transition ${
-              cobrado
-                ? 'bg-aceite-500/20 border-aceite-500 text-aceite-600'
-                : 'bg-red-50 border-red-300 text-red-800 hover:bg-red-100'
-            } disabled:opacity-60 disabled:cursor-not-allowed`}
-          >
-            <div className="text-lg font-semibold">{cobrado ? '💰 Cobrado' : '⚠ Sin cobrar'}</div>
-            <div className="text-xs mt-1 opacity-80">Clic para {cobrado ? 'marcar como sin cobrar' : 'marcar como cobrado'}</div>
-          </button>
+          {!venta.promocion_comercial && (
+            <button
+              type="button"
+              disabled={!puedeEditar || anulada || guardando}
+              onClick={toggleCobrado}
+              className={`rounded-xl border-2 p-4 text-left transition ${
+                cobrado
+                  ? 'bg-aceite-500/20 border-aceite-500 text-aceite-600'
+                  : 'bg-red-50 border-red-300 text-red-800 hover:bg-red-100'
+              } disabled:opacity-60 disabled:cursor-not-allowed`}
+            >
+              <div className="text-lg font-semibold">{cobrado ? '💰 Cobrado' : '⚠ Sin cobrar'}</div>
+              <div className="text-xs mt-1 opacity-80">Clic para {cobrado ? 'marcar como sin cobrar' : 'marcar como cobrado'}</div>
+            </button>
+          )}
         </div>
 
         {/* Cabecera editable */}
