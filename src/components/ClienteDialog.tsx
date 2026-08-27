@@ -19,6 +19,7 @@ export interface Cliente {
   condiciones_pago: string | null
   socio_asignado: string | null
   notas: string | null
+  lista_precios_id: number | null
   creado_en?: string
 }
 
@@ -68,6 +69,11 @@ export function ClienteDialog({
   const [rut, setRut] = useState('')
   const [pago, setPago] = useState('')
   const [socioAsig, setSocioAsig] = useState<string>('')
+  const [listaPreciosId, setListaPreciosId] = useState<string>('')
+  const [listas, setListas] = useState<Array<{ id: number; nombre: string }>>([])
+  useEffect(() => {
+    supabase.from('listas_precios').select('id,nombre').eq('activo', true).order('id').then(({ data }) => setListas(data ?? []))
+  }, [])
   const [notas, setNotas] = useState('')
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -80,6 +86,7 @@ export function ClienteDialog({
       setDireccion(editar.direccion ?? ''); setLocalidad(editar.localidad ?? '')
       setRut(editar.rut ?? ''); setPago(editar.condiciones_pago ?? '')
       setSocioAsig(editar.socio_asignado ?? ''); setNotas(editar.notas ?? '')
+      setListaPreciosId(editar.lista_precios_id ? String(editar.lista_precios_id) : '')
     } else {
       const b = leerObj<{ nombre: string; tipo: Cliente['tipo']; email: string; whatsapp: string; direccion: string; localidad: string; rut: string; pago: string; socioAsig: string; notas: string }>(BORRADOR_CLIENTE)
       if (b) {
@@ -148,6 +155,7 @@ export function ClienteDialog({
       rut: rut.trim() || null,
       condiciones_pago: pago.trim() || null,
       socio_asignado: socioAsig || null,
+      lista_precios_id: listaPreciosId ? Number(listaPreciosId) : null,
       notas: notas.trim() || null,
       actualizado_en: new Date().toISOString(),
     }
@@ -189,6 +197,14 @@ export function ClienteDialog({
                   <option value="">— sin asignar —</option>
                   {socios.map((s) => <option key={s.id} value={s.id}>{s.nombre}</option>)}
                 </select>
+              </div>
+              <div>
+                <label className="label">Lista de precios</label>
+                <select className="input" value={listaPreciosId} onChange={(e) => setListaPreciosId(e.target.value)} disabled={soloLectura}>
+                  <option value="">— consumidor (default) —</option>
+                  {listas.map((l) => <option key={l.id} value={l.id}>{l.nombre}</option>)}
+                </select>
+                <p className="text-[10px] text-oliva-500 mt-1">Al elegir este cliente en una venta, se cargan los precios de esta lista.</p>
               </div>
               <div className="sm:col-span-2">
                 <label className="label">Email</label>

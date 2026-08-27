@@ -567,20 +567,36 @@ function NuevaVentaDialog({
   const stockPorId = useMemo(() => new Map(stock.map((s) => [s.id, s])), [stock])
   const prodPorId = useMemo(() => new Map(productos.map((p) => [p.id, p])), [productos])
 
-  // Al cambiar tipo cliente, re-defaultea precios de items que están en su precio de lista
+  // Precios de la lista del cliente (si tiene). presId → precio_uyu.
+  const [preciosLista, setPreciosLista] = useState<Map<number, number>>(new Map())
+  useEffect(() => {
+    const listaId = (cliente as Cliente | undefined)?.lista_precios_id
+    if (!listaId) { setPreciosLista(new Map()); return }
+    let cancel = false
+    ;(async () => {
+      const { data } = await supabase.from('lista_precios_items').select('presentacion_id, precio_uyu').eq('lista_id', listaId)
+      if (cancel) return
+      setPreciosLista(new Map((data ?? []).map((r: { presentacion_id: number; precio_uyu: number }) => [r.presentacion_id, Number(r.precio_uyu)])))
+    })()
+    return () => { cancel = true }
+  }, [cliente])
+
+  // Al cambiar cliente/lista, re-defaultea precios de items que estaban en precio de lista/catálogo
   useEffect(() => {
     setItems((prev) => prev.map((it) => {
       if (!it.presentacion_id) return it
       const p = presPorId.get(it.presentacion_id)
       if (!p) return it
-      // Solo re-defaulta si el precio actual coincide con alguno de los precios de lista
+      const precioListaCli = preciosLista.get(it.presentacion_id)
       const min = Number(p.precio_minorista), may = Number(p.precio_mayorista)
-      if (it.precio_unitario === min || it.precio_unitario === may) {
-        return { ...it, precio_unitario: esMayorista && may ? may : min }
+      // Solo re-defaulta si el precio actual coincide con precio de catálogo (no si el usuario lo editó a mano)
+      if (it.precio_unitario === min || it.precio_unitario === may || (precioListaCli !== undefined && it.precio_unitario === precioListaCli)) {
+        const nuevo = precioListaCli !== undefined ? precioListaCli : (esMayorista && may ? may : min)
+        return { ...it, precio_unitario: nuevo }
       }
       return it
     }))
-  }, [esMayorista, presPorId])
+  }, [preciosLista, esMayorista, presPorId])
 
   // Al cambiar de ubicación, resetear stock_id de todos los ítems (son de otra ubicación)
   useEffect(() => {
@@ -604,7 +620,11 @@ function NuevaVentaDialog({
     const p = presPorId.get(presId)
     const prod = p ? prodPorId.get(p.producto_id) : undefined
     const esServicio = prod?.categoria === 'servicio'
-    const precioCatalogo = p ? (esMayorista && Number(p.precio_mayorista) ? Number(p.precio_mayorista) : Number(p.precio_minorista)) : 0
+    // Prioridad: precio en la lista del cliente > mayorista si aplica > minorista
+    const precioLista = preciosLista.get(presId)
+    const precioCatalogo = precioLista !== undefined
+      ? Number(precioLista)
+      : (p ? (esMayorista && Number(p.precio_mayorista) ? Number(p.precio_mayorista) : Number(p.precio_minorista)) : 0)
     const monedaDefaultProd: 'UYU' | 'USD' = p?.moneda_default === 'USD' ? 'USD' : 'UYU'
     const cot = Number(cotizacionUsd) || 0
 
@@ -1216,12 +1236,20 @@ async function guardar(e: React.FormEvent) {
                         )}
                       </div>
                       <div>
-                        <label className="label">Desc. u.</label>
+                        <label className="label">Desc. %</label>
                         <input
                           className="input tabular-nums"
-                          type="number" min="0" step="1"
-                          value={f.it.descuento_unitario}
-                          onChange={(e) => actualizarItem(f.it.key, { descuento_unitario: Number(e.target.value) || 0 })}
+                          type="number" min="0" max="100" step="1"
+                          value={(() => {
+                            const precio = monedaVenta === 'USD' ? Number(f.it.precio_usd) : Number(f.it.precio_unitario)
+                            if (precio <= 0) return 0
+                            return Math.round((Number(f.it.descuento_unitario) / precio) * 100)
+                          })()}
+                          onChange={(e) => {
+                            const pct = Math.max(0, Math.min(100, Number(e.target.value) || 0))
+                            const precio = monedaVenta === 'USD' ? Number(f.it.precio_usd) : Number(f.it.precio_unitario)
+                            actualizarItem(f.it.key, { descuento_unitario: (precio * pct) / 100 })
+                          }}
                         />
                       </div>
                       <div className="hidden sm:block">
