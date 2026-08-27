@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { useAuth } from '../lib/auth'
 import { Dialog } from '../components/Dialog'
 import { money } from '../lib/format'
 
@@ -23,6 +24,7 @@ interface Presentacion {
   stock_minimo: number
   activo: boolean
   costo_envasado: number
+  es_pack: boolean
 }
 
 interface Lista { id: number; nombre: string; activo: boolean }
@@ -33,6 +35,10 @@ const CATEGORIAS = ['aceite', 'aceituna', 'miel', 'jabon', 'envases_vacios', 'se
 const UNIDADES = ['botella', 'bidon', 'frasco', 'unidad'] as const
 
 export function Admin() {
+  const { perfil } = useAuth()
+  const nombreLower = (perfil?.nombre ?? '').toLowerCase()
+  const puedeEditarMargenes = nombreLower.includes('rodrigo') || nombreLower.includes('santi')
+
   const [productos, setProductos] = useState<Producto[]>([])
   const [presentaciones, setPresentaciones] = useState<Presentacion[]>([])
   const [listas, setListas] = useState<Lista[]>([])
@@ -137,30 +143,34 @@ export function Admin() {
           </p>
         </div>
         <div className="flex gap-2">
-          <button className="btn-secondary" onClick={() => setEditorListas(true)}>💰 Listas de precios</button>
+          {puedeEditarMargenes && (
+            <button className="btn-secondary" onClick={() => setEditorListas(true)}>💰 Listas de precios</button>
+          )}
           <button className="btn-primary" onClick={() => setNuevoProd(true)}>+ Nuevo producto</button>
         </div>
       </div>
 
-      {/* Config global */}
-      <div className="card p-4 flex items-center gap-4 flex-wrap">
-        <div>
-          <label className="label">Costo aceite USD/L</label>
-          <div className="flex items-center gap-2">
-            <input
-              className="input tabular-nums w-28"
-              type="number" min="0" step="0.1"
-              value={costoAceiteUsd}
-              onChange={(e) => setCostoAceiteUsd(e.target.value)}
-            />
-            <button className="btn-secondary text-xs" onClick={guardarConfigAceite}>Guardar</button>
+      {/* Config global (solo Rodrigo/Santi) */}
+      {puedeEditarMargenes && (
+        <div className="card p-4 flex items-center gap-4 flex-wrap">
+          <div>
+            <label className="label">Costo aceite USD/L</label>
+            <div className="flex items-center gap-2">
+              <input
+                className="input tabular-nums w-28"
+                type="number" min="0" step="0.1"
+                value={costoAceiteUsd}
+                onChange={(e) => setCostoAceiteUsd(e.target.value)}
+              />
+              <button className="btn-secondary text-xs" onClick={guardarConfigAceite}>Guardar</button>
+            </div>
+          </div>
+          <div className="text-xs text-oliva-600 flex-1 min-w-[280px]">
+            Se usa para estimar el <b>margen real</b> del aceite envasado (costo total = envasado + aceite proporcional al volumen).
+            Actualizalo cuando cambie el costo de producción del año.
           </div>
         </div>
-        <div className="text-xs text-oliva-600 flex-1 min-w-[280px]">
-          Se usa para estimar el <b>margen real</b> del aceite envasado (costo total = envasado + aceite proporcional al volumen).
-          Actualizalo cuando cambie el costo de producción del año.
-        </div>
-      </div>
+      )}
 
       {cargando ? (
         <div className="card p-6 text-sm text-oliva-700">Cargando…</div>
@@ -197,17 +207,18 @@ export function Admin() {
                     {ps.length === 0 && <div className="text-sm text-oliva-600">Sin presentaciones. Agregá una.</div>}
                     {ps.length > 0 && (
                       <div className="overflow-x-auto">
-                        <table className="w-full text-sm min-w-[900px]">
+                        <table className={`w-full text-sm ${puedeEditarMargenes ? 'min-w-[900px]' : 'min-w-[560px]'}`}>
                           <thead>
                             <tr className="text-left text-[10px] uppercase tracking-wide text-oliva-600 border-b border-oliva-100">
                               <th className="py-2 pr-2">Presentación</th>
-                              <th className="py-2 pr-2 text-right">Costo env.</th>
+                              {puedeEditarMargenes && <th className="py-2 pr-2 text-right">Costo env.</th>}
                               <th className="py-2 pr-2 text-right">Consumidor</th>
-                              <th className="py-2 pr-2 text-right">Distribuidor</th>
-                              <th className="py-2 pr-2 text-right">Marg. consum. %</th>
-                              <th className="py-2 pr-2 text-right">Marg. distr. %</th>
-                              <th className="py-2 pr-2 text-right">Marg. aceite USD/L (consum · distr)</th>
+                              {puedeEditarMargenes && <th className="py-2 pr-2 text-right">Distribuidor</th>}
+                              {puedeEditarMargenes && <th className="py-2 pr-2 text-right">Marg. consum. %</th>}
+                              {puedeEditarMargenes && <th className="py-2 pr-2 text-right">Marg. distr. %</th>}
+                              {puedeEditarMargenes && <th className="py-2 pr-2 text-right">Marg. aceite USD/L (consum · distr)</th>}
                               <th className="py-2 pr-2 text-right">IVA %</th>
+                              <th className="py-2 pr-2 text-right">Stock mín.</th>
                               <th className="py-2 pr-1"></th>
                             </tr>
                           </thead>
@@ -220,20 +231,23 @@ export function Admin() {
                                     <div className="font-medium">{x.nombre}</div>
                                     <div className="text-[11px] text-oliva-500">{x.unidad}</div>
                                   </td>
-                                  <td className="py-2 pr-2 text-right tabular-nums">{m.costoEnvasado > 0 ? money(m.costoEnvasado) : <span className="text-red-600">—</span>}</td>
+                                  {puedeEditarMargenes && <td className="py-2 pr-2 text-right tabular-nums">{m.costoEnvasado > 0 ? money(m.costoEnvasado) : <span className="text-red-600">—</span>}</td>}
                                   <td className="py-2 pr-2 text-right tabular-nums">{money(m.precioMin)}</td>
-                                  <td className="py-2 pr-2 text-right tabular-nums">{m.precioDistUyu > 0 ? money(m.precioDistUyu) : '—'}</td>
-                                  <td className={`py-2 pr-2 text-right tabular-nums ${m.margenMinPct < 20 ? 'text-red-700' : m.margenMinPct < 30 ? 'text-amber-700' : 'text-green-700'}`}>{m.margenMinPct.toFixed(0)}%</td>
-                                  <td className={`py-2 pr-2 text-right tabular-nums ${m.margenDistPct < 15 ? 'text-red-700' : m.margenDistPct < 25 ? 'text-amber-700' : 'text-green-700'}`}>{m.margenDistPct > 0 ? m.margenDistPct.toFixed(0) + '%' : '—'}</td>
-                                  <td className="py-2 pr-2 text-right tabular-nums text-xs">
-                                    {m.esAceite ? (
-                                      <span>
-                                        <b>{m.margenAceiteMinUsdL.toFixed(1)}</b>
-                                        {m.margenAceiteDistUsdL > 0 && <> · {m.margenAceiteDistUsdL.toFixed(1)}</>}
-                                      </span>
-                                    ) : '—'}
-                                  </td>
+                                  {puedeEditarMargenes && <td className="py-2 pr-2 text-right tabular-nums">{m.precioDistUyu > 0 ? money(m.precioDistUyu) : '—'}</td>}
+                                  {puedeEditarMargenes && <td className={`py-2 pr-2 text-right tabular-nums ${m.margenMinPct < 20 ? 'text-red-700' : m.margenMinPct < 30 ? 'text-amber-700' : 'text-green-700'}`}>{m.margenMinPct.toFixed(0)}%</td>}
+                                  {puedeEditarMargenes && <td className={`py-2 pr-2 text-right tabular-nums ${m.margenDistPct < 15 ? 'text-red-700' : m.margenDistPct < 25 ? 'text-amber-700' : 'text-green-700'}`}>{m.margenDistPct > 0 ? m.margenDistPct.toFixed(0) + '%' : '—'}</td>}
+                                  {puedeEditarMargenes && (
+                                    <td className="py-2 pr-2 text-right tabular-nums text-xs">
+                                      {m.esAceite ? (
+                                        <span>
+                                          <b>{m.margenAceiteMinUsdL.toFixed(1)}</b>
+                                          {m.margenAceiteDistUsdL > 0 && <> · {m.margenAceiteDistUsdL.toFixed(1)}</>}
+                                        </span>
+                                      ) : '—'}
+                                    </td>
+                                  )}
                                   <td className="py-2 pr-2 text-right tabular-nums">{Number(x.iva_pct)}%</td>
+                                  <td className="py-2 pr-2 text-right tabular-nums">{x.stock_minimo}</td>
                                   <td className="py-2 pr-1 text-right">
                                     <button className="text-xs text-oliva-700 underline hover:text-oliva-900" onClick={() => setEditandoPres(x)}>Editar</button>
                                   </td>
@@ -242,7 +256,9 @@ export function Admin() {
                             })}
                           </tbody>
                         </table>
-                        <p className="text-[10px] text-oliva-500 mt-2">Márgenes calculados con costo aceite USD/L de arriba × cot. estimada $40. Los USD/L usan la fórmula: (precio − costo envasado) ÷ litros ÷ 40.</p>
+                        {puedeEditarMargenes && (
+                          <p className="text-[10px] text-oliva-500 mt-2">Márgenes calculados con costo aceite USD/L de arriba × cot. estimada $40. Los USD/L usan la fórmula: (precio − costo envasado) ÷ litros ÷ 40.</p>
+                        )}
                       </div>
                     )}
                     <div className="flex gap-2 flex-wrap items-center">
