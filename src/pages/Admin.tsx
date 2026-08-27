@@ -402,12 +402,28 @@ function PresentacionDialog({ abierto, productoId, editar, onCerrar, onOk }: {
   )
 }
 
+// Orden de tamaños: primero volumen ascendente
+function ordenTamano(nombre: string, volMl: number | null): number {
+  if (volMl && volMl > 0) return volMl
+  // Fallback por nombre (packs y sin volumen)
+  const n = nombre.toLowerCase()
+  if (n.includes('pack')) return 999999
+  return 500000
+}
+
+interface FilaGrupo {
+  label: string           // "Aceite · 1 L" ó "Miel · Chico 300 g"
+  presIds: number[]       // presentaciones que abarca esta fila
+  orden: number
+  esAceiteMultiVariedad: boolean
+}
+
 function EditorListasDialog({ abierto, onCerrar, onOk, listas, listaItems, presentaciones, productos }: {
   abierto: boolean; onCerrar: () => void; onOk: () => void
   listas: Lista[]; listaItems: ListaItem[]; presentaciones: Presentacion[]; productos: Producto[]
 }) {
   const [listaSel, setListaSel] = useState<number | null>(null)
-  const [precios, setPrecios] = useState<Map<number, string>>(new Map())
+  const [precios, setPrecios] = useState<Map<string, string>>(new Map()) // key = filaLabel
   const [guardando, setGuardando] = useState(false)
   const [mensaje, setMensaje] = useState<string | null>(null)
 
@@ -418,37 +434,75 @@ function EditorListasDialog({ abierto, onCerrar, onOk, listas, listaItems, prese
     setMensaje(null)
   }, [abierto, listas])
 
+  const prodPorId = useMemo(() => new Map(productos.map((p) => [p.id, p])), [productos])
+
+  // Agrupar presentaciones: aceite por nombre de presentación (mismo precio para todas las variedades),
+  // no-aceite individual. Excluir servicio y envases_vacios.
+  const filas = useMemo<FilaGrupo[]>(() => {
+    const grupos = new Map<string, FilaGrupo>()
+    for (const p of presentaciones) {
+      if (!p.activo) continue
+      const prod = prodPorId.get(p.producto_id)
+      if (!prod) continue
+      if (prod.categoria === 'servicio' || prod.categoria === 'envases_vacios') continue
+
+      let label: string, orden: number, multi = false
+      if (prod.categoria === 'aceite' && !p.es_pack) {
+        // Agrupar todos los aceites por nombre de presentación (250 ml, 500 ml, 1 L, etc.)
+        label = `Aceite · ${p.nombre}`
+        orden = ordenTamano(p.nombre, p.volumen_ml)
+        multi = true
+      } else if (p.es_pack) {
+        label = `Pack · ${prod.nombre}`
+        orden = 900000
+      } else {
+        // No-aceite: fila por presentación individual, agrupado por categoría/producto
+        const catOrden: Record<string, number> = { miel: 1_000_000, aceituna: 1_100_000, jabon: 1_200_000 }
+        const base = catOrden[prod.categoria] ?? 1_500_000
+        label = `${prod.nombre} · ${p.nombre}`
+        orden = base + (p.volumen_ml ?? 0)
+      }
+      const g = grupos.get(label) ?? { label, presIds: [], orden, esAceiteMultiVariedad: multi }
+      g.presIds.push(p.id)
+      grupos.set(label, g)
+    }
+    return [...grupos.values()].sort((a, b) => a.orden - b.orden)
+  }, [presentaciones, prodPorId])
+
+  // Al cambiar lista, poblar los precios (agrupados)
   useEffect(() => {
     if (listaSel == null) { setPrecios(new Map()); return }
-    const m = new Map<number, string>()
-    for (const it of listaItems) if (it.lista_id === listaSel) m.set(it.presentacion_id, String(it.precio_uyu))
+    const itemsMap = new Map<number, number>()
+    for (const it of listaItems) if (it.lista_id === listaSel) itemsMap.set(it.presentacion_id, Number(it.precio_uyu))
+    const m = new Map<string, string>()
+    for (const g of filas) {
+      const precios = g.presIds.map((id) => itemsMap.get(id) ?? 0)
+      const primerNo0 = precios.find((v) => v > 0) ?? 0
+      m.set(g.label, primerNo0 > 0 ? String(primerNo0) : '')
+    }
     setPrecios(m)
-  }, [listaSel, listaItems])
-
-  const prodPorId = useMemo(() => new Map(productos.map((p) => [p.id, p])), [productos])
-  const filas = useMemo(() => {
-    return [...presentaciones]
-      .filter((p) => p.activo)
-      .sort((a, b) => {
-        const pa = prodPorId.get(a.producto_id), pb = prodPorId.get(b.producto_id)
-        const na = (pa?.nombre ?? '') + ' ' + a.nombre
-        const nb = (pb?.nombre ?? '') + ' ' + b.nombre
-        return na.localeCompare(nb)
-      })
-  }, [presentaciones, prodPorId])
+  }, [listaSel, listaItems, filas])
 
   async function guardar() {
     if (listaSel == null) return
     setGuardando(true); setMensaje(null)
-    const rows = [...precios.entries()]
-      .map(([presId, val]) => ({ lista_id: listaSel, presentacion_id: presId, precio_uyu: Number(val) || 0 }))
-      .filter((r) => r.precio_uyu > 0)
-    const { error } = await supabase.from('lista_precios_items').upsert(rows, { onConflict: 'lista_id,presentacion_id' })
-    // Borrar los que quedaron en 0 o vacíos
-    const aBorrar = [...precios.entries()].filter(([, v]) => !(Number(v) > 0)).map(([id]) => id)
-    if (aBorrar.length > 0) await supabase.from('lista_precios_items').delete().eq('lista_id', listaSel).in('presentacion_id', aBorrar)
+    const upserts: Array<{ lista_id: number; presentacion_id: number; precio_uyu: number }> = []
+    const borrarIds: number[] = []
+    for (const g of filas) {
+      const v = Number(precios.get(g.label) || 0)
+      for (const presId of g.presIds) {
+        if (v > 0) upserts.push({ lista_id: listaSel, presentacion_id: presId, precio_uyu: v })
+        else borrarIds.push(presId)
+      }
+    }
+    if (upserts.length > 0) {
+      const { error } = await supabase.from('lista_precios_items').upsert(upserts, { onConflict: 'lista_id,presentacion_id' })
+      if (error) { setMensaje('Error: ' + error.message); setGuardando(false); return }
+    }
+    if (borrarIds.length > 0) {
+      await supabase.from('lista_precios_items').delete().eq('lista_id', listaSel).in('presentacion_id', borrarIds)
+    }
     setGuardando(false)
-    if (error) { setMensaje('Error: ' + error.message); return }
     setMensaje('Guardado ✓')
     onOk()
   }
@@ -456,42 +510,41 @@ function EditorListasDialog({ abierto, onCerrar, onOk, listas, listaItems, prese
   return (
     <Dialog abierto={abierto} onCerrar={onCerrar} titulo="💰 Listas de precios" ancho="lg">
       <div className="space-y-4">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <label className="label !mb-0">Lista</label>
           <select className="input w-56" value={listaSel ?? ''} onChange={(e) => setListaSel(Number(e.target.value))}>
             {listas.map((l) => <option key={l.id} value={l.id}>{l.nombre}</option>)}
           </select>
           <div className="text-xs text-oliva-600 flex-1">
-            Editá los precios. Dejar en <b>0</b> = usa el precio consumidor (catálogo) al vender.
+            Los aceites se agrupan por tamaño (mismo precio para todas las variedades). Vacío = cae al precio consumidor.
           </div>
         </div>
         <div className="overflow-x-auto border border-oliva-100 rounded-lg">
-          <table className="w-full text-sm min-w-[520px]">
+          <table className="w-full text-sm min-w-[420px]">
             <thead className="bg-oliva-50">
               <tr className="text-left text-[10px] uppercase tracking-wide text-oliva-600 border-b border-oliva-100">
-                <th className="py-2 px-3">Producto</th>
                 <th className="py-2 px-3">Presentación</th>
                 <th className="py-2 px-3 text-right">Precio (UYU)</th>
+                <th className="py-2 px-3 text-[10px] text-oliva-500 hidden sm:table-cell">Aplica a</th>
               </tr>
             </thead>
             <tbody>
-              {filas.map((p) => {
-                const prod = prodPorId.get(p.producto_id)
-                return (
-                  <tr key={p.id} className="border-b border-oliva-100/70 last:border-0">
-                    <td className="py-1.5 px-3 text-oliva-800">{prod?.nombre ?? '?'}</td>
-                    <td className="py-1.5 px-3 text-oliva-800">{p.nombre}</td>
-                    <td className="py-1.5 px-3 text-right">
-                      <input
-                        className="input tabular-nums text-right w-28"
-                        type="number" min="0" step="1"
-                        value={precios.get(p.id) ?? ''}
-                        onChange={(e) => setPrecios(new Map(precios).set(p.id, e.target.value))}
-                      />
-                    </td>
-                  </tr>
-                )
-              })}
+              {filas.map((g) => (
+                <tr key={g.label} className="border-b border-oliva-100/70 last:border-0">
+                  <td className="py-1.5 px-3 text-oliva-800 font-medium">{g.label}</td>
+                  <td className="py-1.5 px-3 text-right">
+                    <input
+                      className="input tabular-nums text-right w-28"
+                      type="number" min="0" step="1"
+                      value={precios.get(g.label) ?? ''}
+                      onChange={(e) => setPrecios(new Map(precios).set(g.label, e.target.value))}
+                    />
+                  </td>
+                  <td className="py-1.5 px-3 text-[10px] text-oliva-500 hidden sm:table-cell">
+                    {g.esAceiteMultiVariedad ? `${g.presIds.length} variedades` : '1 presentación'}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
