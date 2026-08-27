@@ -140,10 +140,10 @@ export function Asistente({ abierto, onCerrar }: Props) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-2 px-4 py-3 border-b border-oliva-100 bg-oliva-50">
-          <div className="h-8 w-8 rounded-full bg-oliva-800 text-oliva-50 flex items-center justify-center text-sm font-bold">🤖</div>
+          <div className="h-8 w-8 rounded-full bg-oliva-800 text-oliva-50 flex items-center justify-center text-sm font-bold">📊</div>
           <div className="flex-1">
-            <div className="text-sm font-bold text-oliva-900">Asistente</div>
-            <div className="text-[10px] text-oliva-500">Sierras de Aiguá · gestión</div>
+            <div className="text-sm font-bold text-oliva-900">Analista de datos</div>
+            <div className="text-[10px] text-oliva-500">Sierras de Aiguá · marketing e insights</div>
           </div>
           <button className="text-xs text-oliva-500 hover:text-oliva-800 underline" onClick={limpiar}>Limpiar</button>
           <button className="text-oliva-500 hover:text-oliva-800 p-1" onClick={onCerrar}>
@@ -154,14 +154,16 @@ export function Asistente({ abierto, onCerrar }: Props) {
         <div className="flex-1 overflow-y-auto p-3 space-y-3 bg-oliva-50/30">
           {mensajes.length === 0 && (
             <div className="text-xs text-oliva-600 text-center py-8 space-y-2">
-              <div className="text-3xl">👋</div>
-              <div>Hola. Preguntame cosas como:</div>
+              <div className="text-3xl">📊</div>
+              <div>Preguntame para analizar los datos. Ejemplos:</div>
               <ul className="text-left inline-block space-y-1">
-                <li>· "¿qué tengo pendiente de cobrar?"</li>
-                <li>· "cargá 3400 pesos de gasoil"</li>
-                <li>· "resumen del mes"</li>
-                <li>· "clientes que no compran hace tiempo"</li>
-                <li>· "marcá cobrada la venta 15"</li>
+                <li>· "cómo vengo este mes vs el pasado"</li>
+                <li>· "top 10 clientes del año"</li>
+                <li>· "qué presentación se vende más"</li>
+                <li>· "qué clientes están en riesgo"</li>
+                <li>· "evolución de ventas últimos 6 meses"</li>
+                <li>· "historial del cliente X"</li>
+                <li>· "qué productos no rotan"</li>
               </ul>
             </div>
           )}
