@@ -27,6 +27,7 @@ interface Presentacion {
 
 interface Lista { id: number; nombre: string; activo: boolean }
 interface ListaItem { lista_id: number; presentacion_id: number; precio_uyu: number }
+interface Componente { presentacion_pack_id: number; presentacion_componente_id: number; unidades: number }
 
 const CATEGORIAS = ['aceite', 'aceituna', 'miel', 'jabon', 'envases_vacios', 'servicio'] as const
 const UNIDADES = ['botella', 'bidon', 'frasco', 'unidad'] as const
@@ -36,6 +37,7 @@ export function Admin() {
   const [presentaciones, setPresentaciones] = useState<Presentacion[]>([])
   const [listas, setListas] = useState<Lista[]>([])
   const [listaItems, setListaItems] = useState<ListaItem[]>([])
+  const [componentes, setComponentes] = useState<Componente[]>([])
   const [costoAceiteUsd, setCostoAceiteUsd] = useState<string>('9')
   const [cargando, setCargando] = useState(true)
   const [expandido, setExpandido] = useState<number | null>(null)
@@ -46,17 +48,19 @@ export function Admin() {
 
   async function cargar() {
     setCargando(true)
-    const [p, pr, l, li, cfg] = await Promise.all([
+    const [p, pr, l, li, cfg, comp] = await Promise.all([
       supabase.from('productos').select('*').order('categoria').order('nombre'),
       supabase.from('presentaciones').select('*').order('volumen_ml', { ascending: true, nullsFirst: false }),
       supabase.from('listas_precios').select('*').order('id'),
       supabase.from('lista_precios_items').select('*'),
       supabase.from('config_global').select('value').eq('key', 'costo_aceite_por_litro_usd').maybeSingle(),
+      supabase.from('presentacion_componente').select('*'),
     ])
     setProductos((p.data as Producto[]) ?? [])
     setPresentaciones((pr.data as Presentacion[]) ?? [])
     setListas((l.data as Lista[]) ?? [])
     setListaItems((li.data as ListaItem[]) ?? [])
+    setComponentes((comp.data as Componente[]) ?? [])
     if (cfg.data?.value) setCostoAceiteUsd(cfg.data.value)
     setCargando(false)
   }
@@ -77,22 +81,50 @@ export function Admin() {
     await supabase.from('config_global').upsert({ key: 'costo_aceite_por_litro_usd', value: String(val), actualizado_en: new Date().toISOString() })
   }
 
+  // Costo envasado de packs = costo propio + suma costos de sus componentes (×unidades)
+  function costoEnvasadoTotal(pr: Presentacion): number {
+    let total = Number(pr.costo_envasado || 0)
+    if (pr.es_pack) {
+      const comps = componentes.filter((c) => c.presentacion_pack_id === pr.id)
+      for (const c of comps) {
+        const comp = presentaciones.find((x) => x.id === c.presentacion_componente_id)
+        if (comp) total += Number(comp.costo_envasado || 0) * Number(c.unidades)
+      }
+    }
+    return total
+  }
+  // Litros equivalentes del pack (para el margen aceite USD/L)
+  function litrosPack(pr: Presentacion): number {
+    if (!pr.es_pack) return Number(pr.volumen_ml ?? 0) / 1000
+    const comps = componentes.filter((c) => c.presentacion_pack_id === pr.id)
+    let l = 0
+    for (const c of comps) {
+      const comp = presentaciones.find((x) => x.id === c.presentacion_componente_id)
+      if (comp) l += (Number(comp.volumen_ml ?? 0) / 1000) * Number(c.unidades)
+    }
+    return l
+  }
+
   function calcMargenes(p: Producto, pr: Presentacion) {
-    const esAceite = p.categoria === 'aceite'
-    const vol = Number(pr.volumen_ml ?? 0)
-    const costoAceite = esAceite && vol > 0 ? (vol / 1000) * Number(costoAceiteUsd) * 40 : 0 // aprox pesos a cot 40; sólo referencia
-    // Costo total: envasado + aceite (a cot 40 estimada). No lo usamos para USD/L; solo para margen % local.
-    const costoTotal = Number(pr.costo_envasado || 0) + costoAceite
+    // Un pack de aceite se trata como aceite para USD/L
+    const esAceite = p.categoria === 'aceite' || (pr.es_pack && componentes.some((c) => {
+      if (c.presentacion_pack_id !== pr.id) return false
+      const comp = presentaciones.find((x) => x.id === c.presentacion_componente_id)
+      const prodComp = comp ? productos.find((pp) => pp.id === comp.producto_id) : undefined
+      return prodComp?.categoria === 'aceite'
+    }))
+    const litros = pr.es_pack ? litrosPack(pr) : Number(pr.volumen_ml ?? 0) / 1000
+    const costoEnv = costoEnvasadoTotal(pr)
+    const costoAceite = esAceite && litros > 0 ? litros * Number(costoAceiteUsd) * 40 : 0
+    const costoTotal = costoEnv + costoAceite
     const precioMin = Number(pr.precio_minorista || 0)
     const precioDistUyu = precioDist.get(pr.id) ?? 0
     const margenMinPct = precioMin > 0 ? ((precioMin - costoTotal) / precioMin) * 100 : 0
     const margenDistPct = precioDistUyu > 0 ? ((precioDistUyu - costoTotal) / precioDistUyu) * 100 : 0
-    // Margen aceite USD/L (fórmula Rodrigo): (precio - costo_envasado) / litros / cotización_estim
-    // Aquí no tenemos cotización BCU al vuelo — usamos 40 como estimativa; el usuario ve la fórmula.
     const cotEst = 40
-    const margenAceiteMinUsdL = esAceite && vol > 0 ? (precioMin - Number(pr.costo_envasado || 0)) / (vol / 1000) / cotEst : 0
-    const margenAceiteDistUsdL = esAceite && vol > 0 && precioDistUyu > 0 ? (precioDistUyu - Number(pr.costo_envasado || 0)) / (vol / 1000) / cotEst : 0
-    return { costoEnvasado: Number(pr.costo_envasado || 0), precioMin, precioDistUyu, margenMinPct, margenDistPct, margenAceiteMinUsdL, margenAceiteDistUsdL, esAceite }
+    const margenAceiteMinUsdL = esAceite && litros > 0 ? (precioMin - costoEnv) / litros / cotEst : 0
+    const margenAceiteDistUsdL = esAceite && litros > 0 && precioDistUyu > 0 ? (precioDistUyu - costoEnv) / litros / cotEst : 0
+    return { costoEnvasado: costoEnv, precioMin, precioDistUyu, margenMinPct, margenDistPct, margenAceiteMinUsdL, margenAceiteDistUsdL, esAceite }
   }
 
   return (
