@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Dialog } from '../components/Dialog'
 import { money } from '../lib/format'
@@ -22,33 +22,78 @@ interface Presentacion {
   iva_pct: number
   stock_minimo: number
   activo: boolean
+  costo_envasado: number
 }
 
-const CATEGORIAS = ['aceite', 'aceituna', 'miel', 'jabon'] as const
+interface Lista { id: number; nombre: string; activo: boolean }
+interface ListaItem { lista_id: number; presentacion_id: number; precio_uyu: number }
+
+const CATEGORIAS = ['aceite', 'aceituna', 'miel', 'jabon', 'envases_vacios', 'servicio'] as const
 const UNIDADES = ['botella', 'bidon', 'frasco', 'unidad'] as const
 
 export function Admin() {
   const [productos, setProductos] = useState<Producto[]>([])
   const [presentaciones, setPresentaciones] = useState<Presentacion[]>([])
+  const [listas, setListas] = useState<Lista[]>([])
+  const [listaItems, setListaItems] = useState<ListaItem[]>([])
+  const [costoAceiteUsd, setCostoAceiteUsd] = useState<string>('9')
   const [cargando, setCargando] = useState(true)
   const [expandido, setExpandido] = useState<number | null>(null)
   const [nuevoProd, setNuevoProd] = useState(false)
   const [nuevaPresProd, setNuevaPresProd] = useState<number | null>(null)
   const [editandoPres, setEditandoPres] = useState<Presentacion | null>(null)
+  const [editorListas, setEditorListas] = useState(false)
 
   async function cargar() {
     setCargando(true)
-    const [p, pr] = await Promise.all([
+    const [p, pr, l, li, cfg] = await Promise.all([
       supabase.from('productos').select('*').order('categoria').order('nombre'),
       supabase.from('presentaciones').select('*').order('volumen_ml', { ascending: true, nullsFirst: false }),
+      supabase.from('listas_precios').select('*').order('id'),
+      supabase.from('lista_precios_items').select('*'),
+      supabase.from('config_global').select('value').eq('key', 'costo_aceite_por_litro_usd').maybeSingle(),
     ])
     setProductos((p.data as Producto[]) ?? [])
     setPresentaciones((pr.data as Presentacion[]) ?? [])
+    setListas((l.data as Lista[]) ?? [])
+    setListaItems((li.data as ListaItem[]) ?? [])
+    if (cfg.data?.value) setCostoAceiteUsd(cfg.data.value)
     setCargando(false)
   }
   useEffect(() => { cargar() }, [])
 
   const presDe = (idProd: number) => presentaciones.filter((x) => x.producto_id === idProd)
+
+  const distId = useMemo(() => listas.find((l) => l.nombre === 'distribuidor')?.id ?? null, [listas])
+  const precioDist = useMemo(() => {
+    const m = new Map<number, number>()
+    for (const it of listaItems) if (it.lista_id === distId) m.set(it.presentacion_id, Number(it.precio_uyu))
+    return m
+  }, [listaItems, distId])
+
+  async function guardarConfigAceite() {
+    const val = Number(costoAceiteUsd)
+    if (!(val > 0)) return
+    await supabase.from('config_global').upsert({ key: 'costo_aceite_por_litro_usd', value: String(val), actualizado_en: new Date().toISOString() })
+  }
+
+  function calcMargenes(p: Producto, pr: Presentacion) {
+    const esAceite = p.categoria === 'aceite'
+    const vol = Number(pr.volumen_ml ?? 0)
+    const costoAceite = esAceite && vol > 0 ? (vol / 1000) * Number(costoAceiteUsd) * 40 : 0 // aprox pesos a cot 40; sólo referencia
+    // Costo total: envasado + aceite (a cot 40 estimada). No lo usamos para USD/L; solo para margen % local.
+    const costoTotal = Number(pr.costo_envasado || 0) + costoAceite
+    const precioMin = Number(pr.precio_minorista || 0)
+    const precioDistUyu = precioDist.get(pr.id) ?? 0
+    const margenMinPct = precioMin > 0 ? ((precioMin - costoTotal) / precioMin) * 100 : 0
+    const margenDistPct = precioDistUyu > 0 ? ((precioDistUyu - costoTotal) / precioDistUyu) * 100 : 0
+    // Margen aceite USD/L (fórmula Rodrigo): (precio - costo_envasado) / litros / cotización_estim
+    // Aquí no tenemos cotización BCU al vuelo — usamos 40 como estimativa; el usuario ve la fórmula.
+    const cotEst = 40
+    const margenAceiteMinUsdL = esAceite && vol > 0 ? (precioMin - Number(pr.costo_envasado || 0)) / (vol / 1000) / cotEst : 0
+    const margenAceiteDistUsdL = esAceite && vol > 0 && precioDistUyu > 0 ? (precioDistUyu - Number(pr.costo_envasado || 0)) / (vol / 1000) / cotEst : 0
+    return { costoEnvasado: Number(pr.costo_envasado || 0), precioMin, precioDistUyu, margenMinPct, margenDistPct, margenAceiteMinUsdL, margenAceiteDistUsdL, esAceite }
+  }
 
   return (
     <div className="space-y-6">
@@ -56,18 +101,40 @@ export function Admin() {
         <div>
           <h1 className="text-2xl font-semibold text-oliva-900">Administración</h1>
           <p className="text-sm text-oliva-700 mt-1">
-            Catálogo de productos, presentaciones y precios. Los precios se aplican automáticamente
-            al cargar una venta según el tipo de cliente (minorista / mayorista).
+            Catálogo, costos, listas de precios y márgenes.
           </p>
         </div>
-        <button className="btn-primary" onClick={() => setNuevoProd(true)}>+ Nuevo producto</button>
+        <div className="flex gap-2">
+          <button className="btn-secondary" onClick={() => setEditorListas(true)}>💰 Listas de precios</button>
+          <button className="btn-primary" onClick={() => setNuevoProd(true)}>+ Nuevo producto</button>
+        </div>
+      </div>
+
+      {/* Config global */}
+      <div className="card p-4 flex items-center gap-4 flex-wrap">
+        <div>
+          <label className="label">Costo aceite USD/L</label>
+          <div className="flex items-center gap-2">
+            <input
+              className="input tabular-nums w-28"
+              type="number" min="0" step="0.1"
+              value={costoAceiteUsd}
+              onChange={(e) => setCostoAceiteUsd(e.target.value)}
+            />
+            <button className="btn-secondary text-xs" onClick={guardarConfigAceite}>Guardar</button>
+          </div>
+        </div>
+        <div className="text-xs text-oliva-600 flex-1 min-w-[280px]">
+          Se usa para estimar el <b>margen real</b> del aceite envasado (costo total = envasado + aceite proporcional al volumen).
+          Actualizalo cuando cambie el costo de producción del año.
+        </div>
       </div>
 
       {cargando ? (
         <div className="card p-6 text-sm text-oliva-700">Cargando…</div>
       ) : productos.length === 0 ? (
         <div className="card p-6 text-sm text-oliva-700">
-          Todavía no hay productos. Cargá el primero con el botón <b>+ Nuevo producto</b>.
+          Todavía no hay productos. Cargá el primero con <b>+ Nuevo producto</b>.
         </div>
       ) : (
         <div className="space-y-3">
@@ -83,14 +150,10 @@ export function Admin() {
                   <div className="min-w-0">
                     <div className="font-medium text-oliva-900 flex items-center gap-2">
                       {p.nombre}
-                      <span className="text-[11px] uppercase tracking-wide rounded-full bg-oliva-100 text-oliva-700 px-2 py-[1px]">
-                        {p.categoria}
-                      </span>
+                      <span className="text-[11px] uppercase tracking-wide rounded-full bg-oliva-100 text-oliva-700 px-2 py-[1px]">{p.categoria}</span>
                       {!p.activo && <span className="text-[11px] text-red-600">inactivo</span>}
                     </div>
-                    {p.descripcion && (
-                      <div className="text-xs text-oliva-600 mt-1 truncate">{p.descripcion}</div>
-                    )}
+                    {p.descripcion && <div className="text-xs text-oliva-600 mt-1 truncate">{p.descripcion}</div>}
                   </div>
                   <div className="text-xs text-oliva-500 shrink-0">
                     {ps.length} {ps.length === 1 ? 'presentación' : 'presentaciones'} {abierto ? '▲' : '▼'}
@@ -99,70 +162,68 @@ export function Admin() {
 
                 {abierto && (
                   <div className="border-t border-oliva-100 p-4 bg-oliva-50/50 space-y-3">
-                    {ps.length === 0 && (
-                      <div className="text-sm text-oliva-600">Sin presentaciones. Agregá una.</div>
-                    )}
+                    {ps.length === 0 && <div className="text-sm text-oliva-600">Sin presentaciones. Agregá una.</div>}
                     {ps.length > 0 && (
                       <div className="overflow-x-auto">
-                        <table className="w-full text-sm min-w-[560px]">
+                        <table className="w-full text-sm min-w-[900px]">
                           <thead>
-                            <tr className="text-left text-xs uppercase tracking-wide text-oliva-600 border-b border-oliva-100">
-                              <th className="py-2 pr-3">Presentación</th>
-                              <th className="py-2 pr-3 text-right">Minorista</th>
-                              <th className="py-2 pr-3 text-right">Mayorista</th>
-                              <th className="py-2 pr-3 text-right">IVA %</th>
-                              <th className="py-2 pr-3 text-right">Stock mín.</th>
+                            <tr className="text-left text-[10px] uppercase tracking-wide text-oliva-600 border-b border-oliva-100">
+                              <th className="py-2 pr-2">Presentación</th>
+                              <th className="py-2 pr-2 text-right">Costo env.</th>
+                              <th className="py-2 pr-2 text-right">Consumidor</th>
+                              <th className="py-2 pr-2 text-right">Distribuidor</th>
+                              <th className="py-2 pr-2 text-right">Marg. consum. %</th>
+                              <th className="py-2 pr-2 text-right">Marg. distr. %</th>
+                              <th className="py-2 pr-2 text-right">Marg. aceite USD/L (consum · distr)</th>
+                              <th className="py-2 pr-2 text-right">IVA %</th>
                               <th className="py-2 pr-1"></th>
                             </tr>
                           </thead>
                           <tbody>
-                            {ps.map((x) => (
-                              <tr key={x.id} className={`border-b border-oliva-100/70 last:border-0 ${!x.activo ? 'text-oliva-400 line-through' : 'text-oliva-800'}`}>
-                                <td className="py-2 pr-3">
-                                  <div className="font-medium">{x.nombre}</div>
-                                  <div className="text-[11px] text-oliva-500">{x.unidad}</div>
-                                </td>
-                                <td className="py-2 pr-3 text-right tabular-nums">{money(x.precio_minorista)}</td>
-                                <td className="py-2 pr-3 text-right tabular-nums">{money(x.precio_mayorista)}</td>
-                                <td className="py-2 pr-3 text-right tabular-nums">{Number(x.iva_pct)}%</td>
-                                <td className="py-2 pr-3 text-right tabular-nums">{x.stock_minimo}</td>
-                                <td className="py-2 pr-1 text-right">
-                                  <button
-                                    className="text-xs text-oliva-700 underline hover:text-oliva-900"
-                                    onClick={() => setEditandoPres(x)}
-                                  >
-                                    Editar
-                                  </button>
-                                </td>
-                              </tr>
-                            ))}
+                            {ps.map((x) => {
+                              const m = calcMargenes(p, x)
+                              return (
+                                <tr key={x.id} className={`border-b border-oliva-100/70 last:border-0 ${!x.activo ? 'text-oliva-400 line-through' : 'text-oliva-800'}`}>
+                                  <td className="py-2 pr-2">
+                                    <div className="font-medium">{x.nombre}</div>
+                                    <div className="text-[11px] text-oliva-500">{x.unidad}</div>
+                                  </td>
+                                  <td className="py-2 pr-2 text-right tabular-nums">{m.costoEnvasado > 0 ? money(m.costoEnvasado) : <span className="text-red-600">—</span>}</td>
+                                  <td className="py-2 pr-2 text-right tabular-nums">{money(m.precioMin)}</td>
+                                  <td className="py-2 pr-2 text-right tabular-nums">{m.precioDistUyu > 0 ? money(m.precioDistUyu) : '—'}</td>
+                                  <td className={`py-2 pr-2 text-right tabular-nums ${m.margenMinPct < 20 ? 'text-red-700' : m.margenMinPct < 30 ? 'text-amber-700' : 'text-green-700'}`}>{m.margenMinPct.toFixed(0)}%</td>
+                                  <td className={`py-2 pr-2 text-right tabular-nums ${m.margenDistPct < 15 ? 'text-red-700' : m.margenDistPct < 25 ? 'text-amber-700' : 'text-green-700'}`}>{m.margenDistPct > 0 ? m.margenDistPct.toFixed(0) + '%' : '—'}</td>
+                                  <td className="py-2 pr-2 text-right tabular-nums text-xs">
+                                    {m.esAceite ? (
+                                      <span>
+                                        <b>{m.margenAceiteMinUsdL.toFixed(1)}</b>
+                                        {m.margenAceiteDistUsdL > 0 && <> · {m.margenAceiteDistUsdL.toFixed(1)}</>}
+                                      </span>
+                                    ) : '—'}
+                                  </td>
+                                  <td className="py-2 pr-2 text-right tabular-nums">{Number(x.iva_pct)}%</td>
+                                  <td className="py-2 pr-1 text-right">
+                                    <button className="text-xs text-oliva-700 underline hover:text-oliva-900" onClick={() => setEditandoPres(x)}>Editar</button>
+                                  </td>
+                                </tr>
+                              )
+                            })}
                           </tbody>
                         </table>
+                        <p className="text-[10px] text-oliva-500 mt-2">Márgenes calculados con costo aceite USD/L de arriba × cot. estimada $40. Los USD/L usan la fórmula: (precio − costo envasado) ÷ litros ÷ 40.</p>
                       </div>
                     )}
                     <div className="flex gap-2 flex-wrap items-center">
                       <button className="btn-secondary" onClick={() => setNuevaPresProd(p.id)}>+ Nueva presentación</button>
-                      <button
-                        className="btn-secondary"
-                        onClick={async () => {
-                          await supabase.from('productos').update({ activo: !p.activo }).eq('id', p.id)
-                          cargar()
-                        }}
-                      >
+                      <button className="btn-secondary" onClick={async () => { await supabase.from('productos').update({ activo: !p.activo }).eq('id', p.id); cargar() }}>
                         {p.activo ? 'Desactivar producto' : 'Activar producto'}
                       </button>
-                      <button
-                        className="ml-auto text-xs text-red-700 hover:text-red-900 underline"
-                        onClick={async () => {
-                          const ok = confirm(`¿Eliminar definitivamente el producto "${p.nombre}"?\n\nSe borran también sus presentaciones. Si alguna venta ya lo usaba, el borrado se bloquea (usá "Desactivar producto" en ese caso).`)
-                          if (!ok) return
-                          const { error } = await supabase.from('productos').delete().eq('id', p.id)
-                          if (error) alert('No se pudo eliminar: ' + error.message)
-                          else cargar()
-                        }}
-                      >
-                        Eliminar producto
-                      </button>
+                      <button className="ml-auto text-xs text-red-700 hover:text-red-900 underline" onClick={async () => {
+                        const ok = confirm(`¿Eliminar definitivamente "${p.nombre}"?\nSi alguna venta ya lo usa, el borrado se bloquea.`)
+                        if (!ok) return
+                        const { error } = await supabase.from('productos').delete().eq('id', p.id)
+                        if (error) alert('No se pudo eliminar: ' + error.message); else cargar()
+                      }}>Eliminar producto</button>
                     </div>
                   </div>
                 )}
@@ -172,30 +233,13 @@ export function Admin() {
         </div>
       )}
 
-      {/* Nuevo producto */}
       <NuevoProductoDialog abierto={nuevoProd} onCerrar={() => setNuevoProd(false)} onOk={() => { setNuevoProd(false); cargar() }} />
-
-      {/* Nueva presentación */}
-      <PresentacionDialog
-        abierto={nuevaPresProd !== null}
-        productoId={nuevaPresProd}
-        onCerrar={() => setNuevaPresProd(null)}
-        onOk={() => { setNuevaPresProd(null); cargar() }}
-      />
-
-      {/* Editar presentación */}
-      <PresentacionDialog
-        abierto={editandoPres !== null}
-        productoId={editandoPres?.producto_id ?? null}
-        editar={editandoPres}
-        onCerrar={() => setEditandoPres(null)}
-        onOk={() => { setEditandoPres(null); cargar() }}
-      />
+      <PresentacionDialog abierto={nuevaPresProd !== null} productoId={nuevaPresProd} onCerrar={() => setNuevaPresProd(null)} onOk={() => { setNuevaPresProd(null); cargar() }} />
+      <PresentacionDialog abierto={editandoPres !== null} productoId={editandoPres?.producto_id ?? null} editar={editandoPres} onCerrar={() => setEditandoPres(null)} onOk={() => { setEditandoPres(null); cargar() }} />
+      <EditorListasDialog abierto={editorListas} onCerrar={() => setEditorListas(false)} onOk={() => { setEditorListas(false); cargar() }} listas={listas} listaItems={listaItems} presentaciones={presentaciones} productos={productos} />
     </div>
   )
 }
-
-// ---------- Dialogs ----------
 
 function NuevoProductoDialog({ abierto, onCerrar, onOk }: { abierto: boolean; onCerrar: () => void; onOk: () => void }) {
   const [nombre, setNombre] = useState('')
@@ -203,39 +247,24 @@ function NuevoProductoDialog({ abierto, onCerrar, onOk }: { abierto: boolean; on
   const [descripcion, setDescripcion] = useState('')
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (abierto) { setNombre(''); setCategoria('aceite'); setDescripcion(''); setError(null) }
-  }, [abierto])
-
+  useEffect(() => { if (abierto) { setNombre(''); setCategoria('aceite'); setDescripcion(''); setError(null) } }, [abierto])
   async function guardar(e: React.FormEvent) {
     e.preventDefault()
     setGuardando(true); setError(null)
-    const { error } = await supabase.from('productos').insert({
-      nombre: nombre.trim(), categoria, descripcion: descripcion.trim() || null,
-    })
+    const { error } = await supabase.from('productos').insert({ nombre: nombre.trim(), categoria, descripcion: descripcion.trim() || null })
     setGuardando(false)
-    if (error) setError(error.message)
-    else onOk()
+    if (error) setError(error.message); else onOk()
   }
-
   return (
     <Dialog abierto={abierto} onCerrar={onCerrar} titulo="Nuevo producto">
       <form onSubmit={guardar} className="space-y-4">
-        <div>
-          <label className="label">Nombre</label>
-          <input className="input" value={nombre} onChange={(e) => setNombre(e.target.value)} required autoFocus />
-        </div>
-        <div>
-          <label className="label">Categoría</label>
+        <div><label className="label">Nombre</label><input className="input" value={nombre} onChange={(e) => setNombre(e.target.value)} required autoFocus /></div>
+        <div><label className="label">Categoría</label>
           <select className="input" value={categoria} onChange={(e) => setCategoria(e.target.value)}>
             {CATEGORIAS.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
         </div>
-        <div>
-          <label className="label">Descripción (opcional)</label>
-          <textarea className="input min-h-[70px]" value={descripcion} onChange={(e) => setDescripcion(e.target.value)} />
-        </div>
+        <div><label className="label">Descripción (opcional)</label><textarea className="input min-h-[70px]" value={descripcion} onChange={(e) => setDescripcion(e.target.value)} /></div>
         {error && <div className="text-sm text-red-700">{error}</div>}
         <div className="flex justify-end gap-2 pt-2">
           <button type="button" className="btn-secondary" onClick={onCerrar}>Cancelar</button>
@@ -246,22 +275,17 @@ function NuevoProductoDialog({ abierto, onCerrar, onOk }: { abierto: boolean; on
   )
 }
 
-function PresentacionDialog({
-  abierto, productoId, editar, onCerrar, onOk,
-}: {
-  abierto: boolean
-  productoId: number | null
-  editar?: Presentacion | null
-  onCerrar: () => void
-  onOk: () => void
+function PresentacionDialog({ abierto, productoId, editar, onCerrar, onOk }: {
+  abierto: boolean; productoId: number | null; editar?: Presentacion | null; onCerrar: () => void; onOk: () => void
 }) {
   const [nombre, setNombre] = useState('')
   const [volumenMl, setVolumenMl] = useState<string>('')
   const [unidad, setUnidad] = useState<string>('botella')
   const [precioMin, setPrecioMin] = useState<string>('0')
   const [precioMay, setPrecioMay] = useState<string>('0')
-  const [ivaPct, setIvaPct] = useState<string>('22')
+  const [ivaPct, setIvaPct] = useState<string>('10')
   const [stockMin, setStockMin] = useState<string>('0')
+  const [costoEnv, setCostoEnv] = useState<string>('0')
   const [activo, setActivo] = useState(true)
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -269,17 +293,13 @@ function PresentacionDialog({
   useEffect(() => {
     if (!abierto) return
     if (editar) {
-      setNombre(editar.nombre)
-      setVolumenMl(editar.volumen_ml?.toString() ?? '')
-      setUnidad(editar.unidad)
-      setPrecioMin(String(editar.precio_minorista))
-      setPrecioMay(String(editar.precio_mayorista))
-      setIvaPct(String(editar.iva_pct))
-      setStockMin(String(editar.stock_minimo))
-      setActivo(editar.activo)
+      setNombre(editar.nombre); setVolumenMl(editar.volumen_ml?.toString() ?? ''); setUnidad(editar.unidad)
+      setPrecioMin(String(editar.precio_minorista)); setPrecioMay(String(editar.precio_mayorista))
+      setIvaPct(String(editar.iva_pct)); setStockMin(String(editar.stock_minimo))
+      setCostoEnv(String(editar.costo_envasado ?? 0)); setActivo(editar.activo)
     } else {
       setNombre(''); setVolumenMl(''); setUnidad('botella')
-      setPrecioMin('0'); setPrecioMay('0'); setIvaPct('22'); setStockMin('0'); setActivo(true)
+      setPrecioMin('0'); setPrecioMay('0'); setIvaPct('10'); setStockMin('0'); setCostoEnv('0'); setActivo(true)
     }
     setError(null)
   }, [abierto, editar])
@@ -297,15 +317,13 @@ function PresentacionDialog({
       precio_mayorista: Number(precioMay) || 0,
       iva_pct: Number(ivaPct) || 0,
       stock_minimo: Number(stockMin) || 0,
+      costo_envasado: Number(costoEnv) || 0,
       activo,
     }
-    const q = editar
-      ? supabase.from('presentaciones').update(payload).eq('id', editar.id)
-      : supabase.from('presentaciones').insert(payload)
+    const q = editar ? supabase.from('presentaciones').update(payload).eq('id', editar.id) : supabase.from('presentaciones').insert(payload)
     const { error } = await q
     setGuardando(false)
-    if (error) setError(error.message)
-    else onOk()
+    if (error) setError(error.message); else onOk()
   }
 
   return (
@@ -313,42 +331,33 @@ function PresentacionDialog({
       <form onSubmit={guardar} className="space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="sm:col-span-2">
-            <label className="label">Nombre (ej: “500 ml”, “3 L”, “unidad 250g”)</label>
+            <label className="label">Nombre</label>
             <input className="input" value={nombre} onChange={(e) => setNombre(e.target.value)} required autoFocus />
           </div>
-          <div>
-            <label className="label">Volumen (ml, opcional)</label>
-            <input className="input" type="number" min="0" step="1" value={volumenMl} onChange={(e) => setVolumenMl(e.target.value)} placeholder="500" />
-          </div>
-          <div>
-            <label className="label">Unidad</label>
+          <div><label className="label">Volumen (ml, opcional)</label><input className="input" type="number" min="0" step="1" value={volumenMl} onChange={(e) => setVolumenMl(e.target.value)} placeholder="500" /></div>
+          <div><label className="label">Unidad</label>
             <select className="input" value={unidad} onChange={(e) => setUnidad(e.target.value)}>
               {UNIDADES.map((u) => <option key={u} value={u}>{u}</option>)}
             </select>
           </div>
+          <div><label className="label">Precio consumidor (UYU)</label><input className="input" type="number" min="0" step="1" value={precioMin} onChange={(e) => setPrecioMin(e.target.value)} /></div>
+          <div><label className="label">Precio mayorista (UYU)</label><input className="input" type="number" min="0" step="1" value={precioMay} onChange={(e) => setPrecioMay(e.target.value)} /></div>
           <div>
-            <label className="label">Precio minorista (UYU)</label>
-            <input className="input" type="number" min="0" step="1" value={precioMin} onChange={(e) => setPrecioMin(e.target.value)} />
+            <label className="label">Costo envasado (UYU)</label>
+            <input className="input tabular-nums" type="number" min="0" step="0.1" value={costoEnv} onChange={(e) => setCostoEnv(e.target.value)} />
+            <p className="text-[10px] text-oliva-500 mt-1">Envase + tapa + etiqueta + caja + servicio. Sin el costo del aceite (ese se toma de la config global).</p>
           </div>
-          <div>
-            <label className="label">Precio mayorista (UYU)</label>
-            <input className="input" type="number" min="0" step="1" value={precioMay} onChange={(e) => setPrecioMay(e.target.value)} />
-          </div>
-          <div>
-            <label className="label">IVA %</label>
+          <div><label className="label">IVA %</label>
             <select className="input" value={ivaPct} onChange={(e) => setIvaPct(e.target.value)}>
               <option value="22">22 % (básico)</option>
-              <option value="10">10 % (mínimo)</option>
+              <option value="10">10 % (mínimo — aceite)</option>
               <option value="0">0 % (exento)</option>
             </select>
           </div>
-          <div>
-            <label className="label">Stock mínimo (alerta)</label>
-            <input className="input" type="number" min="0" step="1" value={stockMin} onChange={(e) => setStockMin(e.target.value)} />
-          </div>
+          <div><label className="label">Stock mínimo (alerta)</label><input className="input" type="number" min="0" step="1" value={stockMin} onChange={(e) => setStockMin(e.target.value)} /></div>
           <div className="sm:col-span-2 flex items-center gap-2 pt-1">
             <input id="activo" type="checkbox" checked={activo} onChange={(e) => setActivo(e.target.checked)} className="h-4 w-4 accent-oliva-700" />
-            <label htmlFor="activo" className="text-sm text-oliva-800">Activa (visible al cargar ventas y stock)</label>
+            <label htmlFor="activo" className="text-sm text-oliva-800">Activa (visible en ventas y stock)</label>
           </div>
         </div>
         {error && <div className="text-sm text-red-700">{error}</div>}
@@ -357,6 +366,109 @@ function PresentacionDialog({
           <button type="submit" className="btn-primary" disabled={guardando}>{guardando ? 'Guardando…' : 'Guardar'}</button>
         </div>
       </form>
+    </Dialog>
+  )
+}
+
+function EditorListasDialog({ abierto, onCerrar, onOk, listas, listaItems, presentaciones, productos }: {
+  abierto: boolean; onCerrar: () => void; onOk: () => void
+  listas: Lista[]; listaItems: ListaItem[]; presentaciones: Presentacion[]; productos: Producto[]
+}) {
+  const [listaSel, setListaSel] = useState<number | null>(null)
+  const [precios, setPrecios] = useState<Map<number, string>>(new Map())
+  const [guardando, setGuardando] = useState(false)
+  const [mensaje, setMensaje] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!abierto) return
+    const id = listas[0]?.id ?? null
+    setListaSel(id)
+    setMensaje(null)
+  }, [abierto, listas])
+
+  useEffect(() => {
+    if (listaSel == null) { setPrecios(new Map()); return }
+    const m = new Map<number, string>()
+    for (const it of listaItems) if (it.lista_id === listaSel) m.set(it.presentacion_id, String(it.precio_uyu))
+    setPrecios(m)
+  }, [listaSel, listaItems])
+
+  const prodPorId = useMemo(() => new Map(productos.map((p) => [p.id, p])), [productos])
+  const filas = useMemo(() => {
+    return [...presentaciones]
+      .filter((p) => p.activo)
+      .sort((a, b) => {
+        const pa = prodPorId.get(a.producto_id), pb = prodPorId.get(b.producto_id)
+        const na = (pa?.nombre ?? '') + ' ' + a.nombre
+        const nb = (pb?.nombre ?? '') + ' ' + b.nombre
+        return na.localeCompare(nb)
+      })
+  }, [presentaciones, prodPorId])
+
+  async function guardar() {
+    if (listaSel == null) return
+    setGuardando(true); setMensaje(null)
+    const rows = [...precios.entries()]
+      .map(([presId, val]) => ({ lista_id: listaSel, presentacion_id: presId, precio_uyu: Number(val) || 0 }))
+      .filter((r) => r.precio_uyu > 0)
+    const { error } = await supabase.from('lista_precios_items').upsert(rows, { onConflict: 'lista_id,presentacion_id' })
+    // Borrar los que quedaron en 0 o vacíos
+    const aBorrar = [...precios.entries()].filter(([, v]) => !(Number(v) > 0)).map(([id]) => id)
+    if (aBorrar.length > 0) await supabase.from('lista_precios_items').delete().eq('lista_id', listaSel).in('presentacion_id', aBorrar)
+    setGuardando(false)
+    if (error) { setMensaje('Error: ' + error.message); return }
+    setMensaje('Guardado ✓')
+    onOk()
+  }
+
+  return (
+    <Dialog abierto={abierto} onCerrar={onCerrar} titulo="💰 Listas de precios" ancho="lg">
+      <div className="space-y-4">
+        <div className="flex items-center gap-3">
+          <label className="label !mb-0">Lista</label>
+          <select className="input w-56" value={listaSel ?? ''} onChange={(e) => setListaSel(Number(e.target.value))}>
+            {listas.map((l) => <option key={l.id} value={l.id}>{l.nombre}</option>)}
+          </select>
+          <div className="text-xs text-oliva-600 flex-1">
+            Editá los precios. Dejar en <b>0</b> = usa el precio consumidor (catálogo) al vender.
+          </div>
+        </div>
+        <div className="overflow-x-auto border border-oliva-100 rounded-lg">
+          <table className="w-full text-sm min-w-[520px]">
+            <thead className="bg-oliva-50">
+              <tr className="text-left text-[10px] uppercase tracking-wide text-oliva-600 border-b border-oliva-100">
+                <th className="py-2 px-3">Producto</th>
+                <th className="py-2 px-3">Presentación</th>
+                <th className="py-2 px-3 text-right">Precio (UYU)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filas.map((p) => {
+                const prod = prodPorId.get(p.producto_id)
+                return (
+                  <tr key={p.id} className="border-b border-oliva-100/70 last:border-0">
+                    <td className="py-1.5 px-3 text-oliva-800">{prod?.nombre ?? '?'}</td>
+                    <td className="py-1.5 px-3 text-oliva-800">{p.nombre}</td>
+                    <td className="py-1.5 px-3 text-right">
+                      <input
+                        className="input tabular-nums text-right w-28"
+                        type="number" min="0" step="1"
+                        value={precios.get(p.id) ?? ''}
+                        onChange={(e) => setPrecios(new Map(precios).set(p.id, e.target.value))}
+                      />
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+        {mensaje && <div className={`text-sm ${mensaje.startsWith('Error') ? 'text-red-700' : 'text-green-700'}`}>{mensaje}</div>}
+        <div className="flex justify-end gap-2">
+          <button className="btn-secondary" onClick={onCerrar}>Cerrar</button>
+          <button className="btn-primary" onClick={guardar} disabled={guardando}>{guardando ? 'Guardando…' : 'Guardar cambios'}</button>
+        </div>
+      </div>
     </Dialog>
   )
 }
