@@ -688,40 +688,42 @@ function NuevaVentaDialog({
 
 async function guardar(e: React.FormEvent) {
     e.preventDefault()
+    if (guardando) return // Prevenir doble-tap: si ya se está guardando, ignorar
+    setGuardando(true)
 
     // Ignoramos ítems vacíos (líneas sin presentación que quedan al final por auto-add)
     const filasValidas = filas.filter((f) => f.it.presentacion_id)
-    if (filasValidas.length === 0) { setError('Agregá al menos un ítem.'); return }
+    if (filasValidas.length === 0) { setError('Agregá al menos un ítem.'); setGuardando(false); return }
     if (envio && !clienteId) {
       setError('Para envío por cadete es necesario seleccionar un cliente (o crearlo con "+ nuevo cliente"). Así queda registrada la dirección/teléfono para el cadete y para próximas ventas.')
-      return
+      setGuardando(false); return
     }
     if (envio && !direccionEnvio.trim()) {
       setError('Ingresá una dirección de entrega para el envío.')
-      return
+      setGuardando(false); return
     }
     // Validar cotización si la venta es en USD
     const cot = Number(cotizacionUsd) || 0
-    if (monedaVenta === 'USD' && cot <= 0) { setError('Ingresá la cotización del USD (pesos por 1 USD) para registrar la venta en dólares.'); return }
+    if (monedaVenta === 'USD' && cot <= 0) { setError('Ingresá la cotización del USD (pesos por 1 USD) para registrar la venta en dólares.'); setGuardando(false); return }
 
     // Preacumular stock necesitado por presentación (para validar packs contra sus componentes)
     const necesidad = new Map<number, number>()
     const litrosPorTanque = new Map<number, number>()
     for (const f of filasValidas) {
-      if (!f.it.presentacion_id) { setError('Todos los ítems necesitan una presentación.'); return }
-      if (f.it.unidades <= 0) { setError('Las unidades deben ser mayores a 0.'); return }
+      if (!f.it.presentacion_id) { setError('Todos los ítems necesitan una presentación.'); setGuardando(false); return }
+      if (f.it.unidades <= 0) { setError('Las unidades deben ser mayores a 0.'); setGuardando(false); return }
       const prodF = f.p ? prodPorId.get(f.p.producto_id) : undefined
       const esServicio = prodF?.categoria === 'servicio'
       const esGranel = (prodF?.nombre ?? '').toLowerCase().includes('aceite a granel')
       if (esGranel) {
-        if (!f.it.tanque_id) { setError(`Elegí un tanque para "${prodF?.nombre}".`); return }
+        if (!f.it.tanque_id) { setError(`Elegí un tanque para "${prodF?.nombre}".`); setGuardando(false); return }
         const acum = (litrosPorTanque.get(f.it.tanque_id) ?? 0) + Number(f.it.unidades)
         litrosPorTanque.set(f.it.tanque_id, acum)
         const tq = tanques.find((t) => t.id === f.it.tanque_id)
-        if (!tq) { setError('Tanque no encontrado.'); return }
+        if (!tq) { setError('Tanque no encontrado.'); setGuardando(false); return }
         if (acum > Number(tq.litros_actuales)) {
           setError(`Litros insuficientes en ${tq.nombre}: pedís ${acum} L y quedan ${Number(tq.litros_actuales).toFixed(0)} L.`)
-          return
+          setGuardando(false); return
         }
         continue
       }
@@ -731,15 +733,15 @@ async function guardar(e: React.FormEvent) {
       }
       if (f.p?.es_pack) {
         const comps = componentes.filter((c) => c.presentacion_pack_id === f.it.presentacion_id)
-        if (comps.length === 0) { setError(`El pack "${f.p?.nombre}" no tiene componentes definidos.`); return }
+        if (comps.length === 0) { setError(`El pack "${f.p?.nombre}" no tiene componentes definidos.`); setGuardando(false); return }
         for (const c of comps) {
           necesidad.set(c.presentacion_componente_id, (necesidad.get(c.presentacion_componente_id) ?? 0) + c.unidades * f.it.unidades)
         }
       } else {
-        if (!f.it.stock_id) { setError('Todos los ítems necesitan un stock disponible.'); return }
+        if (!f.it.stock_id) { setError('Todos los ítems necesitan un stock disponible.'); setGuardando(false); return }
         if (f.it.unidades > f.disponible) {
           setError(`No hay stock suficiente para "${f.p?.nombre ?? ''}": pedís ${f.it.unidades}, disponibles ${f.disponible}.`)
-          return
+          setGuardando(false); return
         }
         necesidad.set(f.it.presentacion_id, (necesidad.get(f.it.presentacion_id) ?? 0) + f.it.unidades)
       }
@@ -754,11 +756,11 @@ async function guardar(e: React.FormEvent) {
         const prod = p ? prodPorId.get(p.producto_id) : null
         const ubicNombre = ubicaciones.find((u) => u.id === Number(ubicacionId))?.nombre ?? ''
         setError(`Stock insuficiente para ${prod?.nombre ?? ''} ${p?.nombre ?? ''} en ${ubicNombre}: se necesitan ${need} u pero hay ${totalDisp} u.`)
-        return
+        setGuardando(false); return
       }
     }
 
-    setGuardando(true); setError(null)
+    setError(null)
 
     // 0) Actualizar la ficha del cliente si corresponde:
     //    - auto-asignar socio (si el cliente no tenía socio, queda del vendedor que carga la venta)
@@ -813,12 +815,16 @@ async function guardar(e: React.FormEvent) {
 
     let ventaId: number
     if (ventaAEditar) {
-      // Edición: revertir movs_stock previos, borrar items viejos, actualizar cabecera
+      // Edición: revertir SOLO los movs_stock de tipo 'venta' (no devoluciones previas), borrar items viejos, actualizar cabecera
       const { data: { user } } = await supabase.auth.getUser()
-      const { data: movsPrev } = await supabase.from('movimientos_stock').select('*').eq('venta_id', ventaAEditar.id)
+      const { data: movsPrev } = await supabase.from('movimientos_stock')
+        .select('*')
+        .eq('venta_id', ventaAEditar.id)
+        .eq('tipo', 'venta')
       for (const m of (movsPrev ?? [])) {
         const { data: s } = await supabase.from('stock').select('unidades').eq('id', m.stock_id).maybeSingle()
         if (!s) continue
+        // m.unidades es negativa (fue venta) → restar un negativo = sumar de vuelta al stock
         await supabase.from('stock').update({ unidades: Number(s.unidades) - Number(m.unidades), actualizado_en: new Date().toISOString() }).eq('id', m.stock_id)
         await supabase.from('movimientos_stock').insert({
           stock_id: m.stock_id, tipo: 'devolucion', unidades: -Number(m.unidades),
@@ -826,8 +832,11 @@ async function guardar(e: React.FormEvent) {
           nota: `Reversion por edicion de venta #${ventaAEditar.id}`,
         })
       }
-      // Revertir movs granel previos de esta venta (devolver litros al tanque)
-      const { data: movsGranPrev } = await supabase.from('movimientos_granel').select('id,tanque_origen_id,litros').eq('venta_id', ventaAEditar.id)
+      // Revertir movs granel previos SOLO los de tipo 'venta_granel'
+      const { data: movsGranPrev } = await supabase.from('movimientos_granel')
+        .select('id,tanque_origen_id,litros')
+        .eq('venta_id', ventaAEditar.id)
+        .eq('tipo', 'venta_granel')
       for (const m of (movsGranPrev ?? [])) {
         if (!m.tanque_origen_id) continue
         const { data: tqPrev } = await supabase.from('tanques').select('litros_actuales').eq('id', m.tanque_origen_id).maybeSingle()
@@ -836,7 +845,7 @@ async function guardar(e: React.FormEvent) {
         const devolver = Math.abs(Number(m.litros))
         await supabase.from('tanques').update({ litros_actuales: Number(tqPrev.litros_actuales) + devolver, actualizado_en: new Date().toISOString() }).eq('id', m.tanque_origen_id)
       }
-      await supabase.from('movimientos_granel').delete().eq('venta_id', ventaAEditar.id)
+      await supabase.from('movimientos_granel').delete().eq('venta_id', ventaAEditar.id).eq('tipo', 'venta_granel')
       await supabase.from('items_venta').delete().eq('venta_id', ventaAEditar.id)
       const { error: eU } = await supabase.from('ventas').update(cabecera).eq('id', ventaAEditar.id)
       if (eU) { setError('Error actualizando venta: ' + eU.message); setGuardando(false); return }
