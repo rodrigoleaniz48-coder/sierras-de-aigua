@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
@@ -475,6 +475,7 @@ function NuevaVentaDialog({
   const [datosCargados, setDatosCargados] = useState(false)
 
   const [guardando, setGuardando] = useState(false)
+  const guardandoRef = useRef(false) // guard sincrono anti-doble-tap (más robusto que setState)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -688,42 +689,44 @@ function NuevaVentaDialog({
 
 async function guardar(e: React.FormEvent) {
     e.preventDefault()
-    if (guardando) return // Prevenir doble-tap: si ya se está guardando, ignorar
+    // Guard sincrono: si ya se está guardando, ignorar (evita duplicación por doble-tap rápido)
+    if (guardandoRef.current) return
+    guardandoRef.current = true
     setGuardando(true)
 
     // Ignoramos ítems vacíos (líneas sin presentación que quedan al final por auto-add)
     const filasValidas = filas.filter((f) => f.it.presentacion_id)
-    if (filasValidas.length === 0) { setError('Agregá al menos un ítem.'); setGuardando(false); return }
+    if (filasValidas.length === 0) { setError('Agregá al menos un ítem.'); setGuardando(false); guardandoRef.current = false; return }
     if (envio && !clienteId) {
       setError('Para envío por cadete es necesario seleccionar un cliente (o crearlo con "+ nuevo cliente"). Así queda registrada la dirección/teléfono para el cadete y para próximas ventas.')
-      setGuardando(false); return
+      setGuardando(false); guardandoRef.current = false; return
     }
     if (envio && !direccionEnvio.trim()) {
       setError('Ingresá una dirección de entrega para el envío.')
-      setGuardando(false); return
+      setGuardando(false); guardandoRef.current = false; return
     }
     // Validar cotización si la venta es en USD
     const cot = Number(cotizacionUsd) || 0
-    if (monedaVenta === 'USD' && cot <= 0) { setError('Ingresá la cotización del USD (pesos por 1 USD) para registrar la venta en dólares.'); setGuardando(false); return }
+    if (monedaVenta === 'USD' && cot <= 0) { setError('Ingresá la cotización del USD (pesos por 1 USD) para registrar la venta en dólares.'); setGuardando(false); guardandoRef.current = false; return }
 
     // Preacumular stock necesitado por presentación (para validar packs contra sus componentes)
     const necesidad = new Map<number, number>()
     const litrosPorTanque = new Map<number, number>()
     for (const f of filasValidas) {
-      if (!f.it.presentacion_id) { setError('Todos los ítems necesitan una presentación.'); setGuardando(false); return }
-      if (f.it.unidades <= 0) { setError('Las unidades deben ser mayores a 0.'); setGuardando(false); return }
+      if (!f.it.presentacion_id) { setError('Todos los ítems necesitan una presentación.'); setGuardando(false); guardandoRef.current = false; return }
+      if (f.it.unidades <= 0) { setError('Las unidades deben ser mayores a 0.'); setGuardando(false); guardandoRef.current = false; return }
       const prodF = f.p ? prodPorId.get(f.p.producto_id) : undefined
       const esServicio = prodF?.categoria === 'servicio'
       const esGranel = (prodF?.nombre ?? '').toLowerCase().includes('aceite a granel')
       if (esGranel) {
-        if (!f.it.tanque_id) { setError(`Elegí un tanque para "${prodF?.nombre}".`); setGuardando(false); return }
+        if (!f.it.tanque_id) { setError(`Elegí un tanque para "${prodF?.nombre}".`); setGuardando(false); guardandoRef.current = false; return }
         const acum = (litrosPorTanque.get(f.it.tanque_id) ?? 0) + Number(f.it.unidades)
         litrosPorTanque.set(f.it.tanque_id, acum)
         const tq = tanques.find((t) => t.id === f.it.tanque_id)
-        if (!tq) { setError('Tanque no encontrado.'); setGuardando(false); return }
+        if (!tq) { setError('Tanque no encontrado.'); setGuardando(false); guardandoRef.current = false; return }
         if (acum > Number(tq.litros_actuales)) {
           setError(`Litros insuficientes en ${tq.nombre}: pedís ${acum} L y quedan ${Number(tq.litros_actuales).toFixed(0)} L.`)
-          setGuardando(false); return
+          setGuardando(false); guardandoRef.current = false; return
         }
         continue
       }
@@ -733,15 +736,15 @@ async function guardar(e: React.FormEvent) {
       }
       if (f.p?.es_pack) {
         const comps = componentes.filter((c) => c.presentacion_pack_id === f.it.presentacion_id)
-        if (comps.length === 0) { setError(`El pack "${f.p?.nombre}" no tiene componentes definidos.`); setGuardando(false); return }
+        if (comps.length === 0) { setError(`El pack "${f.p?.nombre}" no tiene componentes definidos.`); setGuardando(false); guardandoRef.current = false; return }
         for (const c of comps) {
           necesidad.set(c.presentacion_componente_id, (necesidad.get(c.presentacion_componente_id) ?? 0) + c.unidades * f.it.unidades)
         }
       } else {
-        if (!f.it.stock_id) { setError('Todos los ítems necesitan un stock disponible.'); setGuardando(false); return }
+        if (!f.it.stock_id) { setError('Todos los ítems necesitan un stock disponible.'); setGuardando(false); guardandoRef.current = false; return }
         if (f.it.unidades > f.disponible) {
           setError(`No hay stock suficiente para "${f.p?.nombre ?? ''}": pedís ${f.it.unidades}, disponibles ${f.disponible}.`)
-          setGuardando(false); return
+          setGuardando(false); guardandoRef.current = false; return
         }
         necesidad.set(f.it.presentacion_id, (necesidad.get(f.it.presentacion_id) ?? 0) + f.it.unidades)
       }
@@ -756,7 +759,7 @@ async function guardar(e: React.FormEvent) {
         const prod = p ? prodPorId.get(p.producto_id) : null
         const ubicNombre = ubicaciones.find((u) => u.id === Number(ubicacionId))?.nombre ?? ''
         setError(`Stock insuficiente para ${prod?.nombre ?? ''} ${p?.nombre ?? ''} en ${ubicNombre}: se necesitan ${need} u pero hay ${totalDisp} u.`)
-        setGuardando(false); return
+        setGuardando(false); guardandoRef.current = false; return
       }
     }
 
@@ -782,7 +785,7 @@ async function guardar(e: React.FormEvent) {
         patch.actualizado_en = new Date().toISOString()
         const { error: eC, data: cActualizado } = await supabase.from('clientes')
           .update(patch).eq('id', cliente.id).select('*').single()
-        if (eC) { setError('Error actualizando cliente: ' + eC.message); setGuardando(false); return }
+        if (eC) { setError('Error actualizando cliente: ' + eC.message); setGuardando(false); guardandoRef.current = false; return }
         if (cActualizado) onClienteCreado(cActualizado as Cliente)
       }
     }
@@ -848,11 +851,11 @@ async function guardar(e: React.FormEvent) {
       await supabase.from('movimientos_granel').delete().eq('venta_id', ventaAEditar.id).eq('tipo', 'venta_granel')
       await supabase.from('items_venta').delete().eq('venta_id', ventaAEditar.id)
       const { error: eU } = await supabase.from('ventas').update(cabecera).eq('id', ventaAEditar.id)
-      if (eU) { setError('Error actualizando venta: ' + eU.message); setGuardando(false); return }
+      if (eU) { setError('Error actualizando venta: ' + eU.message); setGuardando(false); guardandoRef.current = false; return }
       ventaId = ventaAEditar.id
     } else {
       const { data: venta, error: eV } = await supabase.from('ventas').insert(cabecera).select('id').single()
-      if (eV || !venta) { setError(eV?.message ?? 'Error creando venta'); setGuardando(false); return }
+      if (eV || !venta) { setError(eV?.message ?? 'Error creando venta'); setGuardando(false); guardandoRef.current = false; return }
       ventaId = venta.id
     }
 
@@ -881,7 +884,7 @@ async function guardar(e: React.FormEvent) {
     if (eI) {
       if (!ventaAEditar) await supabase.from('ventas').delete().eq('id', ventaId)
       setError('Error cargando ítems: ' + eI.message)
-      setGuardando(false); return
+      setGuardando(false); guardandoRef.current = false; return
     }
 
     // 3) Aceite a granel: descontar litros de cada tanque + registrar movimiento
@@ -904,6 +907,7 @@ async function guardar(e: React.FormEvent) {
     }
 
     setGuardando(false)
+    guardandoRef.current = false
     if (!ventaAEditar) {
       limpiarBorrador()
       // Reset inmediato para evitar que el useEffect de guardarBorrador re-persista los datos viejos
@@ -1527,7 +1531,7 @@ function VentaDetalleDialog({
     // 1) Obtener todos los movimientos_stock originados por esta venta
     const { data: movs, error: e1 } = await supabase
       .from('movimientos_stock').select('*').eq('venta_id', venta!.id)
-    if (e1) { setError(e1.message); setGuardando(false); return }
+    if (e1) { setError(e1.message); setGuardando(false); guardandoRef.current = false; return }
 
     // 2) Reversar cada movimiento: sumar unidades al stock (mov.unidades es negativo → resta un negativo = suma)
     const { data: { user } } = await supabase.auth.getUser()
