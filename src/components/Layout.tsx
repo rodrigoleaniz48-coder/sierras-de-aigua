@@ -22,6 +22,7 @@ const I = {
   gastos: <path d="M4 20V10M12 20V4M20 20v-6" />,
   contabilidad: <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 10h18" /></>,
   admin: <><circle cx="12" cy="12" r="3" /><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2" /></>,
+  tareas: <><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></>,
 }
 
 const NAV: NavItem[] = [
@@ -30,6 +31,7 @@ const NAV: NavItem[] = [
   { to: '/clientes',    label: 'Clientes',      roles: ['admin', 'ventas', 'marketing'], icon: I.clientes,     group: 'op' },
   { to: '/stock',       label: 'Stock',         roles: ['admin', 'ventas', 'marketing'], icon: I.stock,        group: 'op' },
   { to: '/gastos',      label: 'Mis gastos',    roles: ['admin', 'ventas', 'marketing'], icon: I.gastos,       group: 'op' },
+  { to: '/tareas',      label: 'Tareas',        roles: ['admin', 'ventas', 'marketing', 'campo'], icon: I.tareas,  group: 'op' },
   { to: '/contabilidad',label: 'Contabilidad',  roles: ['admin'],                        icon: I.contabilidad, group: 'gestion' },
   { to: '/admin',       label: 'Administración',roles: ['admin'],                        icon: I.admin,        group: 'gestion' },
 ]
@@ -49,7 +51,13 @@ export function Layout() {
   const [asistente, setAsistente] = useState(false)
   const loc = useLocation()
 
-  const items = NAV.filter((n) => !perfil || n.roles.includes(perfil.rol))
+  // Beta: Tareas solo para Rodrigo mientras probamos
+  const soloRodrigo = (perfil?.nombre ?? '').toLowerCase().includes('rodrigo')
+  const items = NAV.filter((n) => {
+    if (perfil && !n.roles.includes(perfil.rol)) return false
+    if (n.to === '/tareas' && !soloRodrigo) return false
+    return true
+  })
   const itemsOp = items.filter((i) => i.group === 'op')
   const itemsGestion = items.filter((i) => i.group === 'gestion')
 
