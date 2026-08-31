@@ -1531,7 +1531,7 @@ function VentaDetalleDialog({
     // 1) Obtener todos los movimientos_stock originados por esta venta
     const { data: movs, error: e1 } = await supabase
       .from('movimientos_stock').select('*').eq('venta_id', venta!.id)
-    if (e1) { setError(e1.message); setGuardando(false); guardandoRef.current = false; return }
+    if (e1) { setError(e1.message); setGuardando(false); return }
 
     // 2) Reversar cada movimiento: sumar unidades al stock (mov.unidades es negativo → resta un negativo = suma)
     const { data: { user } } = await supabase.auth.getUser()
