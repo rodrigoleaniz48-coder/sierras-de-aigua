@@ -5,6 +5,14 @@ import { Dialog } from '../components/Dialog'
 
 interface Perfil { id: string; nombre: string; rol: string; activo: boolean }
 
+interface Comentario {
+  id: number
+  tarea_id: number
+  autor_id: string
+  contenido: string
+  creado_en: string
+}
+
 interface Tarea {
   id: number
   titulo: string
@@ -263,10 +271,15 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, onCerrar, onO
   onCerrar: () => void
   onOk: () => void
 }) {
-  // El creador edita/borra su tarea; Rodrigo (admin) puede editar/borrar cualquiera
+  // El creador edita/borra su tarea; Rodrigo (admin) puede editar/borrar cualquiera.
+  // El asignado (aunque no sea creador) también puede cambiar el estado y comentar.
   const esMiCreacion = !!editar && editar.creado_por === soyYo
+  const esMiAsignacion = !!editar && editar.asignado_a === soyYo
   const puedeEditar = !editar || esMiCreacion || soyAdmin
   const puedeBorrar = !!editar && (esMiCreacion || soyAdmin)
+  const puedeCambiarEstado = !!editar && (esMiCreacion || esMiAsignacion || soyAdmin)
+  const puedeComentar = !!editar && (esMiCreacion || esMiAsignacion || soyAdmin)
+  const perfilPorId = useMemo(() => new Map(perfiles.map((p) => [p.id, p])), [perfiles])
   const [titulo, setTitulo] = useState('')
   const [descripcion, setDescripcion] = useState('')
   const [prioridad, setPrioridad] = useState<Tarea['prioridad']>('media')
@@ -278,6 +291,9 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, onCerrar, onO
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [confirmDel, setConfirmDel] = useState(false)
+  const [comentarios, setComentarios] = useState<Comentario[]>([])
+  const [nuevoComentario, setNuevoComentario] = useState('')
+  const [enviandoComentario, setEnviandoComentario] = useState(false)
 
   useEffect(() => {
     if (!abierto) return
@@ -294,8 +310,45 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, onCerrar, onO
       setTitulo(''); setDescripcion(''); setPrioridad('media'); setTipo('agenda')
       setEstado('pendiente'); setAsignadoA(''); setFechaVence(''); setNotas('')
     }
-    setError(null); setConfirmDel(false)
+    setError(null); setConfirmDel(false); setNuevoComentario('')
   }, [abierto, editar])
+
+  // Cargar comentarios de la tarea al abrir
+  useEffect(() => {
+    if (!abierto || !editar) { setComentarios([]); return }
+    let cancel = false
+    ;(async () => {
+      const { data } = await supabase
+        .from('tarea_comentarios')
+        .select('*')
+        .eq('tarea_id', editar.id)
+        .order('creado_en', { ascending: true })
+      if (!cancel) setComentarios((data as Comentario[]) ?? [])
+    })()
+    return () => { cancel = true }
+  }, [abierto, editar])
+
+  async function agregarComentario() {
+    if (!editar || !nuevoComentario.trim()) return
+    setEnviandoComentario(true)
+    const { data, error: err } = await supabase
+      .from('tarea_comentarios')
+      .insert({ tarea_id: editar.id, autor_id: soyYo, contenido: nuevoComentario.trim() })
+      .select('*').single()
+    setEnviandoComentario(false)
+    if (err) { setError(err.message); return }
+    if (data) setComentarios((prev) => [...prev, data as Comentario])
+    setNuevoComentario('')
+  }
+
+  // Días trabajados: desde fecha_iniciada hasta hoy (o fecha_completada si terminó)
+  const diasTrabajados = (() => {
+    if (!editar?.fecha_iniciada) return null
+    const fin = editar.fecha_completada ? new Date(editar.fecha_completada) : new Date()
+    const ini = new Date(editar.fecha_iniciada)
+    const ms = fin.getTime() - ini.getTime()
+    return Math.max(0, Math.ceil(ms / (1000 * 60 * 60 * 24)))
+  })()
 
   const soloLectura = !puedeEditar
 
@@ -306,10 +359,32 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, onCerrar, onO
     if (p && p.rol === 'campo') setTipo('campo')
   }, [asignadoA, abierto, editar, perfiles])
 
+  function timestampsPorEstado(nuevo: Tarea['estado'], t: Tarea): Record<string, unknown> {
+    const patch: Record<string, unknown> = {}
+    if (nuevo === 'en_progreso' && !t.fecha_iniciada) patch.fecha_iniciada = new Date().toISOString()
+    if (nuevo === 'hecha' && !t.fecha_completada) patch.fecha_completada = new Date().toISOString()
+    if (nuevo === 'pendiente') { patch.fecha_iniciada = null; patch.fecha_completada = null }
+    return patch
+  }
+
   async function guardar(e: React.FormEvent) {
     e.preventDefault()
+    setError(null)
+
+    // Asignado (no creador ni admin): solo actualiza estado
+    if (editar && !puedeEditar && puedeCambiarEstado) {
+      if (estado === editar.estado) { onCerrar(); return }
+      setGuardando(true)
+      const patch = { estado, ...timestampsPorEstado(estado, editar), actualizado_en: new Date().toISOString() }
+      const { error } = await supabase.from('tareas').update(patch).eq('id', editar.id)
+      setGuardando(false)
+      if (error) { setError(error.message); return }
+      onOk()
+      return
+    }
+
     if (!titulo.trim()) { setError('Poné un título.'); return }
-    setGuardando(true); setError(null)
+    setGuardando(true)
     const base = {
       titulo: titulo.trim(),
       descripcion: descripcion.trim() || null,
@@ -320,13 +395,8 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, onCerrar, onO
       notas: notas.trim() || null,
       actualizado_en: new Date().toISOString(),
     }
-    // Al cambiar estado en edición, sincronizar timestamps
     const payload: Record<string, unknown> = { ...base, estado }
-    if (editar) {
-      if (estado === 'en_progreso' && !editar.fecha_iniciada) payload.fecha_iniciada = new Date().toISOString()
-      if (estado === 'hecha' && !editar.fecha_completada) payload.fecha_completada = new Date().toISOString()
-      if (estado === 'pendiente') { payload.fecha_iniciada = null; payload.fecha_completada = null }
-    }
+    if (editar) Object.assign(payload, timestampsPorEstado(estado, editar))
     const q = editar
       ? supabase.from('tareas').update(payload).eq('id', editar.id)
       : supabase.from('tareas').insert({ ...base, creado_por: soyYo, estado: 'pendiente' })
@@ -429,7 +499,7 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, onCerrar, onO
           <input className="input" value={notas} onChange={(e) => setNotas(e.target.value)} disabled={soloLectura} />
         </div>
 
-        {editar && puedeEditar && (
+        {editar && puedeCambiarEstado && (
           <div>
             <label className="label">Estado</label>
             <div className="grid grid-cols-4 gap-1.5">
@@ -454,6 +524,62 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, onCerrar, onO
           </div>
         )}
 
+        {/* Duración */}
+        {editar && (editar.fecha_iniciada || editar.fecha_completada) && (
+          <div className="text-[11px] text-oliva-600 bg-oliva-50 rounded-md px-3 py-2">
+            {editar.fecha_iniciada && <>Iniciada <b>{new Date(editar.fecha_iniciada).toLocaleDateString('es-UY')}</b>. </>}
+            {editar.fecha_completada && <>Terminada <b>{new Date(editar.fecha_completada).toLocaleDateString('es-UY')}</b>. </>}
+            {diasTrabajados !== null && <>Duración: <b>{diasTrabajados}</b> día{diasTrabajados === 1 ? '' : 's'}.</>}
+          </div>
+        )}
+
+        {/* Comentarios / anotaciones */}
+        {editar && (
+          <div className="pt-3 border-t border-oliva-100">
+            <div className="text-[10px] font-bold uppercase tracking-widest text-oliva-500 mb-2">Anotaciones</div>
+            <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+              {comentarios.length === 0 ? (
+                <div className="text-[11px] text-oliva-500 italic">Sin anotaciones aún.</div>
+              ) : (
+                comentarios.map((c) => {
+                  const autor = perfilPorId.get(c.autor_id)
+                  const soyAutor = c.autor_id === soyYo
+                  return (
+                    <div key={c.id} className={`rounded-md px-3 py-2 text-xs ${soyAutor ? 'bg-oliva-100 text-oliva-900' : 'bg-oliva-50 text-oliva-800'}`}>
+                      <div className="flex items-center justify-between gap-2 mb-0.5">
+                        <span className="font-semibold text-[10px] uppercase tracking-wide">
+                          {soyAutor ? 'Yo' : (autor?.nombre ?? 'alguien')}
+                        </span>
+                        <span className="text-[10px] text-oliva-500">{new Date(c.creado_en).toLocaleString('es-UY', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+                      </div>
+                      <div className="whitespace-pre-wrap">{c.contenido}</div>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+            {puedeComentar && (
+              <div className="mt-2 flex gap-2">
+                <input
+                  className="input flex-1"
+                  placeholder="Agregar anotación…"
+                  value={nuevoComentario}
+                  onChange={(e) => setNuevoComentario(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && nuevoComentario.trim()) { e.preventDefault(); agregarComentario() } }}
+                />
+                <button
+                  type="button"
+                  className="btn-secondary text-xs"
+                  onClick={agregarComentario}
+                  disabled={enviandoComentario || !nuevoComentario.trim()}
+                >
+                  Enviar
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
         {error && <div className="text-sm text-red-700">{error}</div>}
 
         <div className="flex justify-end gap-2 pt-2 border-t border-oliva-100">
@@ -470,9 +596,11 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, onCerrar, onO
               )}
             </div>
           )}
-          <button type="button" className="btn-secondary" onClick={onCerrar}>{soloLectura ? 'Cerrar' : 'Cancelar'}</button>
-          {!soloLectura && (
-            <button type="submit" className="btn-primary" disabled={guardando}>{guardando ? 'Guardando…' : 'Guardar'}</button>
+          <button type="button" className="btn-secondary" onClick={onCerrar}>{(!puedeEditar && !puedeCambiarEstado) ? 'Cerrar' : 'Cancelar'}</button>
+          {(puedeEditar || puedeCambiarEstado) && (
+            <button type="submit" className="btn-primary" disabled={guardando}>
+              {guardando ? 'Guardando…' : (puedeEditar ? 'Guardar' : 'Guardar estado')}
+            </button>
           )}
         </div>
       </form>
