@@ -11,6 +11,7 @@ interface Tarea {
   descripcion: string | null
   prioridad: 'baja' | 'media' | 'alta'
   estado: 'pendiente' | 'en_progreso' | 'hecha' | 'cancelada'
+  tipo: 'agenda' | 'campo'
   asignado_a: string | null
   creado_por: string | null
   fecha_creada: string
@@ -23,6 +24,9 @@ interface Tarea {
 function esCreador(nombre: string | null | undefined): boolean {
   const n = (nombre ?? '').toLowerCase()
   return n.includes('rodrigo') || n.includes('santi') || n.includes('ayelen') || n.includes('ayelén')
+}
+function esAdmin(nombre: string | null | undefined): boolean {
+  return (nombre ?? '').toLowerCase().includes('rodrigo')
 }
 
 const LABEL_ESTADO: Record<Tarea['estado'], string> = {
@@ -47,6 +51,7 @@ export function Tareas() {
   const { perfil, session } = useAuth()
   const soyYo = session?.user.id ?? ''
   const puedeCrear = esCreador(perfil?.nombre)
+  const soyAdmin = esAdmin(perfil?.nombre)
 
   const [tareas, setTareas] = useState<Tarea[]>([])
   const [perfiles, setPerfiles] = useState<Perfil[]>([])
@@ -179,6 +184,7 @@ export function Tareas() {
         editar={editando}
         perfiles={perfiles}
         soyYo={soyYo}
+        soyAdmin={soyAdmin}
         onCerrar={() => { setNueva(false); setEditando(null) }}
         onOk={() => { setNueva(false); setEditando(null); cargar() }}
       />
@@ -209,6 +215,9 @@ function TareaCard({ tarea, asignado, creador, soyYo, onCambiarEstado, onEditar 
 
       <div className="flex flex-wrap items-center gap-1.5 mt-2 text-[11px]">
         <span className={`rounded-full px-2 py-[1px] ${COLOR_ESTADO[tarea.estado]}`}>{LABEL_ESTADO[tarea.estado]}</span>
+        {tarea.tipo === 'campo' && (
+          <span className="rounded-full px-2 py-[1px] bg-green-50 text-green-800 ring-1 ring-green-200">🌱 campo</span>
+        )}
         {asignado && (
           <span className="text-oliva-600">👤 {esMia ? 'Yo' : asignado.nombre}</span>
         )}
@@ -245,19 +254,24 @@ function TareaCard({ tarea, asignado, creador, soyYo, onCambiarEstado, onEditar 
   )
 }
 
-function TareaDialog({ abierto, editar, perfiles, soyYo, onCerrar, onOk }: {
+function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, onCerrar, onOk }: {
   abierto: boolean
   editar: Tarea | null
   perfiles: Perfil[]
   soyYo: string
+  soyAdmin: boolean
   onCerrar: () => void
   onOk: () => void
 }) {
-  // Solo el creador de la tarea puede editar cabecera y eliminar
+  // El creador edita/borra su tarea; Rodrigo (admin) puede editar/borrar cualquiera
   const esMiCreacion = !!editar && editar.creado_por === soyYo
+  const puedeEditar = !editar || esMiCreacion || soyAdmin
+  const puedeBorrar = !!editar && (esMiCreacion || soyAdmin)
   const [titulo, setTitulo] = useState('')
   const [descripcion, setDescripcion] = useState('')
   const [prioridad, setPrioridad] = useState<Tarea['prioridad']>('media')
+  const [tipo, setTipo] = useState<Tarea['tipo']>('agenda')
+  const [estado, setEstado] = useState<Tarea['estado']>('pendiente')
   const [asignadoA, setAsignadoA] = useState<string>('')
   const [fechaVence, setFechaVence] = useState<string>('')
   const [notas, setNotas] = useState('')
@@ -271,34 +285,51 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, onCerrar, onOk }: {
       setTitulo(editar.titulo)
       setDescripcion(editar.descripcion ?? '')
       setPrioridad(editar.prioridad)
+      setTipo(editar.tipo ?? 'agenda')
+      setEstado(editar.estado)
       setAsignadoA(editar.asignado_a ?? '')
       setFechaVence(editar.fecha_vence ?? '')
       setNotas(editar.notas ?? '')
     } else {
-      setTitulo(''); setDescripcion(''); setPrioridad('media')
-      setAsignadoA(''); setFechaVence(''); setNotas('')
+      setTitulo(''); setDescripcion(''); setPrioridad('media'); setTipo('agenda')
+      setEstado('pendiente'); setAsignadoA(''); setFechaVence(''); setNotas('')
     }
     setError(null); setConfirmDel(false)
   }, [abierto, editar])
 
-  const soloLectura = !!editar && !esMiCreacion
+  const soloLectura = !puedeEditar
+
+  // Autoselección: si asignás a alguien con rol 'campo', proponer tipo=campo
+  useEffect(() => {
+    if (!abierto || editar) return
+    const p = perfiles.find((x) => x.id === asignadoA)
+    if (p && p.rol === 'campo') setTipo('campo')
+  }, [asignadoA, abierto, editar, perfiles])
 
   async function guardar(e: React.FormEvent) {
     e.preventDefault()
     if (!titulo.trim()) { setError('Poné un título.'); return }
     setGuardando(true); setError(null)
-    const payload = {
+    const base = {
       titulo: titulo.trim(),
       descripcion: descripcion.trim() || null,
       prioridad,
+      tipo,
       asignado_a: asignadoA || null,
       fecha_vence: fechaVence || null,
       notas: notas.trim() || null,
       actualizado_en: new Date().toISOString(),
     }
+    // Al cambiar estado en edición, sincronizar timestamps
+    const payload: Record<string, unknown> = { ...base, estado }
+    if (editar) {
+      if (estado === 'en_progreso' && !editar.fecha_iniciada) payload.fecha_iniciada = new Date().toISOString()
+      if (estado === 'hecha' && !editar.fecha_completada) payload.fecha_completada = new Date().toISOString()
+      if (estado === 'pendiente') { payload.fecha_iniciada = null; payload.fecha_completada = null }
+    }
     const q = editar
       ? supabase.from('tareas').update(payload).eq('id', editar.id)
-      : supabase.from('tareas').insert({ ...payload, creado_por: soyYo, estado: 'pendiente' })
+      : supabase.from('tareas').insert({ ...base, creado_por: soyYo, estado: 'pendiente' })
     const { error } = await q
     setGuardando(false)
     if (error) { setError(error.message); return }
@@ -313,6 +344,7 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, onCerrar, onOk }: {
     if (error) { setError(error.message); return }
     onOk()
   }
+
 
   return (
     <Dialog abierto={abierto} onCerrar={onCerrar} titulo={editar ? `Tarea #${editar.id}` : 'Nueva tarea'} ancho="md">
@@ -361,23 +393,75 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, onCerrar, onOk }: {
             </div>
           </div>
         </div>
-        <div>
-          <label className="label">Vence (opcional)</label>
-          <input type="date" className="input" value={fechaVence} onChange={(e) => setFechaVence(e.target.value)} disabled={soloLectura} />
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="label">Tipo</label>
+            <div className="flex gap-1.5">
+              {(['agenda', 'campo'] as const).map((t) => {
+                const activo = tipo === t
+                const label = t === 'agenda' ? '📅 Agenda' : '🌱 Campo'
+                const hint = t === 'agenda' ? 'itinerario / semana' : 'jornal / empleado'
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setTipo(t)}
+                    disabled={soloLectura}
+                    className={`flex-1 rounded-md px-2 py-2 text-xs font-semibold transition text-left
+                      ${activo ? 'bg-white ring-2 ring-oliva-800 text-oliva-900' : 'bg-white ring-1 ring-oliva-200 text-oliva-600 hover:ring-oliva-400'}
+                      ${soloLectura ? 'opacity-60 cursor-not-allowed' : ''}`}
+                    title={hint}
+                  >
+                    <div>{label}</div>
+                    <div className="text-[10px] font-normal text-oliva-500">{hint}</div>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+          <div>
+            <label className="label">Vence (opcional)</label>
+            <input type="date" className="input" value={fechaVence} onChange={(e) => setFechaVence(e.target.value)} disabled={soloLectura} />
+          </div>
         </div>
         <div>
           <label className="label">Notas (opcional)</label>
           <input className="input" value={notas} onChange={(e) => setNotas(e.target.value)} disabled={soloLectura} />
         </div>
 
+        {editar && puedeEditar && (
+          <div>
+            <label className="label">Estado</label>
+            <div className="grid grid-cols-4 gap-1.5">
+              {(['pendiente', 'en_progreso', 'hecha', 'cancelada'] as const).map((e) => {
+                const activo = estado === e
+                return (
+                  <button
+                    key={e}
+                    type="button"
+                    onClick={() => setEstado(e)}
+                    className={`rounded-md px-2 py-1.5 text-xs font-semibold transition ${
+                      activo
+                        ? `${COLOR_ESTADO[e]} ring-2 ring-oliva-800`
+                        : `${COLOR_ESTADO[e]} opacity-60 hover:opacity-100`
+                    }`}
+                  >
+                    {LABEL_ESTADO[e]}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
         {error && <div className="text-sm text-red-700">{error}</div>}
 
         <div className="flex justify-end gap-2 pt-2 border-t border-oliva-100">
-          {editar && esMiCreacion && (
+          {editar && puedeBorrar && (
             <div className="mr-auto">
               {confirmDel ? (
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-red-700">¿Eliminar?</span>
+                  <span className="text-xs text-red-700">¿Eliminar? Pierde el registro.</span>
                   <button type="button" className="text-xs text-oliva-600 underline" onClick={() => setConfirmDel(false)}>No</button>
                   <button type="button" className="text-xs px-2 py-1 rounded bg-red-600 text-white" onClick={eliminar} disabled={guardando}>Sí, eliminar</button>
                 </div>
