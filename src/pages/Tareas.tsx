@@ -581,7 +581,13 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, soySocioEdito
                   placeholder="Agregar anotación…"
                   value={nuevoComentario}
                   onChange={(e) => setNuevoComentario(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && nuevoComentario.trim()) { e.preventDefault(); agregarComentario() } }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      if (nuevoComentario.trim() && !enviandoComentario) agregarComentario()
+                    }
+                  }}
                 />
                 <button
                   type="button"
