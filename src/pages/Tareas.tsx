@@ -60,6 +60,7 @@ export function Tareas() {
   const soyYo = session?.user.id ?? ''
   const puedeCrear = esCreador(perfil?.nombre)
   const soyAdmin = esAdmin(perfil?.nombre)
+  const soySocioEditor = puedeCrear // Rodrigo/Santi/Ayelen editan cabecera de cualquier tarea
 
   const [tareas, setTareas] = useState<Tarea[]>([])
   const [perfiles, setPerfiles] = useState<Perfil[]>([])
@@ -193,6 +194,7 @@ export function Tareas() {
         perfiles={perfiles}
         soyYo={soyYo}
         soyAdmin={soyAdmin}
+        soySocioEditor={soySocioEditor}
         onCerrar={() => { setNueva(false); setEditando(null) }}
         onOk={() => { setNueva(false); setEditando(null); cargar() }}
       />
@@ -262,23 +264,25 @@ function TareaCard({ tarea, asignado, creador, soyYo, onCambiarEstado, onEditar 
   )
 }
 
-function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, onCerrar, onOk }: {
+function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, soySocioEditor, onCerrar, onOk }: {
   abierto: boolean
   editar: Tarea | null
   perfiles: Perfil[]
   soyYo: string
   soyAdmin: boolean
+  soySocioEditor: boolean
   onCerrar: () => void
   onOk: () => void
 }) {
-  // El creador edita/borra su tarea; Rodrigo (admin) puede editar/borrar cualquiera.
-  // El asignado (aunque no sea creador) también puede cambiar el estado y comentar.
+  // Rodrigo/Santi/Ayelen editan la cabecera de cualquier tarea.
+  // Rodrigo puede borrar cualquiera; los demas socios editores borran solo las suyas.
+  // Gonzalo/Emiliano no editan cabecera: si son asignados cambian estado y comentan.
   const esMiCreacion = !!editar && editar.creado_por === soyYo
   const esMiAsignacion = !!editar && editar.asignado_a === soyYo
-  const puedeEditar = !editar || esMiCreacion || soyAdmin
+  const puedeEditar = !editar || soySocioEditor
   const puedeBorrar = !!editar && (esMiCreacion || soyAdmin)
-  const puedeCambiarEstado = !!editar && (esMiCreacion || esMiAsignacion || soyAdmin)
-  const puedeComentar = !!editar && (esMiCreacion || esMiAsignacion || soyAdmin)
+  const puedeCambiarEstado = !!editar && (soySocioEditor || esMiAsignacion)
+  const puedeComentar = !!editar && (soySocioEditor || esMiAsignacion)
   const perfilPorId = useMemo(() => new Map(perfiles.map((p) => [p.id, p])), [perfiles])
   const [titulo, setTitulo] = useState('')
   const [descripcion, setDescripcion] = useState('')

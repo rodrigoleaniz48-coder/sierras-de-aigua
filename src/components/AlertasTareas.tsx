@@ -37,9 +37,7 @@ export function AlertasTareas() {
         .select('id,titulo,estado,prioridad,fecha_vence,asignado_a,creado_por')
         .in('estado', ['pendiente', 'en_progreso'])
       if (cancel) return
-      const mias = ((data as Tarea[]) ?? []).filter(
-        (t) => t.asignado_a === soyYo || (t.asignado_a === null && t.creado_por === soyYo)
-      )
+      const mias = ((data as Tarea[]) ?? []).filter((t) => t.asignado_a === soyYo)
       setTareas(mias)
       setCargando(false)
     })()

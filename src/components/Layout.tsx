@@ -51,13 +51,7 @@ export function Layout() {
   const [asistente, setAsistente] = useState(false)
   const loc = useLocation()
 
-  // Beta: Tareas solo para Rodrigo mientras probamos
-  const soloRodrigo = (perfil?.nombre ?? '').toLowerCase().includes('rodrigo')
-  const items = NAV.filter((n) => {
-    if (perfil && !n.roles.includes(perfil.rol)) return false
-    if (n.to === '/tareas' && !soloRodrigo) return false
-    return true
-  })
+  const items = NAV.filter((n) => !perfil || n.roles.includes(perfil.rol))
   const itemsOp = items.filter((i) => i.group === 'op')
   const itemsGestion = items.filter((i) => i.group === 'gestion')
 
