@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Navigate, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { money, num } from '../lib/format'
@@ -24,6 +24,9 @@ export function Dashboard() {
   const { perfil, puede } = useAuth()
   const nav = useNavigate()
   const puedeVender = puede(['admin', 'ventas'])
+  // Empleados de campo (Emiliano) no ven el Inicio: van directo a Tareas.
+  if (perfil && perfil.rol === 'campo') return <Navigate to="/tareas" replace />
+
   const [r, setR] = useState<Resumen>({
     totalMes: 0, cantVentasMes: 0, totalMesAnterior: 0, litrosAceiteMes: 0,
     pendEntrega: 0, pendCobro: 0, pendCobroMonto: 0, enRiesgo: 0,

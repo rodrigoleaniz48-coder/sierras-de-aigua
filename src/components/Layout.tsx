@@ -165,14 +165,16 @@ export function Layout() {
       <CambiarPasswordDialog abierto={cambiarPass} onClose={() => setCambiarPass(false)} />
       <Asistente abierto={asistente} onCerrar={() => setAsistente(false)} />
 
-      {/* Botón flotante Analista (visible siempre) */}
-      <button
-        onClick={() => setAsistente(true)}
-        className="fixed bottom-4 right-4 z-40 h-14 w-14 rounded-full bg-oliva-800 hover:bg-oliva-900 text-oliva-50 shadow-lg shadow-oliva-800/30 flex items-center justify-center text-2xl transition"
-        title="Analista de datos"
-      >
-        📊
-      </button>
+      {/* Botón flotante Analista — oculto para empleados de campo */}
+      {perfil?.rol !== 'campo' && (
+        <button
+          onClick={() => setAsistente(true)}
+          className="fixed bottom-4 right-4 z-40 h-14 w-14 rounded-full bg-oliva-800 hover:bg-oliva-900 text-oliva-50 shadow-lg shadow-oliva-800/30 flex items-center justify-center text-2xl transition"
+          title="Analista de datos"
+        >
+          📊
+        </button>
+      )}
 
       {/* Contenido */}
       <main className="flex-1 p-4 lg:p-6 bg-oliva-50">
