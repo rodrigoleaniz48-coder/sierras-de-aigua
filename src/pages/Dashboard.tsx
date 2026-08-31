@@ -5,6 +5,7 @@ import { useAuth } from '../lib/auth'
 import { money, num } from '../lib/format'
 import { ReporteSemanalCard } from '../components/ReporteSemanalCard'
 import { AlertasStockBajo } from '../components/AlertasStockBajo'
+import { AlertasTareas } from '../components/AlertasTareas'
 
 interface AvisoCadete { socio: string; cantidad: number; ubicacion: string }
 
@@ -29,7 +30,6 @@ export function Dashboard() {
   })
   const [cargando, setCargando] = useState(true)
   const [avisosCadete, setAvisosCadete] = useState<AvisoCadete[]>([])
-  const [tareasPend, setTareasPend] = useState<{ total: number; vencidas: number }>({ total: 0, vencidas: 0 })
   const soyYo = perfil?.id ?? ''
   const nombreLower0 = (perfil?.nombre ?? '').toLowerCase()
   const usaCadete = nombreLower0.includes('rodrigo') || nombreLower0.includes('santi')
@@ -116,24 +116,6 @@ export function Dashboard() {
       .finally(() => setCargando(false))
   }, [])
 
-  // Tareas pendientes asignadas a mí (o creadas por mí y sin asignar)
-  useEffect(() => {
-    if (!soyYo) return
-    let cancel = false
-    ;(async () => {
-      const { data } = await supabase
-        .from('tareas')
-        .select('id,estado,fecha_vence,asignado_a,creado_por')
-        .in('estado', ['pendiente', 'en_progreso'])
-      if (cancel || !data) return
-      const hoy = new Date().toISOString().slice(0, 10)
-      const mias = data.filter((t) => t.asignado_a === soyYo || (t.asignado_a === null && t.creado_por === soyYo))
-      const vencidas = mias.filter((t) => t.fecha_vence && t.fecha_vence < hoy).length
-      setTareasPend({ total: mias.length, vencidas })
-    })()
-    return () => { cancel = true }
-  }, [soyYo])
-
   const primerNombre = perfil?.nombre ? perfil.nombre.split(' ')[0] : ''
   const hoy = new Date().toLocaleDateString('es-UY', { day: 'numeric', month: 'long', year: 'numeric' })
   const ticketProm = r.cantVentasMes > 0 ? r.totalMes / r.cantVentasMes : 0
@@ -163,28 +145,7 @@ export function Dashboard() {
       </div>
 
       {!soloReporte && <AlertasStockBajo />}
-
-      {tareasPend.total > 0 && (
-        <div className={`rounded-lg border-2 p-3 flex items-start gap-3 ${
-          tareasPend.vencidas > 0 ? 'border-red-300 bg-red-50' : 'border-amber-300 bg-amber-50'
-        }`}>
-          <div className="text-xl">📋</div>
-          <div className="flex-1 text-sm">
-            <div className={`font-bold ${tareasPend.vencidas > 0 ? 'text-red-900' : 'text-amber-900'}`}>
-              {tareasPend.total === 1 ? 'Tenés 1 tarea pendiente' : `Tenés ${tareasPend.total} tareas pendientes`}
-              {tareasPend.vencidas > 0 && (
-                <span className="ml-1 text-red-800">· {tareasPend.vencidas} vencida{tareasPend.vencidas === 1 ? '' : 's'}</span>
-              )}
-            </div>
-            <div className={`mt-0.5 text-[12px] ${tareasPend.vencidas > 0 ? 'text-red-800' : 'text-amber-800'}`}>
-              Revisá tu lista y marcá las que ya hiciste.
-            </div>
-          </div>
-          <button className="btn-secondary text-xs shrink-0" onClick={() => nav('/tareas')}>
-            Ir a Tareas →
-          </button>
-        </div>
-      )}
+      {!soloReporte && <AlertasTareas />}
 
       {avisosCadete.length > 0 && (
         <div className="rounded-lg border-2 border-blue-300 bg-blue-50 p-3 flex items-start gap-3">
