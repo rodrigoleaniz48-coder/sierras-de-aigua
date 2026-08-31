@@ -60,8 +60,10 @@ Deno.serve(async (req) => {
       .neq('estado', 'cancelado')
     const ventas = ventasRaw ?? []
 
-    function totalEnUYU(v: { total: number; moneda: string | null; cotizacion: number | null }): number {
-      if ((v.moneda ?? 'UYU') === 'USD' && v.cotizacion && v.cotizacion > 0) return Number(v.total) * Number(v.cotizacion)
+    // OJO: en la tabla `ventas`, `total` ya está SIEMPRE en pesos (UYU) — la columna
+    // `moneda` es solo un flag para saber si originalmente se cobró en USD.
+    // Ver src/pages/Ventas.tsx (Totales SIEMPRE se persisten en pesos).
+    function totalEnUYU(v: { total: number }): number {
       return Number(v.total)
     }
 
