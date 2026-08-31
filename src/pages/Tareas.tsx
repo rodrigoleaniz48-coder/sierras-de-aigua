@@ -334,14 +334,25 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, soySocioEdito
 
   async function agregarComentario() {
     if (!editar || !nuevoComentario.trim()) return
+    setError(null)
     setEnviandoComentario(true)
-    const { data, error: err } = await supabase
+    const contenido = nuevoComentario.trim()
+    const { error: errIns } = await supabase
       .from('tarea_comentarios')
-      .insert({ tarea_id: editar.id, autor_id: soyYo, contenido: nuevoComentario.trim() })
-      .select('*').single()
+      .insert({ tarea_id: editar.id, autor_id: soyYo, contenido })
+    if (errIns) {
+      setEnviandoComentario(false)
+      setError('No se pudo guardar la anotación: ' + errIns.message)
+      return
+    }
+    // Re-fetch para garantizar consistencia (el SELECT after-insert puede fallar por RLS)
+    const { data } = await supabase
+      .from('tarea_comentarios')
+      .select('*')
+      .eq('tarea_id', editar.id)
+      .order('creado_en', { ascending: true })
     setEnviandoComentario(false)
-    if (err) { setError(err.message); return }
-    if (data) setComentarios((prev) => [...prev, data as Comentario])
+    setComentarios((data as Comentario[]) ?? [])
     setNuevoComentario('')
   }
 
