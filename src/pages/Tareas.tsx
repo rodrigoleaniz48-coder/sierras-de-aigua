@@ -179,7 +179,6 @@ export function Tareas() {
         editar={editando}
         perfiles={perfiles}
         soyYo={soyYo}
-        puedeEditarTodo={esCreador(perfil?.nombre)}
         onCerrar={() => { setNueva(false); setEditando(null) }}
         onOk={() => { setNueva(false); setEditando(null); cargar() }}
       />
@@ -246,15 +245,16 @@ function TareaCard({ tarea, asignado, creador, soyYo, onCambiarEstado, onEditar 
   )
 }
 
-function TareaDialog({ abierto, editar, perfiles, soyYo, puedeEditarTodo, onCerrar, onOk }: {
+function TareaDialog({ abierto, editar, perfiles, soyYo, onCerrar, onOk }: {
   abierto: boolean
   editar: Tarea | null
   perfiles: Perfil[]
   soyYo: string
-  puedeEditarTodo: boolean
   onCerrar: () => void
   onOk: () => void
 }) {
+  // Solo el creador de la tarea puede editar cabecera y eliminar
+  const esMiCreacion = !!editar && editar.creado_por === soyYo
   const [titulo, setTitulo] = useState('')
   const [descripcion, setDescripcion] = useState('')
   const [prioridad, setPrioridad] = useState<Tarea['prioridad']>('media')
@@ -281,7 +281,7 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, puedeEditarTodo, onCerr
     setError(null); setConfirmDel(false)
   }, [abierto, editar])
 
-  const soloLectura = !!editar && !puedeEditarTodo && editar.asignado_a !== soyYo
+  const soloLectura = !!editar && !esMiCreacion
 
   async function guardar(e: React.FormEvent) {
     e.preventDefault()
@@ -335,11 +335,30 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, puedeEditarTodo, onCerr
           </div>
           <div>
             <label className="label">Prioridad</label>
-            <select className="input" value={prioridad} onChange={(e) => setPrioridad(e.target.value as Tarea['prioridad'])} disabled={soloLectura}>
-              <option value="baja">Baja</option>
-              <option value="media">Media</option>
-              <option value="alta">Alta</option>
-            </select>
+            <div className="flex gap-1.5">
+              {(['baja', 'media', 'alta'] as const).map((p) => {
+                const activo = prioridad === p
+                const color = p === 'baja' ? 'bg-green-500' : p === 'media' ? 'bg-amber-400' : 'bg-red-500'
+                const label = p === 'baja' ? 'Baja' : p === 'media' ? 'Media' : 'Alta'
+                return (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setPrioridad(p)}
+                    disabled={soloLectura}
+                    className={`flex-1 flex items-center justify-center gap-1.5 rounded-md px-2 py-2 text-xs font-semibold transition
+                      ${activo
+                        ? 'bg-white ring-2 ring-oliva-800 text-oliva-900'
+                        : 'bg-white ring-1 ring-oliva-200 text-oliva-600 hover:ring-oliva-400'}
+                      ${soloLectura ? 'opacity-60 cursor-not-allowed' : ''}`}
+                    title={label}
+                  >
+                    <span className={`h-3 w-3 rounded-full ${color} ${activo ? 'ring-2 ring-offset-1 ring-oliva-800/40' : ''}`}></span>
+                    <span>{label}</span>
+                  </button>
+                )
+              })}
+            </div>
           </div>
         </div>
         <div>
@@ -354,7 +373,7 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, puedeEditarTodo, onCerr
         {error && <div className="text-sm text-red-700">{error}</div>}
 
         <div className="flex justify-end gap-2 pt-2 border-t border-oliva-100">
-          {editar && puedeEditarTodo && (
+          {editar && esMiCreacion && (
             <div className="mr-auto">
               {confirmDel ? (
                 <div className="flex items-center gap-2">
