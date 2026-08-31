@@ -60,27 +60,31 @@ Deno.serve(async (req) => {
       .neq('estado', 'cancelado')
     const ventas = ventasRaw ?? []
 
-    // OJO: en la tabla `ventas`, `total` ya está SIEMPRE en pesos (UYU) — la columna
-    // `moneda` es solo un flag para saber si originalmente se cobró en USD.
-    // Ver src/pages/Ventas.tsx (Totales SIEMPRE se persisten en pesos).
-    function totalEnUYU(v: { total: number }): number {
-      return Number(v.total)
+    // En la tabla `ventas`, `total` está SIEMPRE en pesos (UYU) — la columna
+    // `moneda` indica si originalmente se cobró en USD (con `cotizacion` guardada).
+    // Para conciliación bancaria mantenemos ambas monedas separadas.
+    function totalOriginalUSD(v: { total: number; moneda: string | null; cotizacion: number | null }): number | null {
+      if ((v.moneda ?? 'UYU') !== 'USD' || !v.cotizacion || Number(v.cotizacion) <= 0) return null
+      return Number(v.total) / Number(v.cotizacion)
     }
 
     const ventasEfectivas = ventas.filter((v) => !v.promocion_comercial)
-    const totalVentasUYU = ventasEfectivas.reduce((a, v) => a + totalEnUYU(v), 0)
+    const ventasUYU = ventasEfectivas.filter((v) => (v.moneda ?? 'UYU') !== 'USD')
+    const ventasUSD = ventasEfectivas.filter((v) => (v.moneda ?? 'UYU') === 'USD')
+    const totalUYU = ventasUYU.reduce((a, v) => a + Number(v.total), 0)
+    const totalUSD = ventasUSD.reduce((a, v) => a + (totalOriginalUSD(v) ?? 0), 0)
     const cantVentas = ventasEfectivas.length
-    const ticket = cantVentas > 0 ? totalVentasUYU / cantVentas : 0
-    // Por socio
-    const porSocio = new Map<string, { nombre: string; total: number; cantidad: number }>()
+    // Por socio, con ambas monedas separadas
+    const porSocio = new Map<string, { nombre: string; uyu: number; usd: number; cantidad: number }>()
     for (const v of ventasEfectivas) {
       const key = v.socio_id ?? '—'
-      const acc = porSocio.get(key) ?? { nombre: nombrePorId.get(v.socio_id ?? '') ?? '—', total: 0, cantidad: 0 }
-      acc.total += totalEnUYU(v)
+      const acc = porSocio.get(key) ?? { nombre: nombrePorId.get(v.socio_id ?? '') ?? '—', uyu: 0, usd: 0, cantidad: 0 }
+      if ((v.moneda ?? 'UYU') === 'USD') acc.usd += totalOriginalUSD(v) ?? 0
+      else acc.uyu += Number(v.total)
       acc.cantidad += 1
       porSocio.set(key, acc)
     }
-    const ventasPorSocio = [...porSocio.values()].sort((a, b) => b.total - a.total)
+    const ventasPorSocio = [...porSocio.values()].sort((a, b) => (b.uyu + b.usd * 40) - (a.uyu + a.usd * 40))
     const promos = ventas.length - ventasEfectivas.length
 
     // === GASTOS ===
@@ -89,19 +93,25 @@ Deno.serve(async (req) => {
       .select('id,fecha,socio_id,monto,moneda,categoria,descripcion,reembolsable,reembolsado,es_adelanto')
       .gte('fecha', desdeStr).lt('fecha', hastaStr)
     const gastos = gastosRaw ?? []
-    const gastoPorSocio = new Map<string, { nombre: string; total: number; reembolsables: number; cantidad: number }>()
-    let totalGastos = 0
+    // Gastos también se separan por moneda para conciliación bancaria.
+    const gastoPorSocio = new Map<string, { nombre: string; uyu: number; usd: number; reembUyu: number; reembUsd: number; cantidad: number }>()
+    let gastosTotalUYU = 0
+    let gastosTotalUSD = 0
     for (const g of gastos) {
-      const monto = (g.moneda === 'USD') ? Number(g.monto) * 40 : Number(g.monto) // aprox si vino en USD
-      totalGastos += monto
+      const esUSD = g.moneda === 'USD'
+      const monto = Number(g.monto)
+      if (esUSD) gastosTotalUSD += monto
+      else gastosTotalUYU += monto
       const key = g.socio_id ?? '—'
-      const acc = gastoPorSocio.get(key) ?? { nombre: nombrePorId.get(g.socio_id ?? '') ?? '—', total: 0, reembolsables: 0, cantidad: 0 }
-      acc.total += monto
-      if (g.reembolsable && !g.reembolsado) acc.reembolsables += monto
+      const acc = gastoPorSocio.get(key) ?? { nombre: nombrePorId.get(g.socio_id ?? '') ?? '—', uyu: 0, usd: 0, reembUyu: 0, reembUsd: 0, cantidad: 0 }
+      if (esUSD) acc.usd += monto; else acc.uyu += monto
+      if (g.reembolsable && !g.reembolsado) {
+        if (esUSD) acc.reembUsd += monto; else acc.reembUyu += monto
+      }
       acc.cantidad += 1
       gastoPorSocio.set(key, acc)
     }
-    const gastosPorSocio = [...gastoPorSocio.values()].sort((a, b) => b.total - a.total)
+    const gastosPorSocio = [...gastoPorSocio.values()].sort((a, b) => (b.uyu + b.usd * 40) - (a.uyu + a.usd * 40))
 
     // === TAREAS DE EMILIANO ===
     interface Tarea { id: number; titulo: string; estado: string; tipo: string; fecha_creada: string; fecha_iniciada: string | null; fecha_completada: string | null }
@@ -152,8 +162,9 @@ Deno.serve(async (req) => {
     const APP_URL = 'https://rodrigoleaniz48-coder.github.io/sierras-de-aigua/'
     const html = renderHTML({
       nombreMes, desdeStr, hastaStr,
-      totalVentasUYU, cantVentas, ticket, ventasPorSocio, promos,
-      totalGastos, gastosPorSocio, cantGastos: gastos.length,
+      totalUYU, totalUSD, cantVentas, ventasPorSocio, promos,
+      cantUYU: ventasUYU.length, cantUSD: ventasUSD.length,
+      gastosTotalUYU, gastosTotalUSD, gastosPorSocio, cantGastos: gastos.length,
       jornalesAprox, cerradasEnMes, activasEnMes, comentariosPorTarea,
       APP_URL,
     })
@@ -161,8 +172,9 @@ Deno.serve(async (req) => {
     // === PDF adjunto ===
     const pdfBytes = await renderPDF({
       nombreMes, desdeStr, hastaStr,
-      totalVentasUYU, cantVentas, ticket, ventasPorSocio, promos,
-      totalGastos, gastosPorSocio, cantGastos: gastos.length,
+      totalUYU, totalUSD, cantVentas, ventasPorSocio, promos,
+      cantUYU: ventasUYU.length, cantUSD: ventasUSD.length,
+      gastosTotalUYU, gastosTotalUSD, gastosPorSocio, cantGastos: gastos.length,
       jornalesAprox, cerradasEnMes, activasEnMes, comentariosPorTarea,
     })
     const pdfBase64 = bytesToBase64(pdfBytes)
@@ -200,9 +212,11 @@ Deno.serve(async (req) => {
       adjunto: pdfName,
       subject,
       totales: {
-        ventas_uyu: Math.round(totalVentasUYU),
+        ventas_uyu: Math.round(totalUYU),
+        ventas_usd: Math.round(totalUSD * 100) / 100,
         cant_ventas: cantVentas,
-        gastos_uyu: Math.round(totalGastos),
+        gastos_uyu: Math.round(gastosTotalUYU),
+        gastos_usd: Math.round(gastosTotalUSD * 100) / 100,
         cant_gastos: gastos.length,
         emiliano_jornales_aprox: jornalesAprox,
       },
@@ -221,11 +235,11 @@ function json(obj: unknown, status = 200): Response {
 
 interface RenderData {
   nombreMes: string; desdeStr: string; hastaStr: string
-  totalVentasUYU: number; cantVentas: number; ticket: number
-  ventasPorSocio: Array<{ nombre: string; total: number; cantidad: number }>
+  totalUYU: number; totalUSD: number; cantVentas: number; cantUYU: number; cantUSD: number
+  ventasPorSocio: Array<{ nombre: string; uyu: number; usd: number; cantidad: number }>
   promos: number
-  totalGastos: number
-  gastosPorSocio: Array<{ nombre: string; total: number; reembolsables: number; cantidad: number }>
+  gastosTotalUYU: number; gastosTotalUSD: number
+  gastosPorSocio: Array<{ nombre: string; uyu: number; usd: number; reembUyu: number; reembUsd: number; cantidad: number }>
   cantGastos: number
   jornalesAprox: number
   cerradasEnMes: Array<{ id: number; titulo: string; fecha_iniciada: string | null; fecha_completada: string | null }>
@@ -239,16 +253,23 @@ function renderHTML(d: RenderData): string {
     <tr>
       <td style="padding:10px 14px;border-bottom:1px solid #eee;">${esc(s.nombre)}</td>
       <td style="padding:10px 14px;border-bottom:1px solid #eee;text-align:right;">${s.cantidad}</td>
-      <td style="padding:10px 14px;border-bottom:1px solid #eee;text-align:right;font-weight:600;">${money(s.total)}</td>
+      <td style="padding:10px 14px;border-bottom:1px solid #eee;text-align:right;font-weight:${s.uyu > 0 ? 600 : 400};color:${s.uyu > 0 ? '#1a1a1a' : '#bbb'};">${s.uyu > 0 ? money(s.uyu, 'UYU') : '—'}</td>
+      <td style="padding:10px 14px;border-bottom:1px solid #eee;text-align:right;font-weight:${s.usd > 0 ? 600 : 400};color:${s.usd > 0 ? '#1a1a1a' : '#bbb'};">${s.usd > 0 ? money(s.usd, 'USD') : '—'}</td>
     </tr>`).join('')
 
-  const filasGastosSocio = d.gastosPorSocio.map((s) => `
+  const filasGastosSocio = d.gastosPorSocio.map((s) => {
+    const reembTxt = s.reembUyu > 0 || s.reembUsd > 0
+      ? [s.reembUyu > 0 ? money(s.reembUyu, 'UYU') : '', s.reembUsd > 0 ? money(s.reembUsd, 'USD') : ''].filter(Boolean).join(' + ')
+      : '—'
+    return `
     <tr>
       <td style="padding:10px 14px;border-bottom:1px solid #eee;">${esc(s.nombre)}</td>
       <td style="padding:10px 14px;border-bottom:1px solid #eee;text-align:right;">${s.cantidad}</td>
-      <td style="padding:10px 14px;border-bottom:1px solid #eee;text-align:right;">${money(s.total)}</td>
-      <td style="padding:10px 14px;border-bottom:1px solid #eee;text-align:right;color:${s.reembolsables > 0 ? '#b45309' : '#666'};">${s.reembolsables > 0 ? money(s.reembolsables) : '—'}</td>
-    </tr>`).join('')
+      <td style="padding:10px 14px;border-bottom:1px solid #eee;text-align:right;color:${s.uyu > 0 ? '#1a1a1a' : '#bbb'};">${s.uyu > 0 ? money(s.uyu, 'UYU') : '—'}</td>
+      <td style="padding:10px 14px;border-bottom:1px solid #eee;text-align:right;color:${s.usd > 0 ? '#1a1a1a' : '#bbb'};">${s.usd > 0 ? money(s.usd, 'USD') : '—'}</td>
+      <td style="padding:10px 14px;border-bottom:1px solid #eee;text-align:right;color:${reembTxt !== '—' ? '#b45309' : '#666'};font-size:12px;">${reembTxt}</td>
+    </tr>`
+  }).join('')
 
   const filasCerradas = d.cerradasEnMes.map((t) => {
     const dur = t.fecha_iniciada && t.fecha_completada
@@ -279,16 +300,17 @@ function renderHTML(d: RenderData): string {
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:18px;border-collapse:separate;border-spacing:8px;">
       <tr>
         <td style="background:#f5f5f0;border-radius:6px;padding:14px 16px;vertical-align:top;width:50%;">
-          <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Total del mes</div>
-          <div style="font-size:20px;font-weight:700;color:#2f3d2a;line-height:1.2;">${money(d.totalVentasUYU)}</div>
-          <div style="font-size:12px;color:#666;margin-top:4px;">${d.cantVentas} operaciones</div>
+          <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Total en pesos</div>
+          <div style="font-size:20px;font-weight:700;color:#2f3d2a;line-height:1.2;">${money(d.totalUYU, 'UYU')}</div>
+          <div style="font-size:12px;color:#666;margin-top:4px;">${d.cantUYU} venta${d.cantUYU === 1 ? '' : 's'} en pesos</div>
         </td>
         <td style="background:#f5f5f0;border-radius:6px;padding:14px 16px;vertical-align:top;width:50%;">
-          <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Ticket promedio</div>
-          <div style="font-size:20px;font-weight:700;color:#2f3d2a;line-height:1.2;">${money(d.ticket)}</div>
-          <div style="font-size:12px;color:#666;margin-top:4px;">${d.promos > 0 ? `${d.promos} promo${d.promos === 1 ? '' : 's'} (no cuenta)` : 'por venta'}</div>
+          <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Total en dólares</div>
+          <div style="font-size:20px;font-weight:700;color:#2f3d2a;line-height:1.2;">${money(d.totalUSD, 'USD')}</div>
+          <div style="font-size:12px;color:#666;margin-top:4px;">${d.cantUSD} venta${d.cantUSD === 1 ? '' : 's'} en U$S</div>
         </td>
       </tr>
+      ${d.promos > 0 ? `<tr><td colspan="2" style="padding:8px 4px 0;font-size:12px;color:#666;text-align:right;">${d.promos} promoción${d.promos === 1 ? '' : 'es'} comercial${d.promos === 1 ? '' : 'es'} (no cuentan en totales)</td></tr>` : ''}
     </table>`
 
   return `<!doctype html>
@@ -307,27 +329,37 @@ function renderHTML(d: RenderData): string {
       <table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:28px;">
         <thead><tr style="background:#f5f5f0;">
           <th style="padding:10px 14px;text-align:left;font-weight:600;">Socio</th>
-          <th style="padding:10px 14px;text-align:right;font-weight:600;">Ventas</th>
-          <th style="padding:10px 14px;text-align:right;font-weight:600;">Total</th>
+          <th style="padding:10px 14px;text-align:right;font-weight:600;">Vtas.</th>
+          <th style="padding:10px 14px;text-align:right;font-weight:600;">Pesos</th>
+          <th style="padding:10px 14px;text-align:right;font-weight:600;">Dólares</th>
         </tr></thead>
-        <tbody>${filasVentasSocio || '<tr><td colspan="3" style="padding:16px;color:#888;text-align:center;">sin ventas</td></tr>'}</tbody>
+        <tbody>${filasVentasSocio || '<tr><td colspan="4" style="padding:16px;color:#888;text-align:center;">sin ventas</td></tr>'}</tbody>
       </table>
 
       <!-- GASTOS -->
       <h2 style="font-size:15px;margin:0 0 12px;color:#2f3d2a;text-transform:uppercase;letter-spacing:1.5px;">Gastos</h2>
-      <div style="font-size:14px;margin-bottom:16px;background:#f5f5f0;border-radius:6px;padding:14px 16px;">
-        <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Total del mes</div>
-        <div style="font-size:20px;font-weight:700;color:#2f3d2a;line-height:1.2;">${money(d.totalGastos)}</div>
-        <div style="font-size:12px;color:#666;margin-top:4px;">${d.cantGastos} gasto${d.cantGastos === 1 ? '' : 's'}</div>
-      </div>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:16px;border-collapse:separate;border-spacing:8px;">
+        <tr>
+          <td style="background:#f5f5f0;border-radius:6px;padding:14px 16px;vertical-align:top;width:50%;">
+            <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Total en pesos</div>
+            <div style="font-size:20px;font-weight:700;color:#2f3d2a;line-height:1.2;">${money(d.gastosTotalUYU, 'UYU')}</div>
+          </td>
+          <td style="background:#f5f5f0;border-radius:6px;padding:14px 16px;vertical-align:top;width:50%;">
+            <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Total en dólares</div>
+            <div style="font-size:20px;font-weight:700;color:#2f3d2a;line-height:1.2;">${money(d.gastosTotalUSD, 'USD')}</div>
+          </td>
+        </tr>
+        <tr><td colspan="2" style="padding:6px 4px 0;font-size:12px;color:#666;text-align:right;">${d.cantGastos} gasto${d.cantGastos === 1 ? '' : 's'} en total</td></tr>
+      </table>
       <table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:28px;">
         <thead><tr style="background:#f5f5f0;">
           <th style="padding:10px 14px;text-align:left;font-weight:600;">Socio</th>
           <th style="padding:10px 14px;text-align:right;font-weight:600;">Cant.</th>
-          <th style="padding:10px 14px;text-align:right;font-weight:600;">Total</th>
+          <th style="padding:10px 14px;text-align:right;font-weight:600;">Pesos</th>
+          <th style="padding:10px 14px;text-align:right;font-weight:600;">Dólares</th>
           <th style="padding:10px 14px;text-align:right;font-weight:600;">Pend. reemb.</th>
         </tr></thead>
-        <tbody>${filasGastosSocio || '<tr><td colspan="4" style="padding:16px;color:#888;text-align:center;">sin gastos</td></tr>'}</tbody>
+        <tbody>${filasGastosSocio || '<tr><td colspan="5" style="padding:16px;color:#888;text-align:center;">sin gastos</td></tr>'}</tbody>
       </table>
 
       <!-- EMILIANO -->
@@ -354,7 +386,7 @@ function renderHTML(d: RenderData): string {
       </div>
     </div>
     <div style="padding:16px 28px;background:#fafaf7;font-size:11px;color:#888;text-align:center;line-height:1.5;">
-      Reporte generado automáticamente. Los montos en USD se convierten a UYU a cotización 40 (aprox., solo gastos).<br>
+      Reporte generado automáticamente. Cada moneda se muestra por separado para facilitar la conciliación bancaria.<br>
       El PDF adjunto tiene los mismos datos para archivo/contabilidad.
     </div>
   </div>
@@ -467,31 +499,36 @@ async function renderPDF(d: Omit<RenderData, 'APP_URL'>): Promise<Uint8Array> {
 
   // Ventas
   h2('VENTAS')
-  linea('Total del mes', money(d.totalVentasUYU), { bold: true, sizeDer: 16 })
+  linea('Total en pesos', money(d.totalUYU, 'UYU'), { bold: true, sizeDer: 15 })
+  linea('  ventas en pesos', `${d.cantUYU}`, { sizeIzq: 9, colorIzq: gris })
   espacio(4)
-  linea('Cantidad de operaciones', String(d.cantVentas))
-  linea('Ticket promedio', money(d.ticket))
-  if (d.promos > 0) linea('Promociones (no cuentan)', String(d.promos), { sizeIzq: 9, colorIzq: gris })
+  linea('Total en dolares', money(d.totalUSD, 'USD'), { bold: true, sizeDer: 15 })
+  linea('  ventas en dolares', `${d.cantUSD}`, { sizeIzq: 9, colorIzq: gris })
+  if (d.promos > 0) { espacio(4); linea('Promociones (no cuentan)', String(d.promos), { sizeIzq: 9, colorIzq: gris }) }
   espacio(10)
   texto('Por socio', { size: 10, color: gris, bold: true })
   espacio(LH)
   for (const s of d.ventasPorSocio) {
-    linea(`  ${s.nombre}  ·  ${s.cantidad} vta.`, money(s.total))
+    const der = [s.uyu > 0 ? money(s.uyu, 'UYU') : '', s.usd > 0 ? money(s.usd, 'USD') : ''].filter(Boolean).join('  +  ')
+    linea(`  ${s.nombre}  ·  ${s.cantidad} vta.`, der || '-')
   }
   if (d.ventasPorSocio.length === 0) { texto('(sin ventas)', { size: 10, color: gris }); espacio(LH) }
 
   // Gastos
   h2('GASTOS')
-  linea('Total del mes', money(d.totalGastos), { bold: true, sizeDer: 16 })
+  linea('Total en pesos', money(d.gastosTotalUYU, 'UYU'), { bold: true, sizeDer: 15 })
+  linea('Total en dolares', money(d.gastosTotalUSD, 'USD'), { bold: true, sizeDer: 15 })
   espacio(4)
-  linea('Cantidad', String(d.cantGastos))
+  linea('Cantidad total', String(d.cantGastos))
   espacio(10)
   texto('Por socio', { size: 10, color: gris, bold: true })
   espacio(LH)
   for (const s of d.gastosPorSocio) {
-    linea(`  ${s.nombre}  ·  ${s.cantidad} gasto${s.cantidad === 1 ? '' : 's'}`, money(s.total))
-    if (s.reembolsables > 0) {
-      texto(`      pend. reembolso: ${money(s.reembolsables)}`, { size: 9, color: rgb(0.7, 0.44, 0.03) })
+    const der = [s.uyu > 0 ? money(s.uyu, 'UYU') : '', s.usd > 0 ? money(s.usd, 'USD') : ''].filter(Boolean).join('  +  ')
+    linea(`  ${s.nombre}  ·  ${s.cantidad} gasto${s.cantidad === 1 ? '' : 's'}`, der || '-')
+    if (s.reembUyu > 0 || s.reembUsd > 0) {
+      const reemb = [s.reembUyu > 0 ? money(s.reembUyu, 'UYU') : '', s.reembUsd > 0 ? money(s.reembUsd, 'USD') : ''].filter(Boolean).join(' + ')
+      texto(`      pend. reembolso: ${reemb}`, { size: 9, color: rgb(0.7, 0.44, 0.03) })
       espacio(LH - 2)
     }
   }
@@ -533,7 +570,7 @@ async function renderPDF(d: Omit<RenderData, 'APP_URL'>): Promise<Uint8Array> {
   espacio(24)
   ;(page as PDFPage).drawLine({ start: { x: marginX, y }, end: { x: rightX, y }, thickness: 0.5, color: grisClaro })
   espacio(14)
-  texto('Reporte generado automaticamente. USD convertido a UYU a 40 (aprox., solo gastos).', { size: 8, color: gris })
+  texto('Reporte generado automaticamente. Pesos y dolares se muestran por separado para conciliacion.', { size: 8, color: gris })
 
   return await doc.save()
 }
