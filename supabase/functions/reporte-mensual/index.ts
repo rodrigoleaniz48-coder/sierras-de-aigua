@@ -235,17 +235,17 @@ interface RenderData {
 function renderHTML(d: RenderData): string {
   const filasVentasSocio = d.ventasPorSocio.map((s) => `
     <tr>
-      <td style="padding:6px 10px;border-bottom:1px solid #eee;">${esc(s.nombre)}</td>
-      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right;">${s.cantidad}</td>
-      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right;font-weight:600;">${money(s.total)}</td>
+      <td style="padding:10px 14px;border-bottom:1px solid #eee;">${esc(s.nombre)}</td>
+      <td style="padding:10px 14px;border-bottom:1px solid #eee;text-align:right;">${s.cantidad}</td>
+      <td style="padding:10px 14px;border-bottom:1px solid #eee;text-align:right;font-weight:600;">${money(s.total)}</td>
     </tr>`).join('')
 
   const filasGastosSocio = d.gastosPorSocio.map((s) => `
     <tr>
-      <td style="padding:6px 10px;border-bottom:1px solid #eee;">${esc(s.nombre)}</td>
-      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right;">${s.cantidad}</td>
-      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right;">${money(s.total)}</td>
-      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right;color:${s.reembolsables > 0 ? '#b45309' : '#666'};">${s.reembolsables > 0 ? money(s.reembolsables) : '—'}</td>
+      <td style="padding:10px 14px;border-bottom:1px solid #eee;">${esc(s.nombre)}</td>
+      <td style="padding:10px 14px;border-bottom:1px solid #eee;text-align:right;">${s.cantidad}</td>
+      <td style="padding:10px 14px;border-bottom:1px solid #eee;text-align:right;">${money(s.total)}</td>
+      <td style="padding:10px 14px;border-bottom:1px solid #eee;text-align:right;color:${s.reembolsables > 0 ? '#b45309' : '#666'};">${s.reembolsables > 0 ? money(s.reembolsables) : '—'}</td>
     </tr>`).join('')
 
   const filasCerradas = d.cerradasEnMes.map((t) => {
@@ -255,87 +255,104 @@ function renderHTML(d: RenderData): string {
     const coms = d.comentariosPorTarea.get(t.id) ?? []
     return `
       <tr>
-        <td style="padding:6px 10px;border-bottom:1px solid #eee;">
+        <td style="padding:10px 14px;border-bottom:1px solid #eee;">
           <div style="font-weight:600;">${esc(t.titulo)}</div>
           ${coms.length > 0 ? `<div style="font-size:12px;color:#555;margin-top:4px;">${coms.map((c) => `“${esc(c)}”`).join('<br>')}</div>` : ''}
         </td>
-        <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right;color:#666;font-size:12px;">
+        <td style="padding:10px 14px;border-bottom:1px solid #eee;text-align:right;color:#666;font-size:12px;">
           ${t.fecha_iniciada ? t.fecha_iniciada.slice(0, 10) : '—'}<br>→ ${t.fecha_completada ? t.fecha_completada.slice(0, 10) : '—'}
         </td>
-        <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right;font-weight:600;">${dur ? dur + ' d' : '—'}</td>
+        <td style="padding:10px 14px;border-bottom:1px solid #eee;text-align:right;font-weight:600;">${dur ? dur + ' d' : '—'}</td>
       </tr>`
   }).join('')
 
   const filasActivas = d.activasEnMes.map((t) => `
     <tr>
-      <td style="padding:6px 10px;border-bottom:1px solid #eee;">${esc(t.titulo)}</td>
-      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right;color:#666;font-size:12px;">${t.estado === 'en_progreso' ? 'en curso' : 'pendiente'}</td>
+      <td style="padding:10px 14px;border-bottom:1px solid #eee;">${esc(t.titulo)}</td>
+      <td style="padding:10px 14px;border-bottom:1px solid #eee;text-align:right;color:#666;font-size:12px;">${t.estado === 'en_progreso' ? 'en curso' : 'pendiente'}</td>
     </tr>`).join('')
 
+  // KPIs top como tabla (los clientes de mail ignoran flex; tabla es lo más compatible)
+  const kpiVentas = `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:18px;border-collapse:separate;border-spacing:8px;">
+      <tr>
+        <td style="background:#f5f5f0;border-radius:6px;padding:14px 16px;vertical-align:top;width:50%;">
+          <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Total del mes</div>
+          <div style="font-size:20px;font-weight:700;color:#2f3d2a;line-height:1.2;">${money(d.totalVentasUYU)}</div>
+          <div style="font-size:12px;color:#666;margin-top:4px;">${d.cantVentas} operaciones</div>
+        </td>
+        <td style="background:#f5f5f0;border-radius:6px;padding:14px 16px;vertical-align:top;width:50%;">
+          <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Ticket promedio</div>
+          <div style="font-size:20px;font-weight:700;color:#2f3d2a;line-height:1.2;">${money(d.ticket)}</div>
+          <div style="font-size:12px;color:#666;margin-top:4px;">${d.promos > 0 ? `${d.promos} promo${d.promos === 1 ? '' : 's'} (no cuenta)` : 'por venta'}</div>
+        </td>
+      </tr>
+    </table>`
+
   return `<!doctype html>
-<html><body style="margin:0;padding:0;background:#f7f7f5;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;color:#1a1a1a;">
-  <div style="max-width:640px;margin:20px auto;background:#fff;border:1px solid #e5e5e0;border-radius:10px;overflow:hidden;">
-    <div style="background:#2f3d2a;color:#fff;padding:18px 22px;">
-      <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;opacity:0.7;">Reporte mensual · Sierras de Aiguá</div>
-      <h1 style="margin:6px 0 0;font-size:22px;text-transform:capitalize;">${esc(d.nombreMes)}</h1>
-      <div style="font-size:12px;opacity:0.7;margin-top:2px;">${d.desdeStr} — al ${d.hastaStr}</div>
+<html><body style="margin:0;padding:0;background:#f7f7f5;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#1a1a1a;line-height:1.5;">
+  <div style="max-width:680px;margin:24px auto;background:#fff;border:1px solid #e5e5e0;border-radius:10px;overflow:hidden;">
+    <div style="background:#2f3d2a;color:#fff;padding:22px 28px;">
+      <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;opacity:0.75;">Reporte mensual · Sierras de Aiguá</div>
+      <h1 style="margin:8px 0 0;font-size:24px;text-transform:capitalize;line-height:1.2;">${esc(d.nombreMes)}</h1>
+      <div style="font-size:12px;opacity:0.75;margin-top:4px;">${d.desdeStr} — al ${d.hastaStr}</div>
     </div>
 
-    <div style="padding:22px;">
+    <div style="padding:28px;">
       <!-- VENTAS -->
-      <h2 style="font-size:16px;margin:0 0 8px;">Ventas</h2>
-      <div style="display:flex;gap:14px;margin-bottom:10px;font-size:13px;">
-        <div><b style="font-size:18px;">${money(d.totalVentasUYU)}</b><br><span style="color:#666;">${d.cantVentas} operaciones</span></div>
-        <div><b style="font-size:18px;">${money(d.ticket)}</b><br><span style="color:#666;">ticket promedio</span></div>
-        ${d.promos > 0 ? `<div><b style="font-size:18px;color:#b45309;">${d.promos}</b><br><span style="color:#666;">promos (no cuentan)</span></div>` : ''}
-      </div>
-      <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:22px;">
+      <h2 style="font-size:15px;margin:0 0 12px;color:#2f3d2a;text-transform:uppercase;letter-spacing:1.5px;">Ventas</h2>
+      ${kpiVentas}
+      <table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:28px;">
         <thead><tr style="background:#f5f5f0;">
-          <th style="padding:6px 10px;text-align:left;">Socio</th>
-          <th style="padding:6px 10px;text-align:right;">Ventas</th>
-          <th style="padding:6px 10px;text-align:right;">Total</th>
+          <th style="padding:10px 14px;text-align:left;font-weight:600;">Socio</th>
+          <th style="padding:10px 14px;text-align:right;font-weight:600;">Ventas</th>
+          <th style="padding:10px 14px;text-align:right;font-weight:600;">Total</th>
         </tr></thead>
-        <tbody>${filasVentasSocio || '<tr><td colspan="3" style="padding:12px;color:#888;text-align:center;">sin ventas</td></tr>'}</tbody>
+        <tbody>${filasVentasSocio || '<tr><td colspan="3" style="padding:16px;color:#888;text-align:center;">sin ventas</td></tr>'}</tbody>
       </table>
 
       <!-- GASTOS -->
-      <h2 style="font-size:16px;margin:0 0 8px;">Gastos</h2>
-      <div style="font-size:13px;margin-bottom:10px;">
-        <b style="font-size:18px;">${money(d.totalGastos)}</b> · <span style="color:#666;">${d.cantGastos} gasto${d.cantGastos === 1 ? '' : 's'}</span>
+      <h2 style="font-size:15px;margin:0 0 12px;color:#2f3d2a;text-transform:uppercase;letter-spacing:1.5px;">Gastos</h2>
+      <div style="font-size:14px;margin-bottom:16px;background:#f5f5f0;border-radius:6px;padding:14px 16px;">
+        <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Total del mes</div>
+        <div style="font-size:20px;font-weight:700;color:#2f3d2a;line-height:1.2;">${money(d.totalGastos)}</div>
+        <div style="font-size:12px;color:#666;margin-top:4px;">${d.cantGastos} gasto${d.cantGastos === 1 ? '' : 's'}</div>
       </div>
-      <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:22px;">
+      <table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:28px;">
         <thead><tr style="background:#f5f5f0;">
-          <th style="padding:6px 10px;text-align:left;">Socio</th>
-          <th style="padding:6px 10px;text-align:right;">Cant.</th>
-          <th style="padding:6px 10px;text-align:right;">Total</th>
-          <th style="padding:6px 10px;text-align:right;">Pend. reembolso</th>
+          <th style="padding:10px 14px;text-align:left;font-weight:600;">Socio</th>
+          <th style="padding:10px 14px;text-align:right;font-weight:600;">Cant.</th>
+          <th style="padding:10px 14px;text-align:right;font-weight:600;">Total</th>
+          <th style="padding:10px 14px;text-align:right;font-weight:600;">Pend. reemb.</th>
         </tr></thead>
-        <tbody>${filasGastosSocio || '<tr><td colspan="4" style="padding:12px;color:#888;text-align:center;">sin gastos</td></tr>'}</tbody>
+        <tbody>${filasGastosSocio || '<tr><td colspan="4" style="padding:16px;color:#888;text-align:center;">sin gastos</td></tr>'}</tbody>
       </table>
 
       <!-- EMILIANO -->
-      <h2 style="font-size:16px;margin:0 0 8px;">Emiliano — tareas y jornales</h2>
-      <div style="font-size:13px;margin-bottom:10px;">
-        <b style="font-size:18px;">${d.jornalesAprox}</b> <span style="color:#666;">día${d.jornalesAprox === 1 ? '' : 's'} con actividad (aprox. jornales)</span>
+      <h2 style="font-size:15px;margin:0 0 12px;color:#2f3d2a;text-transform:uppercase;letter-spacing:1.5px;">Emiliano — tareas y jornales</h2>
+      <div style="font-size:14px;margin-bottom:16px;background:#f5f5f0;border-radius:6px;padding:14px 16px;">
+        <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Días con actividad</div>
+        <div style="font-size:20px;font-weight:700;color:#2f3d2a;line-height:1.2;">${d.jornalesAprox}</div>
+        <div style="font-size:12px;color:#666;margin-top:4px;">aprox. jornales del mes</div>
       </div>
       ${d.cerradasEnMes.length > 0 ? `
-        <div style="font-size:12px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Cerradas en el mes</div>
-        <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:14px;">
+        <div style="font-size:12px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Cerradas en el mes</div>
+        <table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:18px;">
           <tbody>${filasCerradas}</tbody>
         </table>` : ''}
       ${d.activasEnMes.length > 0 ? `
-        <div style="font-size:12px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Aún abiertas</div>
-        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <div style="font-size:12px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Aún abiertas</div>
+        <table style="width:100%;border-collapse:collapse;font-size:14px;">
           <tbody>${filasActivas}</tbody>
         </table>` : ''}
-      ${d.cerradasEnMes.length === 0 && d.activasEnMes.length === 0 ? '<div style="color:#888;font-size:13px;">Sin tareas registradas en el mes.</div>' : ''}
+      ${d.cerradasEnMes.length === 0 && d.activasEnMes.length === 0 ? '<div style="color:#888;font-size:14px;">Sin tareas registradas en el mes.</div>' : ''}
 
-      <div style="margin-top:26px;padding-top:16px;border-top:1px solid #eee;text-align:center;">
-        <a href="${d.APP_URL}" style="display:inline-block;background:#2f3d2a;color:#fff;padding:9px 18px;border-radius:6px;text-decoration:none;font-size:13px;font-weight:600;">Abrir la app</a>
+      <div style="margin-top:32px;padding-top:20px;border-top:1px solid #eee;text-align:center;">
+        <a href="${d.APP_URL}" style="display:inline-block;background:#2f3d2a;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-size:13px;font-weight:600;">Abrir la app</a>
       </div>
     </div>
-    <div style="padding:12px 22px;background:#fafaf7;font-size:11px;color:#888;text-align:center;">
-      Reporte generado automáticamente. Los montos en USD se convierten a UYU a cotización 40 (aprox., solo para gastos).
+    <div style="padding:16px 28px;background:#fafaf7;font-size:11px;color:#888;text-align:center;line-height:1.5;">
+      Reporte generado automáticamente. Los montos en USD se convierten a UYU a cotización 40 (aprox., solo gastos).<br>
       El PDF adjunto tiene los mismos datos para archivo/contabilidad.
     </div>
   </div>
@@ -371,24 +388,31 @@ async function renderPDF(d: Omit<RenderData, 'APP_URL'>): Promise<Uint8Array> {
   const doc = await PDFDocument.create()
   const font = await doc.embedFont(StandardFonts.Helvetica)
   const bold = await doc.embedFont(StandardFonts.HelveticaBold)
-  const marginX = 40
+  const marginX = 55
   const pageW = 595
   const pageH = 842
   const oliva = rgb(0.184, 0.239, 0.165)
   const gris = rgb(0.4, 0.4, 0.4)
-  const grisClaro = rgb(0.9, 0.9, 0.88)
+  const grisClaro = rgb(0.88, 0.88, 0.85)
+  const rightX = pageW - marginX
+  const LH = 18 // line height base
 
   let page = doc.addPage([pageW, pageH])
-  let y = pageH - 50
+  let y = pageH - 60
 
   function nuevaPagina() {
     page = doc.addPage([pageW, pageH])
-    y = pageH - 50
+    y = pageH - 60
   }
 
   function espacio(px: number) {
     y -= px
-    if (y < 60) nuevaPagina()
+    if (y < 80) nuevaPagina()
+  }
+
+  function anchoTexto(s: string, size: number, useBold: boolean): number {
+    const f = useBold ? bold : font
+    return f.widthOfTextAtSize(ascii(s), size)
   }
 
   function texto(t: string, opts: { size?: number; bold?: boolean; color?: ReturnType<typeof rgb>; x?: number; align?: 'left' | 'right' } = {}) {
@@ -397,75 +421,87 @@ async function renderPDF(d: Omit<RenderData, 'APP_URL'>): Promise<Uint8Array> {
     const s = ascii(t)
     let x = opts.x ?? marginX
     if (opts.align === 'right') {
-      const w = f.widthOfTextAtSize(s, size)
-      x = (opts.x ?? (pageW - marginX)) - w
+      x = (opts.x ?? rightX) - f.widthOfTextAtSize(s, size)
     }
     ;(page as PDFPage).drawText(s, { x, y, size, font: f, color: opts.color ?? rgb(0.1, 0.1, 0.1) })
   }
 
+  // Trunca la etiqueta si va a colisionar con el valor de la derecha (deja 12px de aire).
+  function truncarPara(label: string, valorDer: string, sizeIzq: number, sizeDer: number, boldIzq: boolean, boldDer: boolean): string {
+    const anchoDer = anchoTexto(valorDer, sizeDer, boldDer)
+    const maxIzq = (rightX - marginX) - anchoDer - 12
+    let l = label
+    while (anchoTexto(l, sizeIzq, boldIzq) > maxIzq && l.length > 4) l = l.slice(0, -1)
+    return l === label ? label : l.slice(0, -1) + '…'.replace('…', '..')
+  }
+
   function h1(t: string) {
+    espacio(10)
+    texto(t, { size: 20, bold: true, color: oliva })
     espacio(6)
-    texto(t, { size: 18, bold: true, color: oliva })
-    espacio(4)
   }
   function h2(t: string) {
-    espacio(14)
+    espacio(20)
     texto(t, { size: 13, bold: true, color: oliva })
-    espacio(3)
-    ;(page as PDFPage).drawLine({ start: { x: marginX, y: y - 2 }, end: { x: pageW - marginX, y: y - 2 }, thickness: 0.7, color: grisClaro })
-    espacio(12)
+    espacio(6)
+    ;(page as PDFPage).drawLine({ start: { x: marginX, y: y }, end: { x: rightX, y: y }, thickness: 0.7, color: grisClaro })
+    espacio(16)
   }
-  function linea(labelIzq: string, valorDer: string, opts: { bold?: boolean; sizeIzq?: number; sizeDer?: number } = {}) {
-    texto(labelIzq, { size: opts.sizeIzq ?? 10, bold: opts.bold })
-    texto(valorDer, { size: opts.sizeDer ?? 10, bold: opts.bold, align: 'right', x: pageW - marginX })
-    espacio(14)
+  function linea(labelIzq: string, valorDer: string, opts: { bold?: boolean; sizeIzq?: number; sizeDer?: number; colorIzq?: ReturnType<typeof rgb>; colorDer?: ReturnType<typeof rgb> } = {}) {
+    const sIzq = opts.sizeIzq ?? 10
+    const sDer = opts.sizeDer ?? 10
+    const label = truncarPara(labelIzq, valorDer, sIzq, sDer, !!opts.bold, !!opts.bold)
+    texto(label, { size: sIzq, bold: opts.bold, color: opts.colorIzq })
+    texto(valorDer, { size: sDer, bold: opts.bold, align: 'right', color: opts.colorDer })
+    espacio(LH)
   }
 
   // Header
   texto('REPORTE MENSUAL - SIERRAS DE AIGUA', { size: 9, color: gris })
-  espacio(14)
-  h1(d.nombreMes.toUpperCase())
-  texto(`${d.desdeStr} al ${d.hastaStr}`, { size: 9, color: gris })
   espacio(16)
+  h1(d.nombreMes.toUpperCase())
+  texto(`${d.desdeStr}  al  ${d.hastaStr}`, { size: 10, color: gris })
+  espacio(6)
 
   // Ventas
   h2('VENTAS')
-  linea('Total del mes', money(d.totalVentasUYU), { bold: true, sizeDer: 14 })
+  linea('Total del mes', money(d.totalVentasUYU), { bold: true, sizeDer: 16 })
+  espacio(4)
   linea('Cantidad de operaciones', String(d.cantVentas))
   linea('Ticket promedio', money(d.ticket))
-  if (d.promos > 0) linea('Promociones (no cuentan)', String(d.promos), { sizeIzq: 9 })
-  espacio(6)
-  // Tabla por socio
-  texto('Por socio', { size: 9, color: gris, bold: true })
-  espacio(12)
+  if (d.promos > 0) linea('Promociones (no cuentan)', String(d.promos), { sizeIzq: 9, colorIzq: gris })
+  espacio(10)
+  texto('Por socio', { size: 10, color: gris, bold: true })
+  espacio(LH)
   for (const s of d.ventasPorSocio) {
-    linea(`  ${s.nombre}  -  ${s.cantidad} vta.`, money(s.total))
+    linea(`  ${s.nombre}  ·  ${s.cantidad} vta.`, money(s.total))
   }
-  if (d.ventasPorSocio.length === 0) { texto('(sin ventas)', { size: 9, color: gris }); espacio(14) }
+  if (d.ventasPorSocio.length === 0) { texto('(sin ventas)', { size: 10, color: gris }); espacio(LH) }
 
   // Gastos
   h2('GASTOS')
-  linea('Total del mes', money(d.totalGastos), { bold: true, sizeDer: 14 })
+  linea('Total del mes', money(d.totalGastos), { bold: true, sizeDer: 16 })
+  espacio(4)
   linea('Cantidad', String(d.cantGastos))
-  espacio(6)
-  texto('Por socio', { size: 9, color: gris, bold: true })
-  espacio(12)
+  espacio(10)
+  texto('Por socio', { size: 10, color: gris, bold: true })
+  espacio(LH)
   for (const s of d.gastosPorSocio) {
-    linea(`  ${s.nombre}  -  ${s.cantidad} gasto${s.cantidad === 1 ? '' : 's'}`, money(s.total))
+    linea(`  ${s.nombre}  ·  ${s.cantidad} gasto${s.cantidad === 1 ? '' : 's'}`, money(s.total))
     if (s.reembolsables > 0) {
-      texto(`    pend. reembolso: ${money(s.reembolsables)}`, { size: 9, color: rgb(0.7, 0.44, 0.03) })
-      espacio(12)
+      texto(`      pend. reembolso: ${money(s.reembolsables)}`, { size: 9, color: rgb(0.7, 0.44, 0.03) })
+      espacio(LH - 2)
     }
   }
-  if (d.gastosPorSocio.length === 0) { texto('(sin gastos)', { size: 9, color: gris }); espacio(14) }
+  if (d.gastosPorSocio.length === 0) { texto('(sin gastos)', { size: 10, color: gris }); espacio(LH) }
 
   // Emiliano
   h2('EMILIANO - TAREAS Y JORNALES')
-  linea('Dias con actividad (aprox. jornales)', String(d.jornalesAprox), { bold: true, sizeDer: 14 })
-  espacio(6)
+  linea('Dias con actividad (aprox. jornales)', String(d.jornalesAprox), { bold: true, sizeDer: 16 })
+  espacio(10)
   if (d.cerradasEnMes.length > 0) {
-    texto('Cerradas en el mes', { size: 9, color: gris, bold: true })
-    espacio(12)
+    texto('Cerradas en el mes', { size: 10, color: gris, bold: true })
+    espacio(LH)
     for (const t of d.cerradasEnMes) {
       const dur = t.fecha_iniciada && t.fecha_completada
         ? Math.max(1, Math.ceil((new Date(t.fecha_completada).getTime() - new Date(t.fecha_iniciada).getTime()) / 86400000))
@@ -473,27 +509,28 @@ async function renderPDF(d: Omit<RenderData, 'APP_URL'>): Promise<Uint8Array> {
       linea(`  ${t.titulo}`, dur ? `${dur} d` : '-')
       const coms = d.comentariosPorTarea.get(t.id) ?? []
       for (const c of coms) {
-        texto(`    "${c}"`, { size: 9, color: gris })
-        espacio(12)
+        texto(`      "${c}"`, { size: 9, color: gris })
+        espacio(LH - 2)
       }
     }
   }
   if (d.activasEnMes.length > 0) {
-    espacio(4)
-    texto('Aun abiertas', { size: 9, color: gris, bold: true })
-    espacio(12)
+    espacio(6)
+    texto('Aun abiertas', { size: 10, color: gris, bold: true })
+    espacio(LH)
     for (const t of d.activasEnMes) {
       linea(`  ${t.titulo}`, t.estado === 'en_progreso' ? 'en curso' : 'pendiente')
     }
   }
   if (d.cerradasEnMes.length === 0 && d.activasEnMes.length === 0) {
-    texto('(sin tareas registradas en el mes)', { size: 9, color: gris })
+    texto('(sin tareas registradas en el mes)', { size: 10, color: gris })
+    espacio(LH)
   }
 
   // Footer
-  espacio(20)
-  ;(page as PDFPage).drawLine({ start: { x: marginX, y }, end: { x: pageW - marginX, y }, thickness: 0.5, color: grisClaro })
-  espacio(10)
+  espacio(24)
+  ;(page as PDFPage).drawLine({ start: { x: marginX, y }, end: { x: rightX, y }, thickness: 0.5, color: grisClaro })
+  espacio(14)
   texto('Reporte generado automaticamente. USD convertido a UYU a 40 (aprox., solo gastos).', { size: 8, color: gris })
 
   return await doc.save()

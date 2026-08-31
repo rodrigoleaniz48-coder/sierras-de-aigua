@@ -4,7 +4,6 @@ import { useAuth } from '../lib/auth'
 import type { Rol } from '../lib/types'
 import { rangoSemanal, reporteVisto } from '../lib/reporte'
 import { CambiarPasswordDialog } from './CambiarPasswordDialog'
-import { Asistente } from './Asistente'
 
 interface NavItem {
   to: string
@@ -48,7 +47,6 @@ export function Layout() {
   const { perfil, signOut } = useAuth()
   const [open, setOpen] = useState(false)
   const [cambiarPass, setCambiarPass] = useState(false)
-  const [asistente, setAsistente] = useState(false)
   const loc = useLocation()
 
   const items = NAV.filter((n) => !perfil || n.roles.includes(perfil.rol))
@@ -163,18 +161,6 @@ export function Layout() {
       </aside>
 
       <CambiarPasswordDialog abierto={cambiarPass} onClose={() => setCambiarPass(false)} />
-      <Asistente abierto={asistente} onCerrar={() => setAsistente(false)} />
-
-      {/* Botón flotante Analista — oculto para empleados de campo */}
-      {perfil?.rol !== 'campo' && (
-        <button
-          onClick={() => setAsistente(true)}
-          className="fixed bottom-4 right-4 z-40 h-14 w-14 rounded-full bg-oliva-800 hover:bg-oliva-900 text-oliva-50 shadow-lg shadow-oliva-800/30 flex items-center justify-center text-2xl transition"
-          title="Analista de datos"
-        >
-          📊
-        </button>
-      )}
 
       {/* Contenido */}
       <main className="flex-1 p-4 lg:p-6 bg-oliva-50">
