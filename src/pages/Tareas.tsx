@@ -399,6 +399,7 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, soySocioEdito
     }
 
     if (!titulo.trim()) { setError('Poné un título.'); return }
+    if (!asignadoA) { setError('Asigná la tarea a alguien.'); return }
     setGuardando(true)
     const base = {
       titulo: titulo.trim(),
@@ -435,7 +436,7 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, soySocioEdito
     <Dialog abierto={abierto} onCerrar={onCerrar} titulo={editar ? `Tarea #${editar.id}` : 'Nueva tarea'} ancho="md">
       <form onSubmit={guardar} className="space-y-4">
         <div>
-          <label className="label">Título</label>
+          <label className="label">Título <span className="text-red-600">*</span></label>
           <input className="input" value={titulo} onChange={(e) => setTitulo(e.target.value)} disabled={soloLectura} required autoFocus />
         </div>
         <div>
@@ -444,9 +445,9 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, soySocioEdito
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="label">Asignada a</label>
-            <select className="input" value={asignadoA} onChange={(e) => setAsignadoA(e.target.value)} disabled={soloLectura}>
-              <option value="">— sin asignar —</option>
+            <label className="label">Asignada a <span className="text-red-600">*</span></label>
+            <select className="input" value={asignadoA} onChange={(e) => setAsignadoA(e.target.value)} disabled={soloLectura} required>
+              <option value="">— elegí a alguien —</option>
               {perfiles.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
             </select>
           </div>
