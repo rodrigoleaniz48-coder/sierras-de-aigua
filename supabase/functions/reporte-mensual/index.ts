@@ -1,9 +1,11 @@
 // Reporte mensual: ventas + gastos + jornales de Emiliano.
 // POST/GET /functions/v1/reporte-mensual?year=2026&month=8&to=rodrigoleaniz48@gmail.com
 // Sin params: reporta el mes anterior al actual (rango [primer día del mes prev, primer día del mes actual)).
-// Envía HTML por Resend. Requiere secrets: RESEND_API_KEY, REPORTE_MAIL_TO (opcional).
+// Envía HTML + PDF adjunto por Resend a los destinatarios en REPORTE_MAIL_TO (CSV).
+// Requiere secrets: RESEND_API_KEY, REPORTE_MAIL_TO (opcional, default rodrigoleaniz48+harriasrl).
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { PDFDocument, StandardFonts, rgb, type PDFPage, type PDFFont } from 'https://esm.sh/pdf-lib@1.17.1'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -154,8 +156,23 @@ Deno.serve(async (req) => {
       APP_URL,
     })
 
+    // === PDF adjunto ===
+    const pdfBytes = await renderPDF({
+      nombreMes, desdeStr, hastaStr,
+      totalVentasUYU, cantVentas, ticket, ventasPorSocio, promos,
+      totalGastos, gastosPorSocio, cantGastos: gastos.length,
+      jornalesAprox, cerradasEnMes, activasEnMes, comentariosPorTarea,
+    })
+    const pdfBase64 = bytesToBase64(pdfBytes)
+    const pdfName = `reporte-${y0}-${String(m0).padStart(2, '0')}.pdf`
+
     // === Envío ===
-    const to = url.searchParams.get('to') ?? Deno.env.get('REPORTE_MAIL_TO') ?? 'rodrigoleaniz48@gmail.com'
+    const toParam = url.searchParams.get('to')
+    // Ojo: mientras no se verifique un dominio propio en Resend, sólo se puede
+    // enviar al email dueño de la cuenta (rodrigoleaniz48@gmail.com). Una vez
+    // verificado, poner REPORTE_MAIL_TO="rodrigoleaniz48@gmail.com, harriasrl@gmail.com"
+    const rawTo = toParam ?? Deno.env.get('REPORTE_MAIL_TO') ?? 'rodrigoleaniz48@gmail.com'
+    const to = rawTo.split(',').map((s) => s.trim()).filter(Boolean)
     const subject = `Reporte mensual — ${nombreMes} — Sierras de Aiguá`
     const resp = await fetch('https://api.resend.com/emails', {
       method: 'POST',
@@ -165,9 +182,10 @@ Deno.serve(async (req) => {
       },
       body: JSON.stringify({
         from: 'Sierras de Aiguá <onboarding@resend.dev>',
-        to: [to],
+        to,
         subject,
         html,
+        attachments: [{ filename: pdfName, content: pdfBase64 }],
       }),
     })
     const bodyResp = await resp.text()
@@ -177,6 +195,7 @@ Deno.serve(async (req) => {
       ok: true,
       periodo: `${desdeStr} .. ${hastaStr}`,
       enviado_a: to,
+      adjunto: pdfName,
       subject,
       totales: {
         ventas_uyu: Math.round(totalVentasUYU),
@@ -317,7 +336,165 @@ function renderHTML(d: RenderData): string {
     </div>
     <div style="padding:12px 22px;background:#fafaf7;font-size:11px;color:#888;text-align:center;">
       Reporte generado automáticamente. Los montos en USD se convierten a UYU a cotización 40 (aprox., solo para gastos).
+      El PDF adjunto tiene los mismos datos para archivo/contabilidad.
     </div>
   </div>
 </body></html>`
+}
+
+// ================== PDF ==================
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let bin = ''
+  const chunk = 0x8000
+  for (let i = 0; i < bytes.length; i += chunk) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + chunk))
+  }
+  return btoa(bin)
+}
+
+// Reemplaza chars no-latin1 por versión compatible (StandardFont Helvetica no soporta unicode)
+function ascii(s: string): string {
+  return s
+    .replace(/[áàäâ]/g, 'a').replace(/[ÁÀÄÂ]/g, 'A')
+    .replace(/[éèëê]/g, 'e').replace(/[ÉÈËÊ]/g, 'E')
+    .replace(/[íìïî]/g, 'i').replace(/[ÍÌÏÎ]/g, 'I')
+    .replace(/[óòöô]/g, 'o').replace(/[ÓÒÖÔ]/g, 'O')
+    .replace(/[úùüû]/g, 'u').replace(/[ÚÙÜÛ]/g, 'U')
+    .replace(/ñ/g, 'n').replace(/Ñ/g, 'N')
+    .replace(/[“”]/g, '"').replace(/[‘’]/g, "'")
+    .replace(/—/g, '-').replace(/–/g, '-').replace(/·/g, '-')
+    .replace(/[^\x20-\x7E\n]/g, '')
+}
+
+async function renderPDF(d: Omit<RenderData, 'APP_URL'>): Promise<Uint8Array> {
+  const doc = await PDFDocument.create()
+  const font = await doc.embedFont(StandardFonts.Helvetica)
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold)
+  const marginX = 40
+  const pageW = 595
+  const pageH = 842
+  const oliva = rgb(0.184, 0.239, 0.165)
+  const gris = rgb(0.4, 0.4, 0.4)
+  const grisClaro = rgb(0.9, 0.9, 0.88)
+
+  let page = doc.addPage([pageW, pageH])
+  let y = pageH - 50
+
+  function nuevaPagina() {
+    page = doc.addPage([pageW, pageH])
+    y = pageH - 50
+  }
+
+  function espacio(px: number) {
+    y -= px
+    if (y < 60) nuevaPagina()
+  }
+
+  function texto(t: string, opts: { size?: number; bold?: boolean; color?: ReturnType<typeof rgb>; x?: number; align?: 'left' | 'right' } = {}) {
+    const size = opts.size ?? 10
+    const f: PDFFont = opts.bold ? bold : font
+    const s = ascii(t)
+    let x = opts.x ?? marginX
+    if (opts.align === 'right') {
+      const w = f.widthOfTextAtSize(s, size)
+      x = (opts.x ?? (pageW - marginX)) - w
+    }
+    ;(page as PDFPage).drawText(s, { x, y, size, font: f, color: opts.color ?? rgb(0.1, 0.1, 0.1) })
+  }
+
+  function h1(t: string) {
+    espacio(6)
+    texto(t, { size: 18, bold: true, color: oliva })
+    espacio(4)
+  }
+  function h2(t: string) {
+    espacio(14)
+    texto(t, { size: 13, bold: true, color: oliva })
+    espacio(3)
+    ;(page as PDFPage).drawLine({ start: { x: marginX, y: y - 2 }, end: { x: pageW - marginX, y: y - 2 }, thickness: 0.7, color: grisClaro })
+    espacio(12)
+  }
+  function linea(labelIzq: string, valorDer: string, opts: { bold?: boolean; sizeIzq?: number; sizeDer?: number } = {}) {
+    texto(labelIzq, { size: opts.sizeIzq ?? 10, bold: opts.bold })
+    texto(valorDer, { size: opts.sizeDer ?? 10, bold: opts.bold, align: 'right', x: pageW - marginX })
+    espacio(14)
+  }
+
+  // Header
+  texto('REPORTE MENSUAL - SIERRAS DE AIGUA', { size: 9, color: gris })
+  espacio(14)
+  h1(d.nombreMes.toUpperCase())
+  texto(`${d.desdeStr} al ${d.hastaStr}`, { size: 9, color: gris })
+  espacio(16)
+
+  // Ventas
+  h2('VENTAS')
+  linea('Total del mes', money(d.totalVentasUYU), { bold: true, sizeDer: 14 })
+  linea('Cantidad de operaciones', String(d.cantVentas))
+  linea('Ticket promedio', money(d.ticket))
+  if (d.promos > 0) linea('Promociones (no cuentan)', String(d.promos), { sizeIzq: 9 })
+  espacio(6)
+  // Tabla por socio
+  texto('Por socio', { size: 9, color: gris, bold: true })
+  espacio(12)
+  for (const s of d.ventasPorSocio) {
+    linea(`  ${s.nombre}  -  ${s.cantidad} vta.`, money(s.total))
+  }
+  if (d.ventasPorSocio.length === 0) { texto('(sin ventas)', { size: 9, color: gris }); espacio(14) }
+
+  // Gastos
+  h2('GASTOS')
+  linea('Total del mes', money(d.totalGastos), { bold: true, sizeDer: 14 })
+  linea('Cantidad', String(d.cantGastos))
+  espacio(6)
+  texto('Por socio', { size: 9, color: gris, bold: true })
+  espacio(12)
+  for (const s of d.gastosPorSocio) {
+    linea(`  ${s.nombre}  -  ${s.cantidad} gasto${s.cantidad === 1 ? '' : 's'}`, money(s.total))
+    if (s.reembolsables > 0) {
+      texto(`    pend. reembolso: ${money(s.reembolsables)}`, { size: 9, color: rgb(0.7, 0.44, 0.03) })
+      espacio(12)
+    }
+  }
+  if (d.gastosPorSocio.length === 0) { texto('(sin gastos)', { size: 9, color: gris }); espacio(14) }
+
+  // Emiliano
+  h2('EMILIANO - TAREAS Y JORNALES')
+  linea('Dias con actividad (aprox. jornales)', String(d.jornalesAprox), { bold: true, sizeDer: 14 })
+  espacio(6)
+  if (d.cerradasEnMes.length > 0) {
+    texto('Cerradas en el mes', { size: 9, color: gris, bold: true })
+    espacio(12)
+    for (const t of d.cerradasEnMes) {
+      const dur = t.fecha_iniciada && t.fecha_completada
+        ? Math.max(1, Math.ceil((new Date(t.fecha_completada).getTime() - new Date(t.fecha_iniciada).getTime()) / 86400000))
+        : null
+      linea(`  ${t.titulo}`, dur ? `${dur} d` : '-')
+      const coms = d.comentariosPorTarea.get(t.id) ?? []
+      for (const c of coms) {
+        texto(`    "${c}"`, { size: 9, color: gris })
+        espacio(12)
+      }
+    }
+  }
+  if (d.activasEnMes.length > 0) {
+    espacio(4)
+    texto('Aun abiertas', { size: 9, color: gris, bold: true })
+    espacio(12)
+    for (const t of d.activasEnMes) {
+      linea(`  ${t.titulo}`, t.estado === 'en_progreso' ? 'en curso' : 'pendiente')
+    }
+  }
+  if (d.cerradasEnMes.length === 0 && d.activasEnMes.length === 0) {
+    texto('(sin tareas registradas en el mes)', { size: 9, color: gris })
+  }
+
+  // Footer
+  espacio(20)
+  ;(page as PDFPage).drawLine({ start: { x: marginX, y }, end: { x: pageW - marginX, y }, thickness: 0.5, color: grisClaro })
+  espacio(10)
+  texto('Reporte generado automaticamente. USD convertido a UYU a 40 (aprox., solo gastos).', { size: 8, color: gris })
+
+  return await doc.save()
 }
