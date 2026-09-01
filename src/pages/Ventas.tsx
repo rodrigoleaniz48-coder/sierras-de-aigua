@@ -185,30 +185,33 @@ export function Ventas() {
       )}
 
       {/* Sección 2: Histórico con filtros */}
-      <div className="card p-3 grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
-        <div>
-          <label className="label">Desde</label>
-          <input type="date" className="input" value={filtroDesde} onChange={(e) => setFiltroDesde(e.target.value)} />
-        </div>
-        <div>
-          <label className="label">Hasta</label>
-          <input type="date" className="input" value={filtroHasta} onChange={(e) => setFiltroHasta(e.target.value)} />
-        </div>
-        <div>
-          <label className="label">Socio</label>
-          <select className="input" value={filtroSocio} onChange={(e) => setFiltroSocio(e.target.value)}>
-            <option value="todos">Todos</option>
-            {socios.map((s) => <option key={s.id} value={s.id}>{s.nombre}</option>)}
-          </select>
-          <label className="flex items-center gap-1 text-xs text-oliva-700 mt-2">
-            <input type="checkbox" className="h-3 w-3 accent-oliva-700" checked={soloEnvio} onChange={(e) => setSoloEnvio(e.target.checked)} />
-            🛵 solo con envío
-          </label>
-        </div>
-        <div className="rounded-lg bg-oliva-100 border border-oliva-200 p-3 text-right">
-          <div className="text-[11px] uppercase tracking-wide text-oliva-700">Total del período</div>
-          <div className="text-lg font-semibold text-oliva-900 tabular-nums">{money(totalPeriodo)}</div>
-          <div className="text-[11px] text-oliva-600">{filtradas.length} venta(s)</div>
+      <div className="card p-3 space-y-3">
+        <SelectorPeriodo desde={filtroDesde} hasta={filtroHasta} onCambio={(d, h) => { setFiltroDesde(d); setFiltroHasta(h) }} />
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
+          <div>
+            <label className="label">Desde</label>
+            <input type="date" className="input" value={filtroDesde} onChange={(e) => setFiltroDesde(e.target.value)} />
+          </div>
+          <div>
+            <label className="label">Hasta</label>
+            <input type="date" className="input" value={filtroHasta} onChange={(e) => setFiltroHasta(e.target.value)} />
+          </div>
+          <div>
+            <label className="label">Socio</label>
+            <select className="input" value={filtroSocio} onChange={(e) => setFiltroSocio(e.target.value)}>
+              <option value="todos">Todos</option>
+              {socios.map((s) => <option key={s.id} value={s.id}>{s.nombre}</option>)}
+            </select>
+            <label className="flex items-center gap-1 text-xs text-oliva-700 mt-2">
+              <input type="checkbox" className="h-3 w-3 accent-oliva-700" checked={soloEnvio} onChange={(e) => setSoloEnvio(e.target.checked)} />
+              🛵 solo con envío
+            </label>
+          </div>
+          <div className="rounded-lg bg-oliva-100 border border-oliva-200 p-3 text-right">
+            <div className="text-[11px] uppercase tracking-wide text-oliva-700">Total del período</div>
+            <div className="text-lg font-semibold text-oliva-900 tabular-nums">{money(totalPeriodo)}</div>
+            <div className="text-[11px] text-oliva-600">{filtradas.length} venta(s)</div>
+          </div>
         </div>
       </div>
 
@@ -260,6 +263,97 @@ export function Ventas() {
         hasta={filtroHasta}
         onCerrar={() => setCadeteAbierto(false)}
       />
+    </div>
+  )
+}
+
+// ---------- Selector rápido de período (chips + selector de mes específico) ----------
+
+const MES_NOMBRE = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic']
+
+function SelectorPeriodo({ desde, hasta, onCambio }: {
+  desde: string; hasta: string
+  onCambio: (desde: string, hasta: string) => void
+}) {
+  const hoy = new Date()
+  const fmt = (d: Date) => d.toISOString().slice(0, 10)
+  const primerDia = (y: number, m: number) => fmt(new Date(y, m, 1))
+  const ultimoDia = (y: number, m: number) => fmt(new Date(y, m + 1, 0))
+
+  function esteMes() {
+    onCambio(primerDia(hoy.getFullYear(), hoy.getMonth()), '')
+  }
+  function mesAnterior() {
+    const d = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1)
+    onCambio(primerDia(d.getFullYear(), d.getMonth()), ultimoDia(d.getFullYear(), d.getMonth()))
+  }
+  function ultimos3() {
+    const d = new Date(hoy); d.setMonth(d.getMonth() - 2); d.setDate(1)
+    onCambio(fmt(d), '')
+  }
+  function esteAnio() {
+    onCambio(fmt(new Date(hoy.getFullYear(), 0, 1)), '')
+  }
+  function todo() {
+    onCambio('', '')
+  }
+
+  // Detectar cuál chip está activo comparando fechas
+  const activoEsteMes = desde === primerDia(hoy.getFullYear(), hoy.getMonth()) && !hasta
+  const dAnt = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1)
+  const activoMesAnt = desde === primerDia(dAnt.getFullYear(), dAnt.getMonth()) && hasta === ultimoDia(dAnt.getFullYear(), dAnt.getMonth())
+  const activoAnio = desde === fmt(new Date(hoy.getFullYear(), 0, 1)) && !hasta
+  const activoTodo = !desde && !hasta
+
+  const chip = (activo: boolean) =>
+    `text-xs px-3 py-1.5 rounded-full font-semibold transition ${
+      activo ? 'bg-oliva-800 text-white' : 'bg-white ring-1 ring-oliva-200 text-oliva-700 hover:ring-oliva-400'
+    }`
+
+  // Genera lista de meses hacia atrás (últimos 24 meses) para el select específico
+  const mesesAtras: { valor: string; label: string }[] = []
+  for (let i = 0; i < 24; i++) {
+    const d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1)
+    const y = d.getFullYear(), m = d.getMonth()
+    mesesAtras.push({
+      valor: `${y}-${String(m + 1).padStart(2, '0')}`,
+      label: `${MES_NOMBRE[m]} ${y}`,
+    })
+  }
+
+  function irAMes(v: string) {
+    if (!v) return
+    const [ys, ms] = v.split('-')
+    const y = Number(ys), m = Number(ms) - 1
+    onCambio(primerDia(y, m), ultimoDia(y, m))
+  }
+
+  // Detectar si el rango actual coincide con algún mes específico
+  const mesActualSelect = (() => {
+    if (!desde || !hasta) return ''
+    const [ys, ms] = desde.split('-')
+    const y = Number(ys), m = Number(ms) - 1
+    return desde === primerDia(y, m) && hasta === ultimoDia(y, m) ? `${ys}-${ms}` : ''
+  })()
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <button type="button" className={chip(activoEsteMes)} onClick={esteMes}>Este mes</button>
+      <button type="button" className={chip(activoMesAnt)} onClick={mesAnterior}>Mes anterior</button>
+      <button type="button" className={chip(false)} onClick={ultimos3}>Últimos 3 meses</button>
+      <button type="button" className={chip(activoAnio)} onClick={esteAnio}>Este año</button>
+      <button type="button" className={chip(activoTodo)} onClick={todo}>Todo</button>
+      <div className="ml-auto flex items-center gap-1.5">
+        <span className="text-xs text-oliva-600">Ir a:</span>
+        <select
+          className="input py-1 text-xs w-auto"
+          value={mesActualSelect}
+          onChange={(e) => irAMes(e.target.value)}
+        >
+          <option value="">— elegir mes —</option>
+          {mesesAtras.map((m) => <option key={m.valor} value={m.valor}>{m.label}</option>)}
+        </select>
+      </div>
     </div>
   )
 }
