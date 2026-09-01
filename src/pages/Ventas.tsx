@@ -531,7 +531,7 @@ function NuevaVentaDialog({
   const [fecha, setFecha] = useState(() => new Date().toISOString().slice(0, 10))
   const [clienteId, setClienteId] = useState<string>('')
   const [canal, setCanal] = useState<string>('directa')
-  const [formaPago, setFormaPago] = useState<string>('efectivo')
+  const [formaPago, setFormaPago] = useState<string>('transferencia')
   const [conFactura, setConFactura] = useState(false)
   const [cuentaId, setCuentaId] = useState<string>('')
   const [cuentas, setCuentas] = useState<CuentaBancaria[]>([])
@@ -584,11 +584,13 @@ function NuevaVentaDialog({
     })
   }, [abierto, cuentas.length])
 
-  // Auto-seleccionar cuenta: siempre BROU personal del socio (default).
+  // Auto-seleccionar cuenta: BROU personal del socio por default.
   // Excepcion: cuando con_factura=true, override a Harria segun moneda.
+  // Si es efectivo, cuenta_id queda null.
   useEffect(() => {
     if (!abierto || cuentas.length === 0) return
     if (ventaAEditar && cuentaId) return // respetar valor cargado
+    if (formaPago === 'efectivo') { setCuentaId(''); return }
     if (conFactura) {
       const harria = cuentas.find((c) => c.nombre.toLowerCase().includes('harria') && c.moneda === monedaVenta)
       if (harria) setCuentaId(String(harria.id))
@@ -598,7 +600,7 @@ function NuevaVentaDialog({
       else setCuentaId('')
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [abierto, conFactura, monedaVenta, cuentas.length, perfil?.cuenta_default_id])
+  }, [abierto, conFactura, monedaVenta, formaPago, cuentas.length, perfil?.cuenta_default_id])
 
   useEffect(() => {
     if (!abierto) return
@@ -634,7 +636,7 @@ function NuevaVentaDialog({
         setCotizacionUsd(b.cotizacionUsd ?? '')
       } else {
         setFecha(new Date().toISOString().slice(0, 10))
-        setClienteId(''); setCanal('whatsapp'); setFormaPago('efectivo'); setConFactura(false); setPromocion(false)
+        setClienteId(''); setCanal('whatsapp'); setFormaPago('transferencia'); setConFactura(false); setPromocion(false)
         setEnvio(false); setCostoEnvio('190'); setHorarioEntrega('')
         setDireccionEnvio(''); setTelefonoEnvio('')
         setUbicacionId(String(ubicacionDefaultPorSocio(perfil?.nombre)))
@@ -1037,7 +1039,7 @@ async function guardar(e: React.FormEvent) {
       limpiarBorrador()
       // Reset inmediato para evitar que el useEffect de guardarBorrador re-persista los datos viejos
       setFecha(new Date().toISOString().slice(0, 10))
-      setClienteId(''); setCanal('whatsapp'); setFormaPago('efectivo'); setConFactura(false)
+      setClienteId(''); setCanal('whatsapp'); setFormaPago('transferencia'); setConFactura(false)
       setEnvio(false); setCostoEnvio('190'); setHorarioEntrega('')
       setDireccionEnvio(''); setTelefonoEnvio('')
       setUbicacionId(String(ubicacionDefaultPorSocio(perfil?.nombre)))
@@ -1102,22 +1104,26 @@ async function guardar(e: React.FormEvent) {
             </select>
           </div>
           <div>
-            <label className="label">Forma de pago</label>
-            <select className="input" value={formaPago} onChange={(e) => setFormaPago(e.target.value)}>
-              {FORMAS_PAGO.map((f) => <option key={f} value={f}>{f.replace('_', ' ')}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="label">Cuenta destino</label>
-            <select className="input" value={cuentaId} onChange={(e) => setCuentaId(e.target.value)}>
-              <option value="">— sin cuenta / efectivo —</option>
-              {cuentas.map((c) => (
-                <option key={c.id} value={String(c.id)}>{c.nombre}{c.moneda !== monedaVenta ? ` (${c.moneda})` : ''}</option>
-              ))}
-            </select>
-            <div className="text-[10px] text-oliva-500 mt-1">
-              {conFactura ? 'con factura → Harria (por default)' : 'sin factura → cuenta personal del socio'}
+            <label className="label">Cobro</label>
+            <div className="flex rounded-md border border-oliva-200 overflow-hidden text-sm font-semibold">
+              <button
+                type="button"
+                onClick={() => { setFormaPago('transferencia') }}
+                className={`flex-1 py-2 ${formaPago === 'transferencia' ? 'bg-oliva-800 text-oliva-50' : 'bg-white text-oliva-700 hover:bg-oliva-100'}`}
+              >💳 Transferencia</button>
+              <button
+                type="button"
+                onClick={() => { setFormaPago('transferencia'); setCuentaId('') }}
+                className={`flex-1 py-2 ${formaPago === 'efectivo' ? 'bg-oliva-800 text-oliva-50' : 'bg-white text-oliva-700 hover:bg-oliva-100'}`}
+              >💵 Efectivo</button>
             </div>
+            {formaPago === 'transferencia' && (
+              <select className="input mt-2" value={cuentaId} onChange={(e) => setCuentaId(e.target.value)}>
+                {cuentas.map((c) => (
+                  <option key={c.id} value={String(c.id)}>{c.nombre}{c.moneda !== monedaVenta ? ` (${c.moneda})` : ''}</option>
+                ))}
+              </select>
+            )}
           </div>
           <div>
             <label className="label">Moneda</label>

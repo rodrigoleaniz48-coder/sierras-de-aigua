@@ -38,7 +38,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setCargando(true)
     supabase
       .from('perfiles')
-      .select('id,nombre,rol,activo,puede_modificar_stock,puede_trasladar_stock,ve_todo_crm,ve_todos_gastos')
+      .select('id,nombre,rol,activo,puede_modificar_stock,puede_trasladar_stock,ve_todo_crm,ve_todos_gastos,cuenta_default_id')
       .eq('id', session.user.id)
       .single()
       .then(({ data }) => {
