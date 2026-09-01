@@ -584,17 +584,15 @@ function NuevaVentaDialog({
     })
   }, [abierto, cuentas.length])
 
-  // Auto-seleccionar cuenta según con_factura + moneda + cuenta_default del socio
+  // Auto-seleccionar cuenta: siempre BROU personal del socio (default).
+  // Excepcion: cuando con_factura=true, override a Harria segun moneda.
   useEffect(() => {
     if (!abierto || cuentas.length === 0) return
-    // Si es venta ya cargada, respetar lo guardado (a menos que el usuario cambie factura/moneda)
-    if (ventaAEditar && cuentaId) return
+    if (ventaAEditar && cuentaId) return // respetar valor cargado
     if (conFactura) {
-      // Con factura -> Harria segun moneda
       const harria = cuentas.find((c) => c.nombre.toLowerCase().includes('harria') && c.moneda === monedaVenta)
       if (harria) setCuentaId(String(harria.id))
     } else {
-      // Sin factura -> cuenta_default del socio
       const def = perfil?.cuenta_default_id
       if (def && cuentas.some((c) => c.id === def)) setCuentaId(String(def))
       else setCuentaId('')
@@ -1113,12 +1111,12 @@ async function guardar(e: React.FormEvent) {
             <label className="label">Cuenta destino</label>
             <select className="input" value={cuentaId} onChange={(e) => setCuentaId(e.target.value)}>
               <option value="">— sin cuenta / efectivo —</option>
-              {cuentas.filter((c) => c.moneda === monedaVenta).map((c) => (
-                <option key={c.id} value={String(c.id)}>{c.nombre}</option>
+              {cuentas.map((c) => (
+                <option key={c.id} value={String(c.id)}>{c.nombre}{c.moneda !== monedaVenta ? ` (${c.moneda})` : ''}</option>
               ))}
             </select>
             <div className="text-[10px] text-oliva-500 mt-1">
-              {conFactura ? 'con factura → Harria (por default)' : 'sin factura → cuenta del socio'}
+              {conFactura ? 'con factura → Harria (por default)' : 'sin factura → cuenta personal del socio'}
             </div>
           </div>
           <div>
