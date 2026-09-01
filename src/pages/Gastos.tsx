@@ -297,6 +297,8 @@ function Kpi({ titulo, valor, tono }: { titulo: string; valor: string; tono?: 'a
   )
 }
 
+interface CuentaBancariaBase { id: number; nombre: string; moneda: 'UYU' | 'USD' }
+
 function GastoDialog({
   abierto, socioId, editar, veTodos, onCerrar, onOk, onEliminar,
 }: {
@@ -308,6 +310,7 @@ function GastoDialog({
   onOk: () => void
   onEliminar?: (g: Gasto) => Promise<void>
 }) {
+  const { perfil } = useAuth()
   const [fecha, setFecha] = useState(() => new Date().toISOString().slice(0, 10))
   const [categoria, setCategoria] = useState<string>('otros')
   const [monto, setMonto] = useState<string>('')
@@ -316,9 +319,32 @@ function GastoDialog({
   const [metodoPago, setMetodoPago] = useState<string>('efectivo')
   const [tipo, setTipo] = useState<TipoGasto>('normal')
   const [reembolsado, setReembolsado] = useState(false)
+  const [cuentaId, setCuentaId] = useState<string>('')
+  const [cuentas, setCuentas] = useState<CuentaBancariaBase[]>([])
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [confirmEliminar, setConfirmEliminar] = useState(false)
+
+  // Cargar cuentas
+  useEffect(() => {
+    if (!abierto || cuentas.length > 0) return
+    supabase.from('cuentas_bancarias').select('id,nombre,moneda').eq('activo', true).order('id').then(({ data }) => {
+      setCuentas((data as CuentaBancariaBase[]) ?? [])
+    })
+  }, [abierto, cuentas.length])
+
+  // Auto-selección de cuenta: default del socio dueño del gasto (o Harria si no tiene)
+  useEffect(() => {
+    if (!abierto || cuentas.length === 0) return
+    if (editar && cuentaId) return // respetar valor cargado
+    const def = perfil?.cuenta_default_id
+    if (def && cuentas.some((c) => c.id === def && c.moneda === moneda)) setCuentaId(String(def))
+    else {
+      const harria = cuentas.find((c) => c.nombre.toLowerCase().includes('harria') && c.moneda === moneda)
+      setCuentaId(harria ? String(harria.id) : '')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [abierto, editar, moneda, cuentas.length, perfil?.cuenta_default_id])
 
   useEffect(() => {
     if (!abierto) return
@@ -328,6 +354,7 @@ function GastoDialog({
       setDescripcion(editar.descripcion ?? ''); setMetodoPago(editar.metodo_pago ?? 'efectivo')
       setTipo(editar.es_adelanto ? 'adelanto' : editar.reembolsable ? 'reembolsable' : 'normal')
       setReembolsado(editar.reembolsado)
+      setCuentaId((editar as Gasto & { cuenta_id?: number | null }).cuenta_id ? String((editar as Gasto & { cuenta_id?: number | null }).cuenta_id) : '')
     } else {
       const b = leerObj<{ fecha: string; categoria: string; monto: string; moneda: 'UYU' | 'USD'; descripcion: string; metodoPago: string; tipo?: TipoGasto; reembolsado: boolean }>('borrador:nuevo-gasto')
       if (b) {
@@ -367,6 +394,7 @@ function GastoDialog({
       reembolsable: tipo === 'reembolsable',
       reembolsado: tipo === 'reembolsable' ? reembolsado : false,
       es_adelanto: tipo === 'adelanto',
+      cuenta_id: cuentaId ? Number(cuentaId) : null,
       actualizado_en: new Date().toISOString(),
     }
     const q = editar
@@ -411,11 +439,22 @@ function GastoDialog({
           <label className="label">Descripción (opcional)</label>
           <input className="input" value={descripcion} onChange={(e) => setDescripcion(e.target.value)} placeholder="ej: gasoil Ancap Aiguá" disabled={soloLectura} />
         </div>
-        <div>
-          <label className="label">Método de pago</label>
-          <select className="input" value={metodoPago} onChange={(e) => setMetodoPago(e.target.value)} disabled={soloLectura}>
-            {METODOS.map((m) => <option key={m} value={m}>{m.replace('_', ' ')}</option>)}
-          </select>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="label">Método de pago</label>
+            <select className="input" value={metodoPago} onChange={(e) => setMetodoPago(e.target.value)} disabled={soloLectura}>
+              {METODOS.map((m) => <option key={m} value={m}>{m.replace('_', ' ')}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="label">Cuenta origen</label>
+            <select className="input" value={cuentaId} onChange={(e) => setCuentaId(e.target.value)} disabled={soloLectura}>
+              <option value="">— efectivo / no aplica —</option>
+              {cuentas.filter((c) => c.moneda === moneda).map((c) => (
+                <option key={c.id} value={String(c.id)}>{c.nombre}</option>
+              ))}
+            </select>
+          </div>
         </div>
         <div className="rounded-xl border border-oliva-100 bg-oliva-50/60 p-3 space-y-2">
           <div className="text-[11px] uppercase tracking-wide text-oliva-600 font-semibold mb-1">Tipo</div>

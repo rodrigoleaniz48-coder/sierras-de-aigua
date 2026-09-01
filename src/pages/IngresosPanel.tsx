@@ -5,7 +5,8 @@ import { Dialog } from '../components/Dialog'
 import { money } from '../lib/format'
 
 interface Categoria { id: number; slug: string; nombre: string; activo: boolean; orden: number }
-interface Socio { id: string; nombre: string }
+interface Socio { id: string; nombre: string; cuenta_default_id?: number | null }
+interface CuentaBancaria { id: number; nombre: string; moneda: 'UYU' | 'USD' }
 interface Ingreso {
   id: number
   fecha: string
@@ -15,6 +16,7 @@ interface Ingreso {
   moneda: 'UYU' | 'USD'
   descripcion: string | null
   comprobante_url: string | null
+  cuenta_id: number | null
   creado_en: string
 }
 
@@ -27,6 +29,7 @@ export function IngresosPanel() {
   const [ingresos, setIngresos] = useState<Ingreso[]>([])
   const [categorias, setCategorias] = useState<Categoria[]>([])
   const [socios, setSocios] = useState<Socio[]>([])
+  const [cuentas, setCuentas] = useState<CuentaBancaria[]>([])
   const [cargando, setCargando] = useState(true)
   const [nuevo, setNuevo] = useState(false)
   const [editando, setEditando] = useState<Ingreso | null>(null)
@@ -38,14 +41,16 @@ export function IngresosPanel() {
 
   async function cargar() {
     setCargando(true)
-    const [i, c, p] = await Promise.all([
+    const [i, c, p, cb] = await Promise.all([
       supabase.from('ingresos').select('*').order('fecha', { ascending: false }).order('id', { ascending: false }),
       supabase.from('categorias_ingreso').select('*').eq('activo', true).order('orden'),
-      supabase.from('perfiles').select('id,nombre').eq('activo', true).order('nombre'),
+      supabase.from('perfiles').select('id,nombre,cuenta_default_id').eq('activo', true).order('nombre'),
+      supabase.from('cuentas_bancarias').select('id,nombre,moneda').eq('activo', true).order('id'),
     ])
     setIngresos((i.data as Ingreso[]) ?? [])
     setCategorias((c.data as Categoria[]) ?? [])
     setSocios((p.data as Socio[]) ?? [])
+    setCuentas((cb.data as CuentaBancaria[]) ?? [])
     setCargando(false)
   }
   useEffect(() => { cargar() }, [])
@@ -165,6 +170,7 @@ export function IngresosPanel() {
         editar={editando}
         categorias={categorias}
         socios={socios}
+        cuentas={cuentas}
         soyYo={soyYo}
         onCerrar={() => { setNuevo(false); setEditando(null) }}
         onOk={() => { setNuevo(false); setEditando(null); cargar() }}
@@ -173,11 +179,12 @@ export function IngresosPanel() {
   )
 }
 
-function IngresoDialog({ abierto, editar, categorias, socios, soyYo, onCerrar, onOk }: {
+function IngresoDialog({ abierto, editar, categorias, socios, cuentas, soyYo, onCerrar, onOk }: {
   abierto: boolean
   editar: Ingreso | null
   categorias: Categoria[]
   socios: Socio[]
+  cuentas: CuentaBancaria[]
   soyYo: string
   onCerrar: () => void
   onOk: () => void
@@ -188,6 +195,7 @@ function IngresoDialog({ abierto, editar, categorias, socios, soyYo, onCerrar, o
   const [monto, setMonto] = useState<string>('')
   const [moneda, setMoneda] = useState<'UYU' | 'USD'>('UYU')
   const [descripcion, setDescripcion] = useState('')
+  const [cuentaId, setCuentaId] = useState<string>('')
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -200,14 +208,29 @@ function IngresoDialog({ abierto, editar, categorias, socios, soyYo, onCerrar, o
       setMonto(String(editar.monto))
       setMoneda(editar.moneda)
       setDescripcion(editar.descripcion ?? '')
+      setCuentaId(editar.cuenta_id ? String(editar.cuenta_id) : '')
     } else {
       setFecha(new Date().toISOString().slice(0, 10))
       setSocioId(soyYo)
       setCategoriaId('')
-      setMonto(''); setMoneda('UYU'); setDescripcion('')
+      setMonto(''); setMoneda('UYU'); setDescripcion(''); setCuentaId('')
     }
     setError(null)
   }, [abierto, editar, soyYo])
+
+  // Auto-selección de cuenta según socio elegido + moneda
+  useEffect(() => {
+    if (!abierto || editar) return
+    const socio = socios.find((s) => s.id === socioId)
+    const def = socio?.cuenta_default_id
+    if (def && cuentas.some((c) => c.id === def && c.moneda === moneda)) {
+      setCuentaId(String(def))
+    } else {
+      // Buscar cualquier cuenta del socio en la moneda actual, si no hay caer a Harria
+      const harria = cuentas.find((c) => c.nombre.toLowerCase().includes('harria') && c.moneda === moneda)
+      setCuentaId(harria ? String(harria.id) : '')
+    }
+  }, [abierto, editar, socioId, moneda, cuentas, socios])
 
   async function guardar(e: React.FormEvent) {
     e.preventDefault()
@@ -221,6 +244,7 @@ function IngresoDialog({ abierto, editar, categorias, socios, soyYo, onCerrar, o
       monto: Number(monto),
       moneda,
       descripcion: descripcion.trim() || null,
+      cuenta_id: cuentaId ? Number(cuentaId) : null,
       actualizado_en: new Date().toISOString(),
     }
     const q = editar
@@ -277,6 +301,15 @@ function IngresoDialog({ abierto, editar, categorias, socios, soyYo, onCerrar, o
               ))}
             </div>
           </div>
+        </div>
+        <div>
+          <label className="label">Cuenta destino</label>
+          <select className="input" value={cuentaId} onChange={(e) => setCuentaId(e.target.value)}>
+            <option value="">— sin cuenta / efectivo —</option>
+            {cuentas.filter((c) => c.moneda === moneda).map((c) => (
+              <option key={c.id} value={String(c.id)}>{c.nombre}</option>
+            ))}
+          </select>
         </div>
         <div>
           <label className="label">Descripción (opcional)</label>

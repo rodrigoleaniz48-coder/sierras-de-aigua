@@ -31,7 +31,9 @@ interface Venta {
   moneda?: 'UYU' | 'USD' | null
   cotizacion?: number | null
   promocion_comercial?: boolean
+  cuenta_id?: number | null
 }
+interface CuentaBancaria { id: number; nombre: string; moneda: 'UYU' | 'USD'; activo: boolean }
 
 const CANALES = ['whatsapp', 'directa', 'feria'] as const
 const FORMAS_PAGO = ['efectivo', 'transferencia'] as const
@@ -531,6 +533,8 @@ function NuevaVentaDialog({
   const [canal, setCanal] = useState<string>('directa')
   const [formaPago, setFormaPago] = useState<string>('efectivo')
   const [conFactura, setConFactura] = useState(false)
+  const [cuentaId, setCuentaId] = useState<string>('')
+  const [cuentas, setCuentas] = useState<CuentaBancaria[]>([])
   const [promocion, setPromocion] = useState(false)
   const [envio, setEnvio] = useState(false)
   const [costoEnvio, setCostoEnvio] = useState<string>('190')
@@ -572,6 +576,32 @@ function NuevaVentaDialog({
   const guardandoRef = useRef(false) // guard sincrono anti-doble-tap (más robusto que setState)
   const [error, setError] = useState<string | null>(null)
 
+  // Cargar cuentas bancarias una sola vez (para auto-seleccionar por con_factura + moneda)
+  useEffect(() => {
+    if (!abierto || cuentas.length > 0) return
+    supabase.from('cuentas_bancarias').select('id,nombre,moneda,activo').eq('activo', true).order('id').then(({ data }) => {
+      setCuentas((data as CuentaBancaria[]) ?? [])
+    })
+  }, [abierto, cuentas.length])
+
+  // Auto-seleccionar cuenta según con_factura + moneda + cuenta_default del socio
+  useEffect(() => {
+    if (!abierto || cuentas.length === 0) return
+    // Si es venta ya cargada, respetar lo guardado (a menos que el usuario cambie factura/moneda)
+    if (ventaAEditar && cuentaId) return
+    if (conFactura) {
+      // Con factura -> Harria segun moneda
+      const harria = cuentas.find((c) => c.nombre.toLowerCase().includes('harria') && c.moneda === monedaVenta)
+      if (harria) setCuentaId(String(harria.id))
+    } else {
+      // Sin factura -> cuenta_default del socio
+      const def = perfil?.cuenta_default_id
+      if (def && cuentas.some((c) => c.id === def)) setCuentaId(String(def))
+      else setCuentaId('')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [abierto, conFactura, monedaVenta, cuentas.length, perfil?.cuenta_default_id])
+
   useEffect(() => {
     if (!abierto) return
     if (ventaAEditar) {
@@ -589,6 +619,7 @@ function NuevaVentaDialog({
       setEntregado(ventaAEditar.entregado)
       setCobrado(ventaAEditar.cobrado)
       setNotas(ventaAEditar.notas ?? '')
+      setCuentaId(ventaAEditar.cuenta_id ? String(ventaAEditar.cuenta_id) : '')
     } else {
       // Intentar cargar borrador de localStorage (últimas 24h)
       const b = leerBorrador()
@@ -612,6 +643,7 @@ function NuevaVentaDialog({
         setEntregado(false); setCobrado(false); setNotas(''); setItems([nuevoItem()])
         setMonedaVenta('UYU'); setCotizacionUsd('')
       }
+      setCuentaId('') // se autocalcula abajo cuando cambia conFactura / moneda
     }
     setError(null)
 
@@ -908,6 +940,7 @@ async function guardar(e: React.FormEvent) {
       notas: notas.trim() || null,
       moneda: monedaVenta,
       cotizacion: monedaVenta === 'USD' ? cotVenta : null,
+      cuenta_id: cuentaId ? Number(cuentaId) : null,
     }
 
     let ventaId: number
@@ -1075,6 +1108,18 @@ async function guardar(e: React.FormEvent) {
             <select className="input" value={formaPago} onChange={(e) => setFormaPago(e.target.value)}>
               {FORMAS_PAGO.map((f) => <option key={f} value={f}>{f.replace('_', ' ')}</option>)}
             </select>
+          </div>
+          <div>
+            <label className="label">Cuenta destino</label>
+            <select className="input" value={cuentaId} onChange={(e) => setCuentaId(e.target.value)}>
+              <option value="">— sin cuenta / efectivo —</option>
+              {cuentas.filter((c) => c.moneda === monedaVenta).map((c) => (
+                <option key={c.id} value={String(c.id)}>{c.nombre}</option>
+              ))}
+            </select>
+            <div className="text-[10px] text-oliva-500 mt-1">
+              {conFactura ? 'con factura → Harria (por default)' : 'sin factura → cuenta del socio'}
+            </div>
           </div>
           <div>
             <label className="label">Moneda</label>
