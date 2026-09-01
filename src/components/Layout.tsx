@@ -29,7 +29,7 @@ const NAV: NavItem[] = [
   { to: '/ventas',      label: 'Ventas',        roles: ['admin', 'ventas'],              icon: I.ventas,       group: 'op' },
   { to: '/clientes',    label: 'Clientes',      roles: ['admin', 'ventas', 'marketing'], icon: I.clientes,     group: 'op' },
   { to: '/stock',       label: 'Stock',         roles: ['admin', 'ventas', 'marketing'], icon: I.stock,        group: 'op' },
-  { to: '/gastos',      label: 'Mis gastos',    roles: ['admin', 'ventas', 'marketing'], icon: I.gastos,       group: 'op' },
+  { to: '/finanzas',    label: 'Ingresos y Egresos', roles: ['admin', 'ventas', 'marketing'], icon: I.gastos,   group: 'op' },
   { to: '/tareas',      label: 'Tareas',        roles: ['admin', 'ventas', 'marketing', 'campo'], icon: I.tareas,  group: 'op' },
   { to: '/contabilidad',label: 'Contabilidad',  roles: ['admin'],                        icon: I.contabilidad, group: 'gestion' },
   { to: '/admin',       label: 'Administración',roles: ['admin'],                        icon: I.admin,        group: 'gestion' },

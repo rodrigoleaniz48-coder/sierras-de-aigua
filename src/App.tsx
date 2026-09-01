@@ -7,10 +7,10 @@ import { Dashboard } from './pages/Dashboard'
 import { Stock } from './pages/Stock'
 import { Ventas } from './pages/Ventas'
 import { Clientes } from './pages/Clientes'
-import { Gastos } from './pages/Gastos'
 import { Contabilidad } from './pages/Contabilidad'
 import { Admin } from './pages/Admin'
 import { Tareas } from './pages/Tareas'
+import { Finanzas } from './pages/Finanzas'
 
 // GitHub Pages sirve bajo /sierras-de-aigua/
 const BASENAME = '/sierras-de-aigua'
@@ -41,7 +41,8 @@ export function App() {
             />
             <Route path="clientes" element={<Clientes />} />
             <Route path="tareas" element={<Tareas />} />
-            <Route path="gastos" element={<Gastos />} />
+            <Route path="finanzas" element={<Finanzas />} />
+            <Route path="gastos" element={<Navigate to="/finanzas" replace />} />
             <Route
               path="contabilidad"
               element={
