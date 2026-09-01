@@ -27,6 +27,7 @@ interface Tarea {
   fecha_iniciada: string | null
   fecha_completada: string | null
   notas: string | null
+  jornales: number
 }
 
 function esCreador(nombre: string | null | undefined): boolean {
@@ -61,11 +62,13 @@ export function Tareas() {
   const puedeCrear = esCreador(perfil?.nombre)
   const soyAdmin = esAdmin(perfil?.nombre)
   const soySocioEditor = puedeCrear // Rodrigo/Santi/Ayelen editan cabecera de cualquier tarea
+  const soyCampo = perfil?.rol === 'campo' // Emiliano y futuros empleados
 
   const [tareas, setTareas] = useState<Tarea[]>([])
   const [perfiles, setPerfiles] = useState<Perfil[]>([])
   const [cargando, setCargando] = useState(true)
   const [nueva, setNueva] = useState(false)
+  const [registrarHecha, setRegistrarHecha] = useState(false) // dialog para empleado
   const [editando, setEditando] = useState<Tarea | null>(null)
   const [filtroEstado, setFiltroEstado] = useState<'todas' | Tarea['estado']>('todas')
   const [filtroAsignado, setFiltroAsignado] = useState<string>('todos')
@@ -113,15 +116,27 @@ export function Tareas() {
           <div className="text-[11px] font-semibold uppercase tracking-widest text-oliva-500">Gestión</div>
           <h1 className="text-xl font-bold text-oliva-900 mt-1">Tareas</h1>
           <p className="text-sm text-oliva-700">
-            {puedeCrear ? 'Podés crear y asignar tareas al equipo.' : 'Ves las tareas que te asignaron. Cambiá el estado a medida que avancés.'}
+            {puedeCrear
+              ? 'Podés crear y asignar tareas al equipo.'
+              : soyCampo
+                ? 'Ves las tareas que te asignaron. Registrá también las tareas que hiciste por tu cuenta con los jornales que te llevaron.'
+                : 'Ves las tareas que te asignaron. Cambiá el estado a medida que avancés.'}
           </p>
         </div>
-        {puedeCrear && (
-          <button className="btn-primary" onClick={() => setNueva(true)}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14M5 12h14" /></svg>
-            Nueva tarea
-          </button>
-        )}
+        <div className="flex gap-2">
+          {soyCampo && (
+            <button className="btn-primary" onClick={() => setRegistrarHecha(true)}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M20 6L9 17l-5-5" /></svg>
+              Registrar tarea realizada
+            </button>
+          )}
+          {puedeCrear && (
+            <button className="btn-primary" onClick={() => setNueva(true)}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14M5 12h14" /></svg>
+              Nueva tarea
+            </button>
+          )}
+        </div>
       </div>
 
       {/* KPIs */}
@@ -198,7 +213,120 @@ export function Tareas() {
         onCerrar={() => { setNueva(false); setEditando(null) }}
         onOk={() => { setNueva(false); setEditando(null); cargar() }}
       />
+      <RegistrarHechaDialog
+        abierto={registrarHecha}
+        soyYo={soyYo}
+        onCerrar={() => setRegistrarHecha(false)}
+        onOk={() => { setRegistrarHecha(false); cargar() }}
+      />
     </div>
+  )
+}
+
+function RegistrarHechaDialog({ abierto, soyYo, onCerrar, onOk }: {
+  abierto: boolean
+  soyYo: string
+  onCerrar: () => void
+  onOk: () => void
+}) {
+  const [titulo, setTitulo] = useState('')
+  const [descripcion, setDescripcion] = useState('')
+  const [jornales, setJornales] = useState<number>(1)
+  const [fecha, setFecha] = useState<string>(new Date().toISOString().slice(0, 10))
+  const [notas, setNotas] = useState('')
+  const [guardando, setGuardando] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!abierto) return
+    setTitulo(''); setDescripcion(''); setJornales(1)
+    setFecha(new Date().toISOString().slice(0, 10)); setNotas(''); setError(null)
+  }, [abierto])
+
+  async function guardar(e: React.FormEvent) {
+    e.preventDefault()
+    if (!titulo.trim()) { setError('Poné qué hiciste.'); return }
+    if (jornales <= 0) { setError('Indicá cuántos jornales te llevó.'); return }
+    setGuardando(true); setError(null)
+    const iso = new Date(fecha + 'T12:00:00').toISOString()
+    const payload = {
+      titulo: titulo.trim(),
+      descripcion: descripcion.trim() || null,
+      prioridad: 'media' as const,
+      tipo: 'campo' as const,
+      estado: 'hecha' as const,
+      asignado_a: soyYo,
+      creado_por: soyYo,
+      fecha_iniciada: iso,
+      fecha_completada: iso,
+      jornales,
+      notas: notas.trim() || null,
+    }
+    const { error: err } = await supabase.from('tareas').insert(payload)
+    setGuardando(false)
+    if (err) { setError(err.message); return }
+    onOk()
+  }
+
+  const opciones: { valor: number; label: string; hint: string }[] = [
+    { valor: 0.5, label: 'Medio jornal', hint: '½ día' },
+    { valor: 1, label: 'Jornal completo', hint: '1 día' },
+    { valor: 2, label: '2 jornales', hint: '2 días' },
+  ]
+
+  return (
+    <Dialog abierto={abierto} onCerrar={onCerrar} titulo="Registrar tarea realizada" ancho="md">
+      <form onSubmit={guardar} className="space-y-4">
+        <div>
+          <label className="label">¿Qué hiciste? <span className="text-red-600">*</span></label>
+          <input className="input" value={titulo} onChange={(e) => setTitulo(e.target.value)} required autoFocus placeholder="ej. Poda de olivos cuadrante norte" />
+        </div>
+        <div>
+          <label className="label">Detalles (opcional)</label>
+          <textarea className="input" rows={2} value={descripcion} onChange={(e) => setDescripcion(e.target.value)} placeholder="qué área, cuántas plantas, herramientas, etc." />
+        </div>
+        <div>
+          <label className="label">Jornales <span className="text-red-600">*</span></label>
+          <div className="grid grid-cols-3 gap-2">
+            {opciones.map((o) => {
+              const activo = jornales === o.valor
+              return (
+                <button
+                  key={o.valor}
+                  type="button"
+                  onClick={() => setJornales(o.valor)}
+                  className={`rounded-md px-2 py-3 text-sm font-semibold transition text-center
+                    ${activo ? 'bg-oliva-800 text-white ring-2 ring-oliva-800' : 'bg-white ring-1 ring-oliva-200 text-oliva-700 hover:ring-oliva-400'}`}
+                >
+                  <div>{o.label}</div>
+                  <div className={`text-[10px] font-normal mt-0.5 ${activo ? 'text-oliva-100' : 'text-oliva-500'}`}>{o.hint}</div>
+                </button>
+              )
+            })}
+          </div>
+          <div className="mt-2 flex items-center gap-2 text-xs text-oliva-600">
+            <span>u otro:</span>
+            <input type="number" step="0.5" min="0" max="30" className="input w-24 py-1" value={jornales} onChange={(e) => setJornales(Number(e.target.value) || 0)} />
+            <span>jornales</span>
+          </div>
+        </div>
+        <div>
+          <label className="label">Fecha</label>
+          <input type="date" className="input" value={fecha} onChange={(e) => setFecha(e.target.value)} />
+        </div>
+        <div>
+          <label className="label">Notas (opcional)</label>
+          <input className="input" value={notas} onChange={(e) => setNotas(e.target.value)} placeholder="observaciones, avances, problemas…" />
+        </div>
+
+        {error && <div className="text-sm text-red-700">{error}</div>}
+
+        <div className="flex justify-end gap-2 pt-2 border-t border-oliva-100">
+          <button type="button" className="btn-secondary" onClick={onCerrar}>Cancelar</button>
+          <button type="submit" className="btn-primary" disabled={guardando}>{guardando ? 'Guardando…' : 'Registrar'}</button>
+        </div>
+      </form>
+    </Dialog>
   )
 }
 
@@ -226,7 +354,9 @@ function TareaCard({ tarea, asignado, creador, soyYo, onCambiarEstado, onEditar 
       <div className="flex flex-wrap items-center gap-1.5 mt-2 text-[11px]">
         <span className={`rounded-full px-2 py-[1px] ${COLOR_ESTADO[tarea.estado]}`}>{LABEL_ESTADO[tarea.estado]}</span>
         {tarea.tipo === 'campo' && (
-          <span className="rounded-full px-2 py-[1px] bg-green-50 text-green-800 ring-1 ring-green-200">🌱 campo</span>
+          <span className="rounded-full px-2 py-[1px] bg-green-50 text-green-800 ring-1 ring-green-200">
+            🌱 campo{tarea.jornales > 0 ? ` · ${tarea.jornales} jornal${tarea.jornales === 1 ? '' : 'es'}` : ''}
+          </span>
         )}
         {asignado && (
           <span className="text-oliva-600">👤 {esMia ? 'Yo' : asignado.nombre}</span>
@@ -289,6 +419,7 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, soySocioEdito
   const [prioridad, setPrioridad] = useState<Tarea['prioridad']>('media')
   const [tipo, setTipo] = useState<Tarea['tipo']>('agenda')
   const [estado, setEstado] = useState<Tarea['estado']>('pendiente')
+  const [jornales, setJornales] = useState<number>(0)
   const [asignadoA, setAsignadoA] = useState<string>('')
   const [fechaVence, setFechaVence] = useState<string>('')
   const [notas, setNotas] = useState('')
@@ -307,12 +438,13 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, soySocioEdito
       setPrioridad(editar.prioridad)
       setTipo(editar.tipo ?? 'agenda')
       setEstado(editar.estado)
+      setJornales(Number(editar.jornales ?? 0))
       setAsignadoA(editar.asignado_a ?? '')
       setFechaVence(editar.fecha_vence ?? '')
       setNotas(editar.notas ?? '')
     } else {
       setTitulo(''); setDescripcion(''); setPrioridad('media'); setTipo('agenda')
-      setEstado('pendiente'); setAsignadoA(''); setFechaVence(''); setNotas('')
+      setEstado('pendiente'); setJornales(0); setAsignadoA(''); setFechaVence(''); setNotas('')
     }
     setError(null); setConfirmDel(false); setNuevoComentario('')
   }, [abierto, editar])
@@ -406,6 +538,7 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, soySocioEdito
       descripcion: descripcion.trim() || null,
       prioridad,
       tipo,
+      jornales: tipo === 'campo' ? Number(jornales) || 0 : 0,
       asignado_a: asignadoA || null,
       fecha_vence: fechaVence || null,
       notas: notas.trim() || null,
@@ -510,6 +643,15 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, soySocioEdito
             <input type="date" className="input" value={fechaVence} onChange={(e) => setFechaVence(e.target.value)} disabled={soloLectura} />
           </div>
         </div>
+        {tipo === 'campo' && (
+          <div>
+            <label className="label">Jornales que llevó</label>
+            <input type="number" step="0.5" min="0" max="30" className="input" value={jornales}
+              onChange={(e) => setJornales(Number(e.target.value) || 0)} disabled={soloLectura}
+              placeholder="0 · 0.5 · 1 · 2 …" />
+            <div className="text-[10px] text-oliva-500 mt-1">Suma al reporte mensual de jornales del empleado.</div>
+          </div>
+        )}
         <div>
           <label className="label">Notas (opcional)</label>
           <input className="input" value={notas} onChange={(e) => setNotas(e.target.value)} disabled={soloLectura} />

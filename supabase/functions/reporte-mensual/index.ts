@@ -114,31 +114,30 @@ Deno.serve(async (req) => {
     const gastosPorSocio = [...gastoPorSocio.values()].sort((a, b) => (b.uyu + b.usd * 40) - (a.uyu + a.usd * 40))
 
     // === TAREAS DE EMILIANO ===
-    interface Tarea { id: number; titulo: string; estado: string; tipo: string; fecha_creada: string; fecha_iniciada: string | null; fecha_completada: string | null }
+    interface Tarea { id: number; titulo: string; estado: string; tipo: string; fecha_creada: string; fecha_iniciada: string | null; fecha_completada: string | null; jornales: number }
     let tareasEmi: Tarea[] = []
     if (emiliano) {
       const { data } = await supa
         .from('tareas')
-        .select('id,titulo,estado,tipo,fecha_creada,fecha_iniciada,fecha_completada')
+        .select('id,titulo,estado,tipo,fecha_creada,fecha_iniciada,fecha_completada,jornales')
         .eq('asignado_a', emiliano.id)
       tareasEmi = (data ?? []) as Tarea[]
     }
-    // Días trabajados: fechas distintas donde Emiliano hizo algo (init o complete) dentro del mes
-    const diasSet = new Set<string>()
+    // Suma real de jornales: tareas tipo=campo cerradas o registradas en el mes.
     const cerradasEnMes: Tarea[] = []
     const activasEnMes: Tarea[] = []
+    let jornalesTotal = 0
     for (const t of tareasEmi) {
-      const fi = t.fecha_iniciada ? t.fecha_iniciada.slice(0, 10) : null
       const fc = t.fecha_completada ? t.fecha_completada.slice(0, 10) : null
       const enRango = (d: string) => d >= desdeStr && d < hastaStr
-      if (fi && enRango(fi)) diasSet.add(fi)
-      if (fc && enRango(fc)) diasSet.add(fc)
-      if (fc && enRango(fc) && t.estado === 'hecha') cerradasEnMes.push(t)
-      else if ((t.estado === 'pendiente' || t.estado === 'en_progreso') && (!fc || enRango(fc))) {
+      if (fc && enRango(fc) && t.estado === 'hecha') {
+        cerradasEnMes.push(t)
+        if (t.tipo === 'campo') jornalesTotal += Number(t.jornales) || 0
+      } else if ((t.estado === 'pendiente' || t.estado === 'en_progreso') && (!fc || enRango(fc))) {
         if (t.fecha_creada.slice(0, 10) < hastaStr) activasEnMes.push(t)
       }
     }
-    const jornalesAprox = diasSet.size
+    const jornalesAprox = jornalesTotal
 
     // Comentarios del mes de Emiliano
     let comentariosMes: Array<{ tarea_id: number; contenido: string; creado_en: string }> = []
@@ -242,7 +241,7 @@ interface RenderData {
   gastosPorSocio: Array<{ nombre: string; uyu: number; usd: number; reembUyu: number; reembUsd: number; cantidad: number }>
   cantGastos: number
   jornalesAprox: number
-  cerradasEnMes: Array<{ id: number; titulo: string; fecha_iniciada: string | null; fecha_completada: string | null }>
+  cerradasEnMes: Array<{ id: number; titulo: string; fecha_iniciada: string | null; fecha_completada: string | null; tipo?: string; jornales?: number }>
   activasEnMes: Array<{ id: number; titulo: string; estado: string; fecha_iniciada: string | null }>
   comentariosPorTarea: Map<number, string[]>
   APP_URL: string
@@ -272,9 +271,14 @@ function renderHTML(d: RenderData): string {
   }).join('')
 
   const filasCerradas = d.cerradasEnMes.map((t) => {
+    const tt = t as unknown as { tipo?: string; jornales?: number }
+    const j = Number(tt.jornales) || 0
     const dur = t.fecha_iniciada && t.fecha_completada
       ? Math.max(1, Math.ceil((new Date(t.fecha_completada).getTime() - new Date(t.fecha_iniciada).getTime()) / 86400000))
       : null
+    const der = tt.tipo === 'campo' && j > 0
+      ? `${j} jornal${j === 1 ? '' : 'es'}`
+      : (dur ? `${dur} d` : '—')
     const coms = d.comentariosPorTarea.get(t.id) ?? []
     return `
       <tr>
@@ -283,9 +287,9 @@ function renderHTML(d: RenderData): string {
           ${coms.length > 0 ? `<div style="font-size:12px;color:#555;margin-top:4px;">${coms.map((c) => `“${esc(c)}”`).join('<br>')}</div>` : ''}
         </td>
         <td style="padding:10px 14px;border-bottom:1px solid #eee;text-align:right;color:#666;font-size:12px;">
-          ${t.fecha_iniciada ? t.fecha_iniciada.slice(0, 10) : '—'}<br>→ ${t.fecha_completada ? t.fecha_completada.slice(0, 10) : '—'}
+          ${t.fecha_completada ? t.fecha_completada.slice(0, 10) : '—'}
         </td>
-        <td style="padding:10px 14px;border-bottom:1px solid #eee;text-align:right;font-weight:600;">${dur ? dur + ' d' : '—'}</td>
+        <td style="padding:10px 14px;border-bottom:1px solid #eee;text-align:right;font-weight:600;">${der}</td>
       </tr>`
   }).join('')
 
@@ -365,9 +369,9 @@ function renderHTML(d: RenderData): string {
       <!-- EMILIANO -->
       <h2 style="font-size:15px;margin:0 0 12px;color:#2f3d2a;text-transform:uppercase;letter-spacing:1.5px;">Emiliano — tareas y jornales</h2>
       <div style="font-size:14px;margin-bottom:16px;background:#f5f5f0;border-radius:6px;padding:14px 16px;">
-        <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Días con actividad</div>
+        <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Jornales del mes</div>
         <div style="font-size:20px;font-weight:700;color:#2f3d2a;line-height:1.2;">${d.jornalesAprox}</div>
-        <div style="font-size:12px;color:#666;margin-top:4px;">aprox. jornales del mes</div>
+        <div style="font-size:12px;color:#666;margin-top:4px;">sumados de tareas de campo cerradas</div>
       </div>
       ${d.cerradasEnMes.length > 0 ? `
         <div style="font-size:12px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Cerradas en el mes</div>
@@ -536,16 +540,19 @@ async function renderPDF(d: Omit<RenderData, 'APP_URL'>): Promise<Uint8Array> {
 
   // Emiliano
   h2('EMILIANO - TAREAS Y JORNALES')
-  linea('Dias con actividad (aprox. jornales)', String(d.jornalesAprox), { bold: true, sizeDer: 16 })
+  linea('Jornales del mes', String(d.jornalesAprox), { bold: true, sizeDer: 16 })
   espacio(10)
   if (d.cerradasEnMes.length > 0) {
     texto('Cerradas en el mes', { size: 10, color: gris, bold: true })
     espacio(LH)
     for (const t of d.cerradasEnMes) {
-      const dur = t.fecha_iniciada && t.fecha_completada
-        ? Math.max(1, Math.ceil((new Date(t.fecha_completada).getTime() - new Date(t.fecha_iniciada).getTime()) / 86400000))
-        : null
-      linea(`  ${t.titulo}`, dur ? `${dur} d` : '-')
+      const j = Number((t as unknown as { jornales?: number }).jornales) || 0
+      const der = t.tipo === 'campo' && j > 0
+        ? `${j} jornal${j === 1 ? '' : 'es'}`
+        : (t.fecha_iniciada && t.fecha_completada
+            ? `${Math.max(1, Math.ceil((new Date(t.fecha_completada).getTime() - new Date(t.fecha_iniciada).getTime()) / 86400000))} d`
+            : '-')
+      linea(`  ${t.titulo}`, der)
       const coms = d.comentariosPorTarea.get(t.id) ?? []
       for (const c of coms) {
         texto(`      "${c}"`, { size: 9, color: gris })
