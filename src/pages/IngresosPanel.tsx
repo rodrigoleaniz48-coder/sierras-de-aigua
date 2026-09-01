@@ -2,7 +2,13 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { Dialog } from '../components/Dialog'
+import { EditorCategoriasDialog } from '../components/EditorCategoriasDialog'
 import { money } from '../lib/format'
+
+function esAdmin(nombre: string | null | undefined): boolean {
+  const n = (nombre ?? '').toLowerCase()
+  return n.includes('rodrigo') || n.includes('santi')
+}
 
 interface Categoria { id: number; slug: string; nombre: string; activo: boolean; orden: number }
 interface Socio { id: string; nombre: string; cuenta_default_id?: number | null }
@@ -23,8 +29,9 @@ interface Ingreso {
 const MESES_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
 
 export function IngresosPanel() {
-  const { session } = useAuth()
+  const { session, perfil } = useAuth()
   const soyYo = session?.user.id ?? ''
+  const puedeEditarCat = esAdmin(perfil?.nombre)
 
   const [ingresos, setIngresos] = useState<Ingreso[]>([])
   const [categorias, setCategorias] = useState<Categoria[]>([])
@@ -32,6 +39,7 @@ export function IngresosPanel() {
   const [cuentas, setCuentas] = useState<CuentaBancaria[]>([])
   const [cargando, setCargando] = useState(true)
   const [nuevo, setNuevo] = useState(false)
+  const [editorCat, setEditorCat] = useState(false)
   const [editando, setEditando] = useState<Ingreso | null>(null)
 
   const hoy = new Date()
@@ -86,10 +94,17 @@ export function IngresosPanel() {
             Ingresos que <b>no</b> son ventas de aceite: eventos, alquileres, aportes de capital, ventas ocasionales, etc.
           </p>
         </div>
-        <button className="btn-primary" onClick={() => setNuevo(true)}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14M5 12h14" /></svg>
-          Nuevo ingreso
-        </button>
+        <div className="flex gap-2">
+          {puedeEditarCat && (
+            <button type="button" className="btn-secondary" onClick={() => setEditorCat(true)}>
+              🏷️ Categorías
+            </button>
+          )}
+          <button className="btn-primary" onClick={() => setNuevo(true)}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14M5 12h14" /></svg>
+            Nuevo ingreso
+          </button>
+        </div>
       </div>
 
       <div className="card p-3 grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
@@ -174,6 +189,13 @@ export function IngresosPanel() {
         soyYo={soyYo}
         onCerrar={() => { setNuevo(false); setEditando(null) }}
         onOk={() => { setNuevo(false); setEditando(null); cargar() }}
+      />
+      <EditorCategoriasDialog
+        abierto={editorCat}
+        tabla="categorias_ingreso"
+        titulo="Categorías de ingresos"
+        onCerrar={() => setEditorCat(false)}
+        onCambio={cargar}
       />
     </div>
   )

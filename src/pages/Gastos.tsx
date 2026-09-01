@@ -2,7 +2,13 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { Dialog } from '../components/Dialog'
+import { EditorCategoriasDialog } from '../components/EditorCategoriasDialog'
 import { money } from '../lib/format'
+
+function esAdminGastos(nombre: string | null | undefined): boolean {
+  const n = (nombre ?? '').toLowerCase()
+  return n.includes('rodrigo') || n.includes('santi')
+}
 import { guardarFlag, leerFlag, guardarObj, leerObj, borrarKey } from '../lib/persistencia'
 
 interface Gasto {
@@ -66,6 +72,7 @@ export function Gastos() {
   const [nuevo, setNuevoRaw] = useState(() => leerFlag('dialog:nuevo-gasto'))
   const setNuevo = (v: boolean) => { setNuevoRaw(v); guardarFlag('dialog:nuevo-gasto', v) }
   const [editando, setEditando] = useState<Gasto | null>(null)
+  const [editorCat, setEditorCat] = useState(false)
 
   // Filtros
   const hoy = new Date()
@@ -131,7 +138,14 @@ export function Gastos() {
             Registro personal de gastos por período. {veTodos ? 'Ves los tuyos y los del resto.' : 'Solo vos ves tus gastos.'}
           </p>
         </div>
-        <button className="btn-primary" onClick={() => setNuevo(true)}>+ Nuevo gasto</button>
+        <div className="flex gap-2">
+          {esAdminGastos(perfil?.nombre) && (
+            <button type="button" className="btn-secondary" onClick={() => setEditorCat(true)}>
+              🏷️ Categorías
+            </button>
+          )}
+          <button className="btn-primary" onClick={() => setNuevo(true)}>+ Nuevo gasto</button>
+        </div>
       </div>
 
       {/* Filtros */}
@@ -283,6 +297,13 @@ export function Gastos() {
           if (error) throw new Error(error.message)
           setEditando(null); cargar()
         }}
+      />
+      <EditorCategoriasDialog
+        abierto={editorCat}
+        tabla="categorias_gasto"
+        titulo="Categorías de egresos"
+        onCerrar={() => setEditorCat(false)}
+        onCambio={cargar}
       />
     </div>
   )

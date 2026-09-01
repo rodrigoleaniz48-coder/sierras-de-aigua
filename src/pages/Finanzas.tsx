@@ -1,25 +1,15 @@
 import { useState } from 'react'
-import { useAuth } from '../lib/auth'
 import { Gastos } from './Gastos'
 import { IngresosPanel } from './IngresosPanel'
-import { CategoriasPanel } from './CategoriasPanel'
 
-type Tab = 'egresos' | 'ingresos' | 'categorias'
-
-function esAdmin(nombre: string | null | undefined): boolean {
-  const n = (nombre ?? '').toLowerCase()
-  return n.includes('rodrigo') || n.includes('santi')
-}
+type Tab = 'egresos' | 'ingresos'
 
 export function Finanzas() {
-  const { perfil } = useAuth()
-  const puedeEditarCat = esAdmin(perfil?.nombre)
   const [tab, setTab] = useState<Tab>('egresos')
 
   const tabs: { key: Tab; label: string; icon: string }[] = [
     { key: 'egresos', label: 'Egresos', icon: '💸' },
     { key: 'ingresos', label: 'Ingresos', icon: '💰' },
-    ...(puedeEditarCat ? [{ key: 'categorias' as Tab, label: 'Categorías', icon: '🏷️' }] : []),
   ]
 
   return (
@@ -49,7 +39,6 @@ export function Finanzas() {
       <div>
         {tab === 'egresos' && <Gastos />}
         {tab === 'ingresos' && <IngresosPanel />}
-        {tab === 'categorias' && puedeEditarCat && <CategoriasPanel />}
       </div>
     </div>
   )
