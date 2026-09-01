@@ -584,21 +584,28 @@ function NuevaVentaDialog({
     })
   }, [abierto, cuentas.length])
 
-  // Auto-seleccionar cuenta: BROU personal del socio por default.
-  // Excepcion: cuando con_factura=true, override a Harria segun moneda.
-  // Si es efectivo, cuenta_id queda null.
+  // Auto-seleccionar cuenta segun contexto:
+  //   - Efectivo -> vacio
+  //   - Con factura -> Harria en la moneda de la venta
+  //   - Sin factura + USD -> Harria USD (los socios no tienen cuenta USD personal)
+  //   - Sin factura + UYU -> cuenta personal del socio (perfil.cuenta_default_id)
   useEffect(() => {
     if (!abierto || cuentas.length === 0) return
-    if (ventaAEditar && cuentaId) return // respetar valor cargado
+    if (ventaAEditar && cuentaId) return // respetar lo cargado en edicion
     if (formaPago === 'efectivo') { setCuentaId(''); return }
+    const harriaEnMoneda = cuentas.find((c) => c.nombre.toLowerCase().includes('harria') && c.moneda === monedaVenta)
     if (conFactura) {
-      const harria = cuentas.find((c) => c.nombre.toLowerCase().includes('harria') && c.moneda === monedaVenta)
-      if (harria) setCuentaId(String(harria.id))
-    } else {
-      const def = perfil?.cuenta_default_id
-      if (def && cuentas.some((c) => c.id === def)) setCuentaId(String(def))
-      else setCuentaId('')
+      setCuentaId(harriaEnMoneda ? String(harriaEnMoneda.id) : '')
+      return
     }
+    if (monedaVenta === 'USD') {
+      // Los socios no tienen cuenta USD personal → cae a Harria USD
+      setCuentaId(harriaEnMoneda ? String(harriaEnMoneda.id) : '')
+      return
+    }
+    const def = perfil?.cuenta_default_id
+    if (def && cuentas.some((c) => c.id === def)) setCuentaId(String(def))
+    else setCuentaId('')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [abierto, conFactura, monedaVenta, formaPago, cuentas.length, perfil?.cuenta_default_id])
 
@@ -1113,7 +1120,7 @@ async function guardar(e: React.FormEvent) {
               >💳 Transferencia</button>
               <button
                 type="button"
-                onClick={() => { setFormaPago('transferencia'); setCuentaId('') }}
+                onClick={() => { setFormaPago('efectivo'); setCuentaId('') }}
                 className={`flex-1 py-2 ${formaPago === 'efectivo' ? 'bg-oliva-800 text-oliva-50' : 'bg-white text-oliva-700 hover:bg-oliva-100'}`}
               >💵 Efectivo</button>
             </div>
