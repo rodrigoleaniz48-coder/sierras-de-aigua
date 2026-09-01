@@ -9,6 +9,7 @@ export function Login() {
   const loc = useLocation() as { state?: { from?: { pathname?: string } } }
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [verPass, setVerPass] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -54,14 +55,25 @@ export function Login() {
           </div>
           <div>
             <label className="label">Contraseña</label>
-            <input
-              type="password"
-              className="input"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
+            <div className="relative">
+              <input
+                type={verPass ? 'text' : 'password'}
+                className="input pr-20"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+              <button
+                type="button"
+                onClick={() => setVerPass((v) => !v)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-semibold text-oliva-700 hover:text-oliva-900 px-2 py-1 rounded hover:bg-oliva-100"
+                tabIndex={-1}
+                aria-label={verPass ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+              >
+                {verPass ? '🙈 Ocultar' : '👁 Ver'}
+              </button>
+            </div>
           </div>
           {error && <div className="text-sm text-red-700">{error}</div>}
           <button type="submit" className="btn-primary w-full" disabled={loading}>
