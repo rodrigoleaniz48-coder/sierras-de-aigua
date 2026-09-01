@@ -52,10 +52,14 @@ Deno.serve(async (req) => {
     const nombrePorId = new Map(perfiles.map((p) => [p.id, p.nombre]))
     const emiliano = perfiles.find((p) => (p.nombre ?? '').toLowerCase().includes('emiliano'))
 
+    // === CUENTAS BANCARIAS ===
+    const { data: cuentasRaw } = await supa.from('cuentas_bancarias').select('id,nombre,moneda,activo').eq('activo', true).order('id')
+    const cuentas = (cuentasRaw ?? []) as Array<{ id: number; nombre: string; moneda: 'UYU' | 'USD' }>
+
     // === VENTAS ===
     const { data: ventasRaw } = await supa
       .from('ventas')
-      .select('id,fecha,socio_id,total,moneda,cotizacion,estado,promocion_comercial')
+      .select('id,fecha,socio_id,total,moneda,cotizacion,estado,promocion_comercial,cuenta_id')
       .gte('fecha', desdeStr).lt('fecha', hastaStr)
       .neq('estado', 'cancelado')
     const ventas = ventasRaw ?? []
@@ -90,7 +94,7 @@ Deno.serve(async (req) => {
     // === GASTOS ===
     const { data: gastosRaw } = await supa
       .from('gastos')
-      .select('id,fecha,socio_id,monto,moneda,categoria,descripcion,reembolsable,reembolsado,es_adelanto')
+      .select('id,fecha,socio_id,monto,moneda,categoria,descripcion,reembolsable,reembolsado,es_adelanto,cuenta_id')
       .gte('fecha', desdeStr).lt('fecha', hastaStr)
     const gastos = gastosRaw ?? []
     // Gastos también se separan por moneda para conciliación bancaria.
@@ -112,6 +116,47 @@ Deno.serve(async (req) => {
       gastoPorSocio.set(key, acc)
     }
     const gastosPorSocio = [...gastoPorSocio.values()].sort((a, b) => (b.uyu + b.usd * 40) - (a.uyu + a.usd * 40))
+
+    // === INGRESOS MANUALES (no ventas) ===
+    const { data: ingresosRaw } = await supa
+      .from('ingresos')
+      .select('id,fecha,socio_id,monto,moneda,cuenta_id,categoria_id')
+      .gte('fecha', desdeStr).lt('fecha', hastaStr)
+    const ingresos = ingresosRaw ?? []
+
+    // === MOVIMIENTOS POR CUENTA (para conciliacion bancaria) ===
+    // Para cada cuenta empresa, cuanto entro (ventas + ingresos) y cuanto salio (gastos)
+    interface MovCuenta { id: number; nombre: string; moneda: 'UYU' | 'USD'; entradas: number; salidas: number; entOps: number; salOps: number }
+    const porCuenta = new Map<number, MovCuenta>()
+    for (const c of cuentas) porCuenta.set(c.id, { id: c.id, nombre: c.nombre, moneda: c.moneda, entradas: 0, salidas: 0, entOps: 0, salOps: 0 })
+    // Ventas -> entrada (en la moneda original)
+    for (const v of ventasEfectivas) {
+      if (!v.cuenta_id) continue
+      const acc = porCuenta.get(Number(v.cuenta_id)); if (!acc) continue
+      const esUSD = (v.moneda ?? 'UYU') === 'USD'
+      const monto = esUSD ? (totalOriginalUSD(v) ?? 0) : Number(v.total)
+      // Solo sumar si coincide moneda de la cuenta con la de la venta
+      if ((esUSD && acc.moneda === 'USD') || (!esUSD && acc.moneda === 'UYU')) {
+        acc.entradas += monto; acc.entOps += 1
+      }
+    }
+    // Ingresos manuales -> entrada
+    for (const i of ingresos) {
+      if (!i.cuenta_id) continue
+      const acc = porCuenta.get(Number(i.cuenta_id)); if (!acc) continue
+      if (i.moneda === acc.moneda) { acc.entradas += Number(i.monto); acc.entOps += 1 }
+    }
+    // Gastos -> salida
+    for (const g of gastos) {
+      if (!g.cuenta_id) continue
+      const acc = porCuenta.get(Number(g.cuenta_id)); if (!acc) continue
+      if (g.moneda === acc.moneda) { acc.salidas += Number(g.monto); acc.salOps += 1 }
+    }
+    const movsPorCuenta = [...porCuenta.values()].filter((c) => c.entradas > 0 || c.salidas > 0)
+    // Contar movimientos sin cuenta asignada (para alertar)
+    const sinCuentaVentas = ventasEfectivas.filter((v) => !v.cuenta_id).length
+    const sinCuentaGastos = gastos.filter((g) => !g.cuenta_id).length
+    const sinCuentaIngresos = ingresos.filter((i) => !i.cuenta_id).length
 
     // === TAREAS DE EMILIANO ===
     interface Tarea { id: number; titulo: string; estado: string; tipo: string; fecha_creada: string; fecha_iniciada: string | null; fecha_completada: string | null; jornales: number }
@@ -159,23 +204,18 @@ Deno.serve(async (req) => {
 
     // === HTML ===
     const APP_URL = 'https://rodrigoleaniz48-coder.github.io/sierras-de-aigua/'
-    const html = renderHTML({
+    const commonData = {
       nombreMes, desdeStr, hastaStr,
       totalUYU, totalUSD, cantVentas, ventasPorSocio, promos,
       cantUYU: ventasUYU.length, cantUSD: ventasUSD.length,
       gastosTotalUYU, gastosTotalUSD, gastosPorSocio, cantGastos: gastos.length,
+      movsPorCuenta, sinCuentaVentas, sinCuentaGastos, sinCuentaIngresos,
       jornalesAprox, cerradasEnMes, activasEnMes, comentariosPorTarea,
-      APP_URL,
-    })
+    }
+    const html = renderHTML({ ...commonData, APP_URL })
 
     // === PDF adjunto ===
-    const pdfBytes = await renderPDF({
-      nombreMes, desdeStr, hastaStr,
-      totalUYU, totalUSD, cantVentas, ventasPorSocio, promos,
-      cantUYU: ventasUYU.length, cantUSD: ventasUSD.length,
-      gastosTotalUYU, gastosTotalUSD, gastosPorSocio, cantGastos: gastos.length,
-      jornalesAprox, cerradasEnMes, activasEnMes, comentariosPorTarea,
-    })
+    const pdfBytes = await renderPDF(commonData)
     const pdfBase64 = bytesToBase64(pdfBytes)
     const pdfName = `reporte-${y0}-${String(m0).padStart(2, '0')}.pdf`
 
@@ -240,6 +280,8 @@ interface RenderData {
   gastosTotalUYU: number; gastosTotalUSD: number
   gastosPorSocio: Array<{ nombre: string; uyu: number; usd: number; reembUyu: number; reembUsd: number; cantidad: number }>
   cantGastos: number
+  movsPorCuenta: Array<{ id: number; nombre: string; moneda: 'UYU' | 'USD'; entradas: number; salidas: number; entOps: number; salOps: number }>
+  sinCuentaVentas: number; sinCuentaGastos: number; sinCuentaIngresos: number
   jornalesAprox: number
   cerradasEnMes: Array<{ id: number; titulo: string; fecha_iniciada: string | null; fecha_completada: string | null; tipo?: string; jornales?: number }>
   activasEnMes: Array<{ id: number; titulo: string; estado: string; fecha_iniciada: string | null }>
@@ -365,6 +407,46 @@ function renderHTML(d: RenderData): string {
         </tr></thead>
         <tbody>${filasGastosSocio || '<tr><td colspan="5" style="padding:16px;color:#888;text-align:center;">sin gastos</td></tr>'}</tbody>
       </table>
+
+      <!-- CONCILIACION BANCARIA -->
+      <h2 style="font-size:15px;margin:0 0 4px;color:#2f3d2a;text-transform:uppercase;letter-spacing:1.5px;">Movimientos por cuenta bancaria</h2>
+      <div style="font-size:11px;color:#666;margin-bottom:12px;">Para cotejar contra el extracto de cada cuenta. Solo cuenta lo que se le asignó cuenta destino/origen.</div>
+      ${d.movsPorCuenta.length > 0 ? `
+      <table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:8px;">
+        <thead><tr style="background:#f5f5f0;">
+          <th style="padding:10px 14px;text-align:left;font-weight:600;">Cuenta</th>
+          <th style="padding:10px 14px;text-align:right;font-weight:600;color:#166534;">Entradas</th>
+          <th style="padding:10px 14px;text-align:right;font-weight:600;color:#991b1b;">Salidas</th>
+          <th style="padding:10px 14px;text-align:right;font-weight:700;">Saldo neto</th>
+        </tr></thead>
+        <tbody>
+        ${d.movsPorCuenta.map((c) => {
+          const neto = c.entradas - c.salidas
+          const netoColor = neto >= 0 ? '#166534' : '#991b1b'
+          return `
+          <tr>
+            <td style="padding:10px 14px;border-bottom:1px solid #eee;">
+              <div style="font-weight:600;">${esc(c.nombre)}</div>
+              <div style="font-size:11px;color:#666;">${c.entOps} ent · ${c.salOps} sal</div>
+            </td>
+            <td style="padding:10px 14px;border-bottom:1px solid #eee;text-align:right;color:${c.entradas > 0 ? '#166534' : '#bbb'};">
+              ${c.entradas > 0 ? '+ ' + money(c.entradas, c.moneda) : '—'}
+            </td>
+            <td style="padding:10px 14px;border-bottom:1px solid #eee;text-align:right;color:${c.salidas > 0 ? '#991b1b' : '#bbb'};">
+              ${c.salidas > 0 ? '− ' + money(c.salidas, c.moneda) : '—'}
+            </td>
+            <td style="padding:10px 14px;border-bottom:1px solid #eee;text-align:right;font-weight:700;color:${netoColor};">
+              ${neto >= 0 ? '+ ' : '− '}${money(Math.abs(neto), c.moneda)}
+            </td>
+          </tr>`
+        }).join('')}
+        </tbody>
+      </table>` : '<div style="padding:12px;color:#888;text-align:center;font-size:13px;">Ningún movimiento del mes tiene cuenta asignada.</div>'}
+      ${(d.sinCuentaVentas + d.sinCuentaGastos + d.sinCuentaIngresos) > 0 ? `
+      <div style="background:#fff7ed;border:1px solid #fdba74;border-radius:6px;padding:10px 14px;margin-bottom:28px;font-size:12px;color:#9a3412;">
+        ⚠️ Este mes hay <b>${d.sinCuentaVentas + d.sinCuentaGastos + d.sinCuentaIngresos}</b> movimientos sin cuenta asignada
+        (${d.sinCuentaVentas} ventas · ${d.sinCuentaGastos} gastos · ${d.sinCuentaIngresos} ingresos). No están sumando en esta tabla.
+      </div>` : '<div style="margin-bottom:28px;"></div>'}
 
       <!-- EMILIANO -->
       <h2 style="font-size:15px;margin:0 0 12px;color:#2f3d2a;text-transform:uppercase;letter-spacing:1.5px;">Emiliano — tareas y jornales</h2>
@@ -537,6 +619,32 @@ async function renderPDF(d: Omit<RenderData, 'APP_URL'>): Promise<Uint8Array> {
     }
   }
   if (d.gastosPorSocio.length === 0) { texto('(sin gastos)', { size: 10, color: gris }); espacio(LH) }
+
+  // Movimientos por cuenta (para conciliacion bancaria)
+  h2('MOVIMIENTOS POR CUENTA BANCARIA')
+  texto('Para cotejar contra el extracto de cada cuenta.', { size: 9, color: gris })
+  espacio(LH)
+  if (d.movsPorCuenta.length === 0) {
+    texto('(ningun movimiento del mes tiene cuenta asignada)', { size: 10, color: gris })
+    espacio(LH)
+  } else {
+    for (const c of d.movsPorCuenta) {
+      const neto = c.entradas - c.salidas
+      texto(`${c.nombre}`, { size: 11, bold: true })
+      espacio(LH - 2)
+      linea(`  entradas (${c.entOps})`, c.entradas > 0 ? '+ ' + money(c.entradas, c.moneda) : '-', { colorDer: c.entradas > 0 ? rgb(0.086, 0.396, 0.204) : gris })
+      linea(`  salidas (${c.salOps})`, c.salidas > 0 ? '- ' + money(c.salidas, c.moneda) : '-', { colorDer: c.salidas > 0 ? rgb(0.6, 0.106, 0.106) : gris })
+      linea(`  saldo neto del mes`, (neto >= 0 ? '+ ' : '- ') + money(Math.abs(neto), c.moneda), { bold: true, colorDer: neto >= 0 ? rgb(0.086, 0.396, 0.204) : rgb(0.6, 0.106, 0.106) })
+      espacio(4)
+    }
+  }
+  if ((d.sinCuentaVentas + d.sinCuentaGastos + d.sinCuentaIngresos) > 0) {
+    espacio(4)
+    texto(`ATENCION: ${d.sinCuentaVentas + d.sinCuentaGastos + d.sinCuentaIngresos} movimientos sin cuenta asignada`, { size: 9, color: rgb(0.6, 0.204, 0.055), bold: true })
+    espacio(LH - 4)
+    texto(`(${d.sinCuentaVentas} ventas / ${d.sinCuentaGastos} gastos / ${d.sinCuentaIngresos} ingresos). No suman en la tabla.`, { size: 8, color: gris })
+    espacio(LH - 2)
+  }
 
   // Emiliano
   h2('EMILIANO - TAREAS Y JORNALES')
