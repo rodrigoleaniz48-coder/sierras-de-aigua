@@ -514,6 +514,18 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, soySocioEdito
     return patch
   }
 
+  // Al pasar a 'hecha' en una tarea de campo, precalcular jornales por duración
+  // (fecha_iniciada -> fecha_completada). Editable por el creador.
+  useEffect(() => {
+    if (!editar || tipo !== 'campo' || estado !== 'hecha') return
+    if (jornales > 0) return // respetar valor ya cargado o editado
+    const ini = editar.fecha_iniciada ? new Date(editar.fecha_iniciada) : new Date()
+    const fin = editar.fecha_completada ? new Date(editar.fecha_completada) : new Date()
+    const dias = Math.max(1, Math.ceil((fin.getTime() - ini.getTime()) / 86400000))
+    setJornales(dias)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [estado, tipo, editar])
+
   async function guardar(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
@@ -643,13 +655,15 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, soySocioEdito
             <input type="date" className="input" value={fechaVence} onChange={(e) => setFechaVence(e.target.value)} disabled={soloLectura} />
           </div>
         </div>
-        {tipo === 'campo' && (
+        {tipo === 'campo' && editar && estado === 'hecha' && (
           <div>
             <label className="label">Jornales que llevó</label>
             <input type="number" step="0.5" min="0" max="30" className="input" value={jornales}
               onChange={(e) => setJornales(Number(e.target.value) || 0)} disabled={soloLectura}
               placeholder="0 · 0.5 · 1 · 2 …" />
-            <div className="text-[10px] text-oliva-500 mt-1">Suma al reporte mensual de jornales del empleado.</div>
+            <div className="text-[10px] text-oliva-500 mt-1">
+              Se calcula automático al marcar hecha (entre fecha iniciada y completada). Podés corregirlo si el empleado se equivocó.
+            </div>
           </div>
         )}
         <div>
