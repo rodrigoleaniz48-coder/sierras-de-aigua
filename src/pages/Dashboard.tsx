@@ -69,7 +69,7 @@ export function Dashboard() {
     const mesAntFin = new Date(hoy.getFullYear(), hoy.getMonth(), 0).toISOString().slice(0, 10)
 
     Promise.all([
-      // Ventas del mes (con estado)
+      // Ventas del mes (para KPI de facturado)
       supabase.from('ventas').select('id, total, entregado, cobrado').gte('fecha', mesInicio).neq('estado', 'cancelado').eq('promocion_comercial', false),
       // Total del mes anterior
       supabase.from('ventas').select('total').gte('fecha', mesAntInicio).lte('fecha', mesAntFin).neq('estado', 'cancelado').eq('promocion_comercial', false),
@@ -77,12 +77,17 @@ export function Dashboard() {
       supabase.from('items_venta').select('unidades, presentacion:presentaciones(volumen_ml, producto:productos(nombre, categoria)), venta:ventas!inner(fecha, estado)').gte('venta.fecha', mesInicio).neq('venta.estado', 'cancelado'),
       // Ventas con última compra vieja (para "en riesgo") — traemos fechas de última venta por cliente
       supabase.from('ventas').select('cliente_id, fecha').neq('estado', 'cancelado').order('fecha', { ascending: false }),
+      // Pendientes de entrega/cobro (todas las fechas, no filtrar por mes: siguen pendientes despues del cierre)
+      supabase.from('ventas').select('id, total, entregado, cobrado, promocion_comercial').neq('estado', 'cancelado').or('entregado.eq.false,cobrado.eq.false'),
     ])
-      .then(([vRes, vAntRes, iRes, ultVentasRes]) => {
+      .then(([vRes, vAntRes, iRes, ultVentasRes, pendRes]) => {
         const ventasMes = vRes.data ?? []
         const totalMes = ventasMes.reduce((s, v) => s + Number(v.total ?? 0), 0)
-        const pendEntrega = ventasMes.filter((v) => !v.entregado).length
-        const pendCobroList = ventasMes.filter((v) => !v.cobrado)
+        // Pendientes: TODAS las ventas no-canceladas no-entregadas o no-cobradas (independiente del mes)
+        // Las promos no tienen cobro; solo cuentan si falta entregar.
+        const pendientes = pendRes.data ?? []
+        const pendEntrega = pendientes.filter((v) => !v.entregado).length
+        const pendCobroList = pendientes.filter((v) => !v.cobrado && !v.promocion_comercial)
         const pendCobro = pendCobroList.length
         const pendCobroMonto = pendCobroList.reduce((s, v) => s + Number(v.total ?? 0), 0)
 
