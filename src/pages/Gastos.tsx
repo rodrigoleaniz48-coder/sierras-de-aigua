@@ -30,29 +30,7 @@ type TipoGasto = 'normal' | 'reembolsable' | 'adelanto'
 
 interface Socio { id: string; nombre: string }
 
-const CATEGORIAS = [
-  'combustible',
-  'viaticos',
-  'insumos_almazara',
-  'insumos_campo',
-  'sueldos',
-  'jornales',
-  'impuestos',
-  'compras_generales',
-  'otros',
-] as const
-
-const CAT_LABEL: Record<(typeof CATEGORIAS)[number], string> = {
-  combustible: 'Combustible',
-  viaticos: 'Viáticos',
-  insumos_almazara: 'Insumos almazara',
-  insumos_campo: 'Insumos campo',
-  sueldos: 'Sueldos',
-  jornales: 'Jornales',
-  impuestos: 'Impuestos',
-  compras_generales: 'Compras generales',
-  otros: 'Otros',
-}
+interface Categoria { id: number; slug: string; nombre: string; activo: boolean; orden: number }
 
 const METODOS = ['efectivo', 'transferencia', 'tarjeta', 'debito_automatico'] as const
 
@@ -68,6 +46,7 @@ export function Gastos() {
 
   const [gastos, setGastos] = useState<Gasto[]>([])
   const [socios, setSocios] = useState<Socio[]>([])
+  const [categorias, setCategorias] = useState<Categoria[]>([])
   const [cargando, setCargando] = useState(true)
   const [nuevo, setNuevoRaw] = useState(() => leerFlag('dialog:nuevo-gasto'))
   const setNuevo = (v: boolean) => { setNuevoRaw(v); guardarFlag('dialog:nuevo-gasto', v) }
@@ -83,14 +62,22 @@ export function Gastos() {
 
   async function cargar() {
     setCargando(true)
-    const [g, s] = await Promise.all([
+    const [g, s, c] = await Promise.all([
       supabase.from('gastos').select('*').order('fecha', { ascending: false }).order('id', { ascending: false }),
       supabase.from('perfiles').select('id,nombre').eq('activo', true).order('nombre'),
+      supabase.from('categorias_gasto').select('*').eq('activo', true).order('orden').order('nombre'),
     ])
     setGastos((g.data as Gasto[]) ?? [])
     setSocios((s.data as Socio[]) ?? [])
+    setCategorias((c.data as Categoria[]) ?? [])
     setCargando(false)
   }
+  // Lookup slug -> nombre para mostrar label lindo
+  const catLabel = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const c of categorias) m.set(c.slug, c.nombre)
+    return (slug: string) => m.get(slug) ?? slug
+  }, [categorias])
   useEffect(() => { cargar() }, [])
 
   const socioPorId = useMemo(() => new Map(socios.map((s) => [s.id, s])), [socios])
@@ -170,7 +157,7 @@ export function Gastos() {
           <label className="label">Categoría</label>
           <select className="input" value={filtroCategoria} onChange={(e) => setFiltroCategoria(e.target.value)}>
             <option value="todas">Todas</option>
-            {CATEGORIAS.map((c) => <option key={c} value={c}>{CAT_LABEL[c]}</option>)}
+            {categorias.map((c) => <option key={c.slug} value={c.slug}>{c.nombre}</option>)}
           </select>
         </div>
         {veTodos && (
@@ -256,7 +243,7 @@ export function Gastos() {
                   onClick={() => setEditando(g)}
                 >
                   <td className="py-2 px-4 tabular-nums text-oliva-700 whitespace-nowrap">{g.fecha}</td>
-                  <td className="py-2 px-4 text-oliva-800">{CAT_LABEL[g.categoria as keyof typeof CAT_LABEL] ?? g.categoria}</td>
+                  <td className="py-2 px-4 text-oliva-800">{catLabel(g.categoria)}</td>
                   {veTodos && <td className="py-2 px-4 text-oliva-700 text-xs">{socioPorId.get(g.socio_id)?.nombre ?? '—'}</td>}
                   <td className="py-2 px-4 text-oliva-700 text-xs truncate max-w-[280px]">{g.descripcion ?? '—'}</td>
                   <td className="py-2 px-4 text-oliva-700 text-xs">{g.metodo_pago?.replace('_', ' ') ?? '—'}</td>
@@ -333,7 +320,7 @@ function GastoDialog({
 }) {
   const { perfil } = useAuth()
   const [fecha, setFecha] = useState(() => new Date().toISOString().slice(0, 10))
-  const [categoria, setCategoria] = useState<string>('otros')
+  const [categoria, setCategoria] = useState<string>('varios')
   const [monto, setMonto] = useState<string>('')
   const [moneda, setMoneda] = useState<'UYU' | 'USD'>('UYU')
   const [descripcion, setDescripcion] = useState('')
@@ -345,6 +332,15 @@ function GastoDialog({
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [confirmEliminar, setConfirmEliminar] = useState(false)
+  const [catsDialog, setCatsDialog] = useState<Categoria[]>([])
+
+  // Cargar categorias
+  useEffect(() => {
+    if (!abierto || catsDialog.length > 0) return
+    supabase.from('categorias_gasto').select('*').eq('activo', true).order('orden').order('nombre').then(({ data }) => {
+      setCatsDialog((data as Categoria[]) ?? [])
+    })
+  }, [abierto, catsDialog.length])
 
   // Cargar cuentas
   useEffect(() => {
@@ -384,7 +380,7 @@ function GastoDialog({
         setTipo(b.tipo ?? 'normal'); setReembolsado(b.reembolsado)
       } else {
         setFecha(new Date().toISOString().slice(0, 10))
-        setCategoria('otros'); setMonto(''); setMoneda('UYU')
+        setCategoria('varios'); setMonto(''); setMoneda('UYU')
         setDescripcion(''); setMetodoPago('efectivo')
         setTipo('normal'); setReembolsado(false)
       }
@@ -439,7 +435,8 @@ function GastoDialog({
           <div>
             <label className="label">Categoría</label>
             <select className="input" value={categoria} onChange={(e) => setCategoria(e.target.value)} disabled={soloLectura}>
-              {CATEGORIAS.map((c) => <option key={c} value={c}>{CAT_LABEL[c]}</option>)}
+              {catsDialog.length === 0 && <option value={categoria}>{categoria || '—'}</option>}
+              {catsDialog.map((c) => <option key={c.slug} value={c.slug}>{c.nombre}</option>)}
             </select>
           </div>
         </div>
