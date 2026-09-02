@@ -1526,21 +1526,20 @@ interface ItemVenta {
 interface PresentacionInfo { id: number; nombre: string; producto_id: number; es_pack: boolean }
 interface ProdInfo { id: number; nombre: string }
 
-function usuarioDatosBancarios(nombre: string | null | undefined, conFactura: boolean): string[] | null {
+function usuarioDatosBancarios(nombre: string | null | undefined, conFactura: boolean, moneda: 'UYU' | 'USD' = 'UYU'): string[] | null {
   const n = (nombre ?? '').toLowerCase()
-  const cuentaHarria = ['*Datos para transferencia:*', '*BROU*', 'Caja de ahorro en pesos', '001529985-00002', 'HARRIA SRL', '', 'Te agradezco me envíes el comprobante de pago!']
+  const cuentaHarriaUYU = ['*Datos para transferencia:*', '*BROU*', 'Cuenta corriente en pesos', '001529985-00002', 'HARRIA SRL', '', 'Te agradezco me envíes el comprobante de pago!']
+  const cuentaHarriaUSD = ['*Datos para transferencia:*', '*BROU*', 'Cuenta corriente en dólares', '001529985-00001', 'HARRIA SRL', '', 'Te agradezco me envíes el comprobante de pago!']
+  const cuentaHarria = moneda === 'USD' ? cuentaHarriaUSD : cuentaHarriaUYU
   const cuentaRodrigo = ['*Datos para transferencia:*', 'BROU', 'Caja de ahorro en pesos', '110854026-00001', 'RODRIGO LEANIZ', '', 'Te agradezco me envíes el comprobante de pago!']
   const cuentaGonzalo = ['*Datos para transferencia:*', 'BROU', '000247689-00002', 'Gonzalo Leániz', '', 'Te agradezco me envíes el comprobante de pago!']
   const cuentaSanti   = ['*Datos para transferencia:*', 'BROU', '001773207-00001', 'Santiago Leániz', '', 'Te agradezco me envíes el comprobante de pago!']
-  if (n.includes('rodrigo') || n.includes('ayelen') || n.includes('ayelén')) {
-    return conFactura ? cuentaHarria : cuentaRodrigo
-  }
-  if (n.includes('santi')) {
-    return conFactura ? cuentaHarria : cuentaSanti
-  }
-  if (n.includes('gonzalo')) {
-    return conFactura ? cuentaHarria : cuentaGonzalo
-  }
+  // Con factura → Harria (moneda según venta).
+  // Sin factura + USD → tampoco los socios tienen cuenta USD, así que usa Harria USD.
+  if (conFactura || moneda === 'USD') return cuentaHarria
+  if (n.includes('rodrigo') || n.includes('ayelen') || n.includes('ayelén')) return cuentaRodrigo
+  if (n.includes('santi')) return cuentaSanti
+  if (n.includes('gonzalo')) return cuentaGonzalo
   return null
 }
 
@@ -1632,8 +1631,8 @@ function VentaDetalleDialog({
     if (venta!.con_factura) partes.push(`IVA (10%): ${money(conv(venta!.iva), mnd)}`)
     partes.push(`*Total: ${money(conv(venta!.total), mnd)}*`)
     if (venta!.horario_entrega) partes.push(`🕐 ${venta!.horario_entrega}`)
-    // Datos bancarios: sólo si el usuario logueado los tiene configurados para este tipo de venta
-    const datosBanco = usuarioDatosBancarios(perfil?.nombre, !!venta!.con_factura)
+    // Datos bancarios: según usuario logueado, con factura y moneda de la venta
+    const datosBanco = usuarioDatosBancarios(perfil?.nombre, !!venta!.con_factura, mnd)
     if (datosBanco) {
       partes.push('')
       partes.push(...datosBanco)
