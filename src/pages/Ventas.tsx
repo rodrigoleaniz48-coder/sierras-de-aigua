@@ -1612,15 +1612,20 @@ function VentaDetalleDialog({
       const prod = p ? prodMap.get(p.producto_id) : null
       return `• ${it.unidades}× ${prod?.nombre ?? ''} ${p?.nombre ?? ''}`.trim()
     }).join('\n')
+    // Los totales están guardados en UYU. Si la venta fue en USD, mostramos en la moneda original.
+    const esUSD = venta!.moneda === 'USD' && venta!.cotizacion && Number(venta!.cotizacion) > 0
+    const cot = esUSD ? Number(venta!.cotizacion) : 1
+    const mnd: 'UYU' | 'USD' = esUSD ? 'USD' : 'UYU'
+    const conv = (nUyu: number) => esUSD ? Number(nUyu) / cot : Number(nUyu)
     const partes: string[] = []
     partes.push(`Hola ${clienteActual?.nombre?.split(' ')[0] ?? ''}!`)
     partes.push('Gracias por tu compra en Sierras de Aiguá 🫒')
     partes.push('')
     partes.push(`*Pedido #${venta!.id}* · ${venta!.fecha}`)
     partes.push(items_str)
-    if (venta!.envio) partes.push(`🛵 Envío: ${money(venta!.costo_envio)}`)
-    if (venta!.con_factura) partes.push(`IVA (10%): ${money(venta!.iva)}`)
-    partes.push(`*Total: ${money(venta!.total)}*`)
+    if (venta!.envio) partes.push(`🛵 Envío: ${money(conv(venta!.costo_envio), mnd)}`)
+    if (venta!.con_factura) partes.push(`IVA (10%): ${money(conv(venta!.iva), mnd)}`)
+    partes.push(`*Total: ${money(conv(venta!.total), mnd)}*`)
     if (venta!.horario_entrega) partes.push(`🕐 ${venta!.horario_entrega}`)
     // Datos bancarios: sólo si el usuario logueado los tiene configurados para este tipo de venta
     const datosBanco = usuarioDatosBancarios(perfil?.nombre, !!venta!.con_factura)
