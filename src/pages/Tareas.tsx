@@ -72,6 +72,7 @@ export function Tareas() {
   const [editando, setEditando] = useState<Tarea | null>(null)
   const [filtroEstado, setFiltroEstado] = useState<'todas' | Tarea['estado']>('todas')
   const [filtroAsignado, setFiltroAsignado] = useState<string>('todos')
+  const [vista, setVista] = useState<'agenda' | 'equipo'>('agenda')
 
   async function cargar() {
     setCargando(true)
@@ -99,6 +100,42 @@ export function Tareas() {
   const pend = tareas.filter((t) => t.estado === 'pendiente').length
   const curso = tareas.filter((t) => t.estado === 'en_progreso').length
   const misAsignadas = tareas.filter((t) => t.asignado_a === soyYo && t.estado !== 'hecha' && t.estado !== 'cancelada').length
+
+  // === Mi agenda: mis tareas activas agrupadas por vencimiento ===
+  const hoyStr = new Date().toISOString().slice(0, 10)
+  const en7Str = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10)
+  const misActivas = useMemo(
+    () => tareas.filter((t) => t.asignado_a === soyYo && (t.estado === 'pendiente' || t.estado === 'en_progreso')),
+    [tareas, soyYo],
+  )
+  const gruposAgenda = useMemo(() => ({
+    atrasadas: misActivas.filter((t) => t.fecha_vence && t.fecha_vence < hoyStr),
+    hoy:       misActivas.filter((t) => t.fecha_vence === hoyStr),
+    semana:    misActivas.filter((t) => t.fecha_vence && t.fecha_vence > hoyStr && t.fecha_vence <= en7Str),
+    despues:   misActivas.filter((t) => !t.fecha_vence || t.fecha_vence > en7Str),
+  }), [misActivas, hoyStr, en7Str])
+
+  // === Resumen del mes por persona (solo admin) ===
+  const resumenMes = useMemo(() => {
+    const mesIni = new Date(); mesIni.setDate(1); mesIni.setHours(0, 0, 0, 0)
+    const mesIniStr = mesIni.toISOString().slice(0, 10)
+    type R = { nombre: string; rol: string; hechas: number; pendientes: number; jornales: number }
+    const mp = new Map<string, R>()
+    for (const p of perfiles) {
+      mp.set(p.id, { nombre: p.nombre, rol: p.rol, hechas: 0, pendientes: 0, jornales: 0 })
+    }
+    for (const t of tareas) {
+      if (!t.asignado_a) continue
+      const r = mp.get(t.asignado_a); if (!r) continue
+      const fc = t.fecha_completada ? t.fecha_completada.slice(0, 10) : null
+      if (t.estado === 'hecha' && fc && fc >= mesIniStr) {
+        r.hechas += 1
+        r.jornales += Number(t.jornales) || 0
+      }
+      if ((t.estado === 'pendiente' || t.estado === 'en_progreso')) r.pendientes += 1
+    }
+    return [...mp.values()].filter((r) => r.hechas > 0 || r.pendientes > 0)
+  }, [tareas, perfiles])
 
   async function cambiarEstado(t: Tarea, nuevo: Tarea['estado']) {
     const patch: Partial<Tarea> = { estado: nuevo }
@@ -139,68 +176,149 @@ export function Tareas() {
         </div>
       </div>
 
-      {/* KPIs */}
-      <div className="grid grid-cols-3 gap-3">
-        <div className="panel">
-          <div className="text-[10px] font-bold uppercase tracking-widest text-oliva-500">Pendientes</div>
-          <div className="text-2xl font-extrabold text-amber-800 mt-1">{pend}</div>
+      {/* Toggle vista (solo socios editores tienen la de Equipo) */}
+      {soySocioEditor && (
+        <div className="flex rounded-md border border-oliva-200 overflow-hidden text-sm font-semibold w-full sm:w-auto">
+          <button
+            type="button"
+            onClick={() => setVista('agenda')}
+            className={`flex-1 sm:flex-none px-4 py-2 ${vista === 'agenda' ? 'bg-oliva-800 text-oliva-50' : 'bg-white text-oliva-700 hover:bg-oliva-100'}`}
+          >📅 Mi agenda <span className="opacity-70 text-xs">· {misActivas.length}</span></button>
+          <button
+            type="button"
+            onClick={() => setVista('equipo')}
+            className={`flex-1 sm:flex-none px-4 py-2 ${vista === 'equipo' ? 'bg-oliva-800 text-oliva-50' : 'bg-white text-oliva-700 hover:bg-oliva-100'}`}
+          >👥 Equipo <span className="opacity-70 text-xs">· {pend + curso}</span></button>
         </div>
-        <div className="panel">
-          <div className="text-[10px] font-bold uppercase tracking-widest text-oliva-500">En curso</div>
-          <div className="text-2xl font-extrabold text-blue-800 mt-1">{curso}</div>
-        </div>
-        <div className="panel">
-          <div className="text-[10px] font-bold uppercase tracking-widest text-oliva-500">Tuyas activas</div>
-          <div className="text-2xl font-extrabold text-oliva-900 mt-1">{misAsignadas}</div>
-        </div>
-      </div>
+      )}
 
-      {/* Filtros */}
-      <div className="card p-3 flex flex-wrap gap-2 items-end">
-        <div className="flex-1 min-w-[140px]">
-          <label className="label">Estado</label>
-          <select className="input" value={filtroEstado} onChange={(e) => setFiltroEstado(e.target.value as 'todas' | Tarea['estado'])}>
-            <option value="todas">Todas</option>
-            <option value="pendiente">Pendiente</option>
-            <option value="en_progreso">En curso</option>
-            <option value="hecha">Hecha</option>
-            <option value="cancelada">Cancelada</option>
-          </select>
+      {/* ========= MI AGENDA ========= */}
+      {(vista === 'agenda' || !soySocioEditor) && (
+        <div className="space-y-4">
+          {cargando ? (
+            <div className="card p-6 text-sm text-oliva-700">Cargando…</div>
+          ) : misActivas.length === 0 ? (
+            <div className="card p-6 text-sm text-oliva-700 text-center">
+              🎉 No tenés tareas pendientes. {soyCampo ? 'Cuando termines algo por tu cuenta, cargalo con "Registrar tarea realizada".' : ''}
+            </div>
+          ) : (
+            <>
+              {gruposAgenda.atrasadas.length > 0 && (
+                <SeccionAgenda titulo={`Atrasadas · ${gruposAgenda.atrasadas.length}`} color="red">
+                  {gruposAgenda.atrasadas.map((t) => (
+                    <AgendaItem key={t.id} tarea={t} onCambiarEstado={cambiarEstado} onEditar={() => setEditando(t)} tono="red" />
+                  ))}
+                </SeccionAgenda>
+              )}
+              {gruposAgenda.hoy.length > 0 && (
+                <SeccionAgenda titulo={`Hoy · ${gruposAgenda.hoy.length}`} color="amber">
+                  {gruposAgenda.hoy.map((t) => (
+                    <AgendaItem key={t.id} tarea={t} onCambiarEstado={cambiarEstado} onEditar={() => setEditando(t)} tono="amber" />
+                  ))}
+                </SeccionAgenda>
+              )}
+              {gruposAgenda.semana.length > 0 && (
+                <SeccionAgenda titulo={`Esta semana · ${gruposAgenda.semana.length}`} color="oliva">
+                  {gruposAgenda.semana.map((t) => (
+                    <AgendaItem key={t.id} tarea={t} onCambiarEstado={cambiarEstado} onEditar={() => setEditando(t)} tono="oliva" />
+                  ))}
+                </SeccionAgenda>
+              )}
+              {gruposAgenda.despues.length > 0 && (
+                <SeccionAgenda titulo={`Después / sin fecha · ${gruposAgenda.despues.length}`} color="gris">
+                  {gruposAgenda.despues.map((t) => (
+                    <AgendaItem key={t.id} tarea={t} onCambiarEstado={cambiarEstado} onEditar={() => setEditando(t)} tono="gris" />
+                  ))}
+                </SeccionAgenda>
+              )}
+            </>
+          )}
         </div>
-        <div className="flex-1 min-w-[140px]">
-          <label className="label">Asignado a</label>
-          <select className="input" value={filtroAsignado} onChange={(e) => setFiltroAsignado(e.target.value)}>
-            <option value="todos">Todos</option>
-            <option value={soyYo}>Yo</option>
-            {perfiles.filter((p) => p.id !== soyYo).map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-          </select>
-        </div>
-        <div className="text-xs text-oliva-500 ml-auto">{filtradas.length} tarea(s)</div>
-      </div>
+      )}
 
-      {/* Lista */}
-      {cargando ? (
-        <div className="card p-6 text-sm text-oliva-700">Cargando…</div>
-      ) : filtradas.length === 0 ? (
-        <div className="card p-6 text-sm text-oliva-700 text-center">
-          {tareas.length === 0
-            ? (puedeCrear ? 'Todavía no hay tareas. Creá la primera con "+ Nueva tarea".' : 'No tenés tareas asignadas.')
-            : 'Sin resultados para el filtro.'}
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {filtradas.map((t) => (
-            <TareaCard
-              key={t.id}
-              tarea={t}
-              asignado={t.asignado_a ? perfilPorId.get(t.asignado_a) : undefined}
-              creador={t.creado_por ? perfilPorId.get(t.creado_por) : undefined}
-              soyYo={soyYo}
-              onCambiarEstado={cambiarEstado}
-              onEditar={() => setEditando(t)}
-            />
-          ))}
-        </div>
+      {/* ========= EQUIPO (solo socios editores) ========= */}
+      {vista === 'equipo' && soySocioEditor && (
+        <>
+          {/* KPIs */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="panel">
+              <div className="text-[10px] font-bold uppercase tracking-widest text-oliva-500">Pendientes</div>
+              <div className="text-2xl font-extrabold text-amber-800 mt-1">{pend}</div>
+            </div>
+            <div className="panel">
+              <div className="text-[10px] font-bold uppercase tracking-widest text-oliva-500">En curso</div>
+              <div className="text-2xl font-extrabold text-blue-800 mt-1">{curso}</div>
+            </div>
+            <div className="panel">
+              <div className="text-[10px] font-bold uppercase tracking-widest text-oliva-500">Tuyas activas</div>
+              <div className="text-2xl font-extrabold text-oliva-900 mt-1">{misAsignadas}</div>
+            </div>
+          </div>
+
+          {/* Resumen del mes por persona */}
+          {resumenMes.length > 0 && (
+            <div className="card p-4">
+              <div className="text-[10px] font-bold uppercase tracking-widest text-oliva-500 mb-3">📊 Este mes por persona</div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                {resumenMes.map((r) => (
+                  <div key={r.nombre} className="rounded-md border border-oliva-100 bg-oliva-50/60 p-3">
+                    <div className="text-sm font-semibold text-oliva-900">{r.nombre} <span className="text-[10px] font-normal text-oliva-500 uppercase">· {r.rol}</span></div>
+                    <div className="flex gap-4 mt-1 text-xs text-oliva-700">
+                      <span>✅ <b>{r.hechas}</b> hechas</span>
+                      <span>⏳ <b>{r.pendientes}</b> abiertas</span>
+                      {r.rol === 'campo' && <span>🌱 <b>{r.jornales}</b> jornales</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Filtros */}
+          <div className="card p-3 flex flex-wrap gap-2 items-end">
+            <div className="flex-1 min-w-[140px]">
+              <label className="label">Estado</label>
+              <select className="input" value={filtroEstado} onChange={(e) => setFiltroEstado(e.target.value as 'todas' | Tarea['estado'])}>
+                <option value="todas">Todas</option>
+                <option value="pendiente">Pendiente</option>
+                <option value="en_progreso">En curso</option>
+                <option value="hecha">Hecha</option>
+                <option value="cancelada">Cancelada</option>
+              </select>
+            </div>
+            <div className="flex-1 min-w-[140px]">
+              <label className="label">Asignado a</label>
+              <select className="input" value={filtroAsignado} onChange={(e) => setFiltroAsignado(e.target.value)}>
+                <option value="todos">Todos</option>
+                <option value={soyYo}>Yo</option>
+                {perfiles.filter((p) => p.id !== soyYo).map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+              </select>
+            </div>
+            <div className="text-xs text-oliva-500 ml-auto">{filtradas.length} tarea(s)</div>
+          </div>
+
+          {cargando ? (
+            <div className="card p-6 text-sm text-oliva-700">Cargando…</div>
+          ) : filtradas.length === 0 ? (
+            <div className="card p-6 text-sm text-oliva-700 text-center">
+              {tareas.length === 0 ? 'Todavía no hay tareas. Creá la primera con "+ Nueva tarea".' : 'Sin resultados para el filtro.'}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {filtradas.map((t) => (
+                <TareaCard
+                  key={t.id}
+                  tarea={t}
+                  asignado={t.asignado_a ? perfilPorId.get(t.asignado_a) : undefined}
+                  creador={t.creado_por ? perfilPorId.get(t.creado_por) : undefined}
+                  soyYo={soyYo}
+                  onCambiarEstado={cambiarEstado}
+                  onEditar={() => setEditando(t)}
+                />
+              ))}
+            </div>
+          )}
+        </>
       )}
 
       <TareaDialog
@@ -219,6 +337,78 @@ export function Tareas() {
         onCerrar={() => setRegistrarHecha(false)}
         onOk={() => { setRegistrarHecha(false); cargar() }}
       />
+    </div>
+  )
+}
+
+// ===== Mi agenda: sección + item compacto =====
+
+function SeccionAgenda({ titulo, color, children }: {
+  titulo: string
+  color: 'red' | 'amber' | 'oliva' | 'gris'
+  children: React.ReactNode
+}) {
+  const cls = color === 'red' ? 'text-red-800 border-l-4 border-red-400'
+    : color === 'amber' ? 'text-amber-800 border-l-4 border-amber-400'
+    : color === 'oliva' ? 'text-oliva-800 border-l-4 border-oliva-400'
+    : 'text-oliva-600 border-l-4 border-oliva-200'
+  return (
+    <div className="card p-3">
+      <div className={`text-[11px] font-bold uppercase tracking-widest pl-3 mb-2 ${cls}`}>{titulo}</div>
+      <div className="space-y-1">{children}</div>
+    </div>
+  )
+}
+
+function AgendaItem({ tarea, onCambiarEstado, onEditar, tono }: {
+  tarea: Tarea
+  onCambiarEstado: (t: Tarea, nuevo: Tarea['estado']) => void
+  onEditar: () => void
+  tono: 'red' | 'amber' | 'oliva' | 'gris'
+}) {
+  const dotPrio: Record<Tarea['prioridad'], string> = {
+    alta: 'bg-red-500', media: 'bg-amber-400', baja: 'bg-green-500',
+  }
+  const fechaFmt = tarea.fecha_vence
+    ? new Date(tarea.fecha_vence + 'T00:00:00').toLocaleDateString('es-UY', { day: '2-digit', month: 'short' })
+    : null
+  const [confirmHecha, setConfirmHecha] = useState(false)
+  return (
+    <div className="group flex items-center gap-2 rounded-md hover:bg-oliva-50/70 px-1.5 py-1.5 transition">
+      {/* Checkbox marcar hecha */}
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          if (!confirmHecha) { setConfirmHecha(true); setTimeout(() => setConfirmHecha(false), 3000); return }
+          onCambiarEstado(tarea, 'hecha')
+        }}
+        title={confirmHecha ? 'Confirmá — click otra vez' : 'Marcar hecha'}
+        className={`shrink-0 h-5 w-5 rounded-full border-2 flex items-center justify-center transition ${
+          confirmHecha ? 'bg-green-600 border-green-600 text-white' : 'bg-white border-oliva-300 hover:border-green-600'
+        }`}
+      >
+        {confirmHecha && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4"><path d="M20 6L9 17l-5-5" /></svg>}
+      </button>
+
+      <span className={`shrink-0 w-1.5 h-1.5 rounded-full ${dotPrio[tarea.prioridad]}`} title={`prioridad ${tarea.prioridad}`}></span>
+
+      <button
+        type="button"
+        onClick={onEditar}
+        className="flex-1 min-w-0 text-left"
+      >
+        <div className={`text-sm text-oliva-900 truncate ${tarea.estado === 'en_progreso' ? 'italic' : ''}`}>
+          {tarea.titulo}
+          {tarea.estado === 'en_progreso' && <span className="text-[10px] text-blue-700 ml-2 uppercase tracking-wide">en curso</span>}
+        </div>
+      </button>
+
+      {fechaFmt && (
+        <span className={`shrink-0 text-[11px] tabular-nums ${
+          tono === 'red' ? 'text-red-700 font-semibold' : tono === 'amber' ? 'text-amber-800 font-semibold' : 'text-oliva-600'
+        }`}>📅 {fechaFmt}</span>
+      )}
     </div>
   )
 }
@@ -417,7 +607,6 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, soySocioEdito
   const [titulo, setTitulo] = useState('')
   const [descripcion, setDescripcion] = useState('')
   const [prioridad, setPrioridad] = useState<Tarea['prioridad']>('media')
-  const [tipo, setTipo] = useState<Tarea['tipo']>('agenda')
   const [estado, setEstado] = useState<Tarea['estado']>('pendiente')
   const [jornales, setJornales] = useState<number>(0)
   const [asignadoA, setAsignadoA] = useState<string>('')
@@ -436,14 +625,13 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, soySocioEdito
       setTitulo(editar.titulo)
       setDescripcion(editar.descripcion ?? '')
       setPrioridad(editar.prioridad)
-      setTipo(editar.tipo ?? 'agenda')
       setEstado(editar.estado)
       setJornales(Number(editar.jornales ?? 0))
       setAsignadoA(editar.asignado_a ?? '')
       setFechaVence(editar.fecha_vence ?? '')
       setNotas(editar.notas ?? '')
     } else {
-      setTitulo(''); setDescripcion(''); setPrioridad('media'); setTipo('agenda')
+      setTitulo(''); setDescripcion(''); setPrioridad('media')
       setEstado('pendiente'); setJornales(0); setAsignadoA(''); setFechaVence(''); setNotas('')
     }
     setError(null); setConfirmDel(false); setNuevoComentario('')
@@ -499,12 +687,8 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, soySocioEdito
 
   const soloLectura = !puedeEditar
 
-  // Autoselección: si asignás a alguien con rol 'campo', proponer tipo=campo
-  useEffect(() => {
-    if (!abierto || editar) return
-    const p = perfiles.find((x) => x.id === asignadoA)
-    if (p && p.rol === 'campo') setTipo('campo')
-  }, [asignadoA, abierto, editar, perfiles])
+  // El "tipo" ahora se deriva del rol del asignado (empleado=campo, socio=agenda).
+  const asignadoEsEmpleado = (perfilPorId.get(asignadoA)?.rol === 'campo')
 
   function timestampsPorEstado(nuevo: Tarea['estado'], t: Tarea): Record<string, unknown> {
     const patch: Record<string, unknown> = {}
@@ -514,17 +698,16 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, soySocioEdito
     return patch
   }
 
-  // Al pasar a 'hecha' en una tarea de campo, precalcular jornales por duración
-  // (fecha_iniciada -> fecha_completada). Editable por el creador.
+  // Al pasar a 'hecha' con asignado empleado, precalcular jornales por duración.
   useEffect(() => {
-    if (!editar || tipo !== 'campo' || estado !== 'hecha') return
+    if (!editar || !asignadoEsEmpleado || estado !== 'hecha') return
     if (jornales > 0) return // respetar valor ya cargado o editado
     const ini = editar.fecha_iniciada ? new Date(editar.fecha_iniciada) : new Date()
     const fin = editar.fecha_completada ? new Date(editar.fecha_completada) : new Date()
     const dias = Math.max(1, Math.ceil((fin.getTime() - ini.getTime()) / 86400000))
     setJornales(dias)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [estado, tipo, editar])
+  }, [estado, asignadoEsEmpleado, editar])
 
   async function guardar(e: React.FormEvent) {
     e.preventDefault()
@@ -549,8 +732,8 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, soySocioEdito
       titulo: titulo.trim(),
       descripcion: descripcion.trim() || null,
       prioridad,
-      tipo,
-      jornales: tipo === 'campo' ? Number(jornales) || 0 : 0,
+      tipo: (asignadoEsEmpleado ? 'campo' : 'agenda') as Tarea['tipo'],
+      jornales: asignadoEsEmpleado ? Number(jornales) || 0 : 0,
       asignado_a: asignadoA || null,
       fecha_vence: fechaVence || null,
       notas: notas.trim() || null,
@@ -624,38 +807,11 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, soySocioEdito
             </div>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="label">Tipo</label>
-            <div className="flex gap-1.5">
-              {(['agenda', 'campo'] as const).map((t) => {
-                const activo = tipo === t
-                const label = t === 'agenda' ? '📅 Agenda' : '🌱 Campo'
-                const hint = t === 'agenda' ? 'itinerario / semana' : 'jornal / empleado'
-                return (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => setTipo(t)}
-                    disabled={soloLectura}
-                    className={`flex-1 rounded-md px-2 py-2 text-xs font-semibold transition text-left
-                      ${activo ? 'bg-white ring-2 ring-oliva-800 text-oliva-900' : 'bg-white ring-1 ring-oliva-200 text-oliva-600 hover:ring-oliva-400'}
-                      ${soloLectura ? 'opacity-60 cursor-not-allowed' : ''}`}
-                    title={hint}
-                  >
-                    <div>{label}</div>
-                    <div className="text-[10px] font-normal text-oliva-500">{hint}</div>
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-          <div>
-            <label className="label">Fecha límite para realizar la tarea</label>
-            <input type="date" className="input" value={fechaVence} onChange={(e) => setFechaVence(e.target.value)} disabled={soloLectura} />
-          </div>
+        <div>
+          <label className="label">Fecha límite para realizar la tarea</label>
+          <input type="date" className="input" value={fechaVence} onChange={(e) => setFechaVence(e.target.value)} disabled={soloLectura} />
         </div>
-        {tipo === 'campo' && editar && estado === 'hecha' && (
+        {asignadoEsEmpleado && editar && estado === 'hecha' && (
           <div>
             <label className="label">Jornales que llevó</label>
             <input type="number" step="0.5" min="0" max="30" className="input" value={jornales}
