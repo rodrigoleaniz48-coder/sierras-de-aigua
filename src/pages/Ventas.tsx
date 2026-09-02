@@ -1605,6 +1605,11 @@ function VentaDetalleDialog({
   const socio = socios.find((s) => s.id === venta.socio_id)
   const clienteActual = venta.cliente_id ? clientes.find((c) => c.id === venta.cliente_id) : null
   const clienteWA = normalizarTelWA(clienteActual?.whatsapp ?? clienteActual?.telefono ?? null)
+  // Los montos en BD están en UYU; si la venta fue en USD mostramos en la moneda original.
+  const esUSDdet = venta.moneda === 'USD' && venta.cotizacion && Number(venta.cotizacion) > 0
+  const cotDet = esUSDdet ? Number(venta.cotizacion) : 1
+  const mndDet: 'UYU' | 'USD' = esUSDdet ? 'USD' : 'UYU'
+  const convDet = (nUyu: number | string | null | undefined) => esUSDdet ? Number(nUyu ?? 0) / cotDet : Number(nUyu ?? 0)
 
   function armarMensajeCliente(): string {
     const items_str = items.map((it) => {
@@ -1861,9 +1866,9 @@ function VentaDetalleDialog({
                           {p?.es_pack && <span className="text-[10px] ml-2 text-oliva-600">(pack)</span>}
                         </td>
                         <td className="py-2 px-3 text-right tabular-nums">{it.unidades}</td>
-                        <td className="py-2 px-3 text-right tabular-nums">{money(it.precio_unitario)}</td>
-                        <td className="py-2 px-3 text-right tabular-nums">{Number(it.descuento_unitario) > 0 ? money(it.descuento_unitario) : '—'}</td>
-                        <td className="py-2 px-3 text-right tabular-nums font-medium">{money(it.subtotal)}</td>
+                        <td className="py-2 px-3 text-right tabular-nums">{money(convDet(it.precio_unitario), mndDet)}</td>
+                        <td className="py-2 px-3 text-right tabular-nums">{Number(it.descuento_unitario) > 0 ? money(convDet(it.descuento_unitario), mndDet) : '—'}</td>
+                        <td className="py-2 px-3 text-right tabular-nums font-medium">{money(convDet(it.subtotal), mndDet)}</td>
                       </tr>
                     )
                   })}
@@ -1877,19 +1882,19 @@ function VentaDetalleDialog({
         <div className="card p-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm bg-oliva-50/60">
           <div>
             <div className="text-xs uppercase tracking-wide text-oliva-600">Subtotal</div>
-            <div className="tabular-nums font-medium">{money(venta.subtotal)}</div>
+            <div className="tabular-nums font-medium">{money(convDet(venta.subtotal), mndDet)}</div>
           </div>
           <div>
             <div className="text-xs uppercase tracking-wide text-oliva-600">IVA {venta.con_factura ? '' : '(sin factura)'}</div>
-            <div className="tabular-nums font-medium">{venta.con_factura ? money(venta.iva) : <span className="text-oliva-400">—</span>}</div>
+            <div className="tabular-nums font-medium">{venta.con_factura ? money(convDet(venta.iva), mndDet) : <span className="text-oliva-400">—</span>}</div>
           </div>
           <div>
             <div className="text-xs uppercase tracking-wide text-oliva-600">🛵 Envío</div>
-            <div className="tabular-nums font-medium">{venta.envio ? money(venta.costo_envio) : <span className="text-oliva-400">—</span>}</div>
+            <div className="tabular-nums font-medium">{venta.envio ? money(convDet(venta.costo_envio), mndDet) : <span className="text-oliva-400">—</span>}</div>
           </div>
           <div>
-            <div className="text-xs uppercase tracking-wide text-oliva-600">Total</div>
-            <div className="tabular-nums font-semibold text-lg">{money(venta.total)}</div>
+            <div className="text-xs uppercase tracking-wide text-oliva-600">Total {esUSDdet ? `(cot ${venta.cotizacion})` : ''}</div>
+            <div className="tabular-nums font-semibold text-lg">{money(convDet(venta.total), mndDet)}</div>
           </div>
         </div>
 
