@@ -651,7 +651,7 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, soySocioEdito
             </div>
           </div>
           <div>
-            <label className="label">Vence (opcional)</label>
+            <label className="label">Fecha límite para realizar la tarea</label>
             <input type="date" className="input" value={fechaVence} onChange={(e) => setFechaVence(e.target.value)} disabled={soloLectura} />
           </div>
         </div>
