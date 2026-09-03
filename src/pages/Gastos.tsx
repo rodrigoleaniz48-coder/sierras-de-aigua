@@ -350,18 +350,9 @@ function GastoDialog({
     })
   }, [abierto, cuentas.length])
 
-  // Auto-selección de cuenta: default del socio dueño del gasto (o Harria si no tiene)
-  useEffect(() => {
-    if (!abierto || cuentas.length === 0) return
-    if (editar && cuentaId) return // respetar valor cargado
-    const def = perfil?.cuenta_default_id
-    if (def && cuentas.some((c) => c.id === def && c.moneda === moneda)) setCuentaId(String(def))
-    else {
-      const harria = cuentas.find((c) => c.nombre.toLowerCase().includes('harria') && c.moneda === moneda)
-      setCuentaId(harria ? String(harria.id) : '')
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [abierto, editar, moneda, cuentas.length, perfil?.cuenta_default_id])
+  // Cuenta por default: vacía (efectivo / no aplica).
+  // El usuario elige cuenta manualmente cuando corresponde.
+  // (Al editar, se respeta el valor que tenía guardado — cargado en el useEffect de arriba.)
 
   useEffect(() => {
     if (!abierto) return
