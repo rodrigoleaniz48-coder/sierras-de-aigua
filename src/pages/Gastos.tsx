@@ -318,7 +318,6 @@ function GastoDialog({
   onOk: () => void
   onEliminar?: (g: Gasto) => Promise<void>
 }) {
-  const { perfil } = useAuth()
   const [fecha, setFecha] = useState(() => new Date().toISOString().slice(0, 10))
   const [categoria, setCategoria] = useState<string>('varios')
   const [monto, setMonto] = useState<string>('')
