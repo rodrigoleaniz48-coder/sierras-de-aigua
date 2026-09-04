@@ -1526,20 +1526,42 @@ interface ItemVenta {
 interface PresentacionInfo { id: number; nombre: string; producto_id: number; es_pack: boolean }
 interface ProdInfo { id: number; nombre: string }
 
-function usuarioDatosBancarios(nombre: string | null | undefined, conFactura: boolean, moneda: 'UYU' | 'USD' = 'UYU'): string[] | null {
+// Devuelve las líneas del bloque "Datos para transferencia" para el recibo WhatsApp.
+// Prioriza la cuenta destino elegida en la venta (cuentaIdVenta); si no hay, cae al
+// fallback histórico por socio + factura + moneda.
+function usuarioDatosBancarios(
+  nombre: string | null | undefined,
+  conFactura: boolean,
+  moneda: 'UYU' | 'USD' = 'UYU',
+  cuentaIdVenta?: number | null,
+): string[] | null {
   const n = (nombre ?? '').toLowerCase()
-  const cuentaHarriaUYU = ['*Datos para transferencia:*', '*BROU*', 'Cuenta corriente en pesos', '001529985-00002', 'HARRIA SRL', '', 'Te agradezco me envíes el comprobante de pago!']
-  const cuentaHarriaUSD = ['*Datos para transferencia:*', '*BROU*', 'Cuenta corriente en dólares', '001529985-00001', 'HARRIA SRL', '', 'Te agradezco me envíes el comprobante de pago!']
+  const foot = ['', 'Te agradezco me envíes el comprobante de pago!']
+  const bloque = (banco: string, tipo: string, numero: string, titular: string) =>
+    ['*Datos para transferencia:*', `*${banco}*`, tipo, numero, titular, ...foot]
+
+  // Prioridad 1: la cuenta que quedó asignada a la venta
+  if (cuentaIdVenta) {
+    switch (Number(cuentaIdVenta)) {
+      case 1: return bloque('BROU', 'Cuenta corriente en pesos', '001529985-00002', 'HARRIA SRL')
+      case 2: return bloque('BROU', 'Cuenta corriente en dólares', '001529985-00001', 'HARRIA SRL')
+      case 3: return bloque('BROU', 'Caja de ahorro en pesos', '110854026-00001', 'RODRIGO LEANIZ')
+      case 5: return bloque('BROU', 'Caja de ahorro en pesos', '001773207-00001', 'SANTIAGO LEÁNIZ')
+      case 6: return bloque('BROU', 'Caja de ahorro en pesos', '000247689-00002', 'GONZALO LEÁNIZ')
+    }
+  }
+
+  // Fallback: por socio logueado + factura + moneda
+  const cuentaHarriaUYU = bloque('BROU', 'Cuenta corriente en pesos', '001529985-00002', 'HARRIA SRL')
+  const cuentaHarriaUSD = bloque('BROU', 'Cuenta corriente en dólares', '001529985-00001', 'HARRIA SRL')
   const cuentaHarria = moneda === 'USD' ? cuentaHarriaUSD : cuentaHarriaUYU
-  const cuentaRodrigo = ['*Datos para transferencia:*', 'BROU', 'Caja de ahorro en pesos', '110854026-00001', 'RODRIGO LEANIZ', '', 'Te agradezco me envíes el comprobante de pago!']
-  const cuentaGonzalo = ['*Datos para transferencia:*', 'BROU', '000247689-00002', 'Gonzalo Leániz', '', 'Te agradezco me envíes el comprobante de pago!']
-  const cuentaSanti   = ['*Datos para transferencia:*', 'BROU', '001773207-00001', 'Santiago Leániz', '', 'Te agradezco me envíes el comprobante de pago!']
-  // Con factura → Harria (moneda según venta).
-  // Sin factura + USD → tampoco los socios tienen cuenta USD, así que usa Harria USD.
   if (conFactura || moneda === 'USD') return cuentaHarria
-  if (n.includes('rodrigo') || n.includes('ayelen') || n.includes('ayelén')) return cuentaRodrigo
-  if (n.includes('santi')) return cuentaSanti
-  if (n.includes('gonzalo')) return cuentaGonzalo
+  if (n.includes('rodrigo') || n.includes('ayelen') || n.includes('ayelén'))
+    return bloque('BROU', 'Caja de ahorro en pesos', '110854026-00001', 'RODRIGO LEANIZ')
+  if (n.includes('santi'))
+    return bloque('BROU', 'Caja de ahorro en pesos', '001773207-00001', 'SANTIAGO LEÁNIZ')
+  if (n.includes('gonzalo'))
+    return bloque('BROU', 'Caja de ahorro en pesos', '000247689-00002', 'GONZALO LEÁNIZ')
   return null
 }
 
@@ -1631,8 +1653,8 @@ function VentaDetalleDialog({
     if (venta!.con_factura) partes.push(`IVA (10%): ${money(conv(venta!.iva), mnd)}`)
     partes.push(`*Total: ${money(conv(venta!.total), mnd)}*`)
     if (venta!.horario_entrega) partes.push(`🕐 ${venta!.horario_entrega}`)
-    // Datos bancarios: según usuario logueado, con factura y moneda de la venta
-    const datosBanco = usuarioDatosBancarios(perfil?.nombre, !!venta!.con_factura, mnd)
+    // Datos bancarios: prioriza la cuenta destino asignada a la venta, si no cae al fallback por socio+factura+moneda
+    const datosBanco = usuarioDatosBancarios(perfil?.nombre, !!venta!.con_factura, mnd, venta!.cuenta_id)
     if (datosBanco) {
       partes.push('')
       partes.push(...datosBanco)
