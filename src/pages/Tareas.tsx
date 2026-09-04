@@ -71,6 +71,7 @@ export function Tareas() {
   const [registrarHecha, setRegistrarHecha] = useState(false) // dialog para empleado
   const [editando, setEditando] = useState<Tarea | null>(null)
   const [vista, setVista] = useState<'agenda' | 'equipo'>('agenda')
+  const [subVistaAgenda, setSubVistaAgenda] = useState<'campo' | 'general' | 'todas'>('todas')
 
   async function cargar() {
     setCargando(true)
@@ -92,10 +93,18 @@ export function Tareas() {
   // === Mi agenda: mis tareas activas agrupadas por vencimiento ===
   const hoyStr = new Date().toISOString().slice(0, 10)
   const en7Str = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10)
-  const misActivas = useMemo(
+  const misActivasTodas = useMemo(
     () => tareas.filter((t) => t.asignado_a === soyYo && (t.estado === 'pendiente' || t.estado === 'en_progreso')),
     [tareas, soyYo],
   )
+  const misActivas = useMemo(() => {
+    if (subVistaAgenda === 'campo') return misActivasTodas.filter((t) => t.tipo === 'campo')
+    if (subVistaAgenda === 'general') return misActivasTodas.filter((t) => t.tipo !== 'campo')
+    return misActivasTodas
+  }, [misActivasTodas, subVistaAgenda])
+  const misCampo = misActivasTodas.filter((t) => t.tipo === 'campo').length
+  const misGeneral = misActivasTodas.filter((t) => t.tipo !== 'campo').length
+
   const gruposAgenda = useMemo(() => ({
     atrasadas: misActivas.filter((t) => t.fecha_vence && t.fecha_vence < hoyStr),
     hoy:       misActivas.filter((t) => t.fecha_vence === hoyStr),
@@ -183,11 +192,31 @@ export function Tareas() {
       {/* ========= MI AGENDA ========= */}
       {(vista === 'agenda' || !soySocioEditor) && (
         <div className="space-y-4">
+          {/* Sub-vista Campo / General / Todas (solo si tengo de ambas) */}
+          {misActivasTodas.length > 0 && (misCampo > 0 && misGeneral > 0) && (
+            <div className="flex rounded-md border border-oliva-200 overflow-hidden text-sm font-semibold self-start">
+              <button
+                type="button"
+                onClick={() => setSubVistaAgenda('todas')}
+                className={`px-3 py-1.5 ${subVistaAgenda === 'todas' ? 'bg-oliva-800 text-oliva-50' : 'bg-white text-oliva-700 hover:bg-oliva-100'}`}
+              >Todas <span className="opacity-70 text-xs">· {misActivasTodas.length}</span></button>
+              <button
+                type="button"
+                onClick={() => setSubVistaAgenda('campo')}
+                className={`px-3 py-1.5 ${subVistaAgenda === 'campo' ? 'bg-green-700 text-white' : 'bg-white text-oliva-700 hover:bg-oliva-100'}`}
+              >🌱 Campo <span className="opacity-70 text-xs">· {misCampo}</span></button>
+              <button
+                type="button"
+                onClick={() => setSubVistaAgenda('general')}
+                className={`px-3 py-1.5 ${subVistaAgenda === 'general' ? 'bg-oliva-800 text-oliva-50' : 'bg-white text-oliva-700 hover:bg-oliva-100'}`}
+              >📋 Generales <span className="opacity-70 text-xs">· {misGeneral}</span></button>
+            </div>
+          )}
           {cargando ? (
             <div className="card p-6 text-sm text-oliva-700">Cargando…</div>
           ) : misActivas.length === 0 ? (
             <div className="card p-6 text-sm text-oliva-700 text-center">
-              🎉 No tenés tareas pendientes. {soyCampo ? 'Cuando termines algo por tu cuenta, cargalo con "Registrar tarea realizada".' : ''}
+              🎉 No tenés tareas pendientes{subVistaAgenda === 'campo' ? ' de campo' : subVistaAgenda === 'general' ? ' generales' : ''}. {soyCampo ? 'Cuando termines algo por tu cuenta, cargalo con "Registrar tarea realizada".' : ''}
             </div>
           ) : (
             <>
@@ -489,6 +518,9 @@ function AgendaItem({ tarea, onCambiarEstado, onEditar, tono }: {
       </button>
 
       <span className={`shrink-0 w-1.5 h-1.5 rounded-full ${dotPrio[tarea.prioridad]}`} title={`prioridad ${tarea.prioridad}`}></span>
+      {tarea.tipo === 'campo' && (
+        <span className="shrink-0 text-[10px] uppercase tracking-wide rounded px-1.5 py-[1px] bg-green-100 text-green-800" title="Tarea de campo">🌱</span>
+      )}
 
       <button
         type="button"
@@ -705,6 +737,7 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, soySocioEdito
   const [descripcion, setDescripcion] = useState('')
   const [prioridad, setPrioridad] = useState<Tarea['prioridad']>('media')
   const [estado, setEstado] = useState<Tarea['estado']>('pendiente')
+  const [tipo, setTipo] = useState<Tarea['tipo']>('agenda')
   const [jornales, setJornales] = useState<number>(0)
   const [asignadoA, setAsignadoA] = useState<string>('')
   const [fechaVence, setFechaVence] = useState<string>('')
@@ -723,13 +756,14 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, soySocioEdito
       setDescripcion(editar.descripcion ?? '')
       setPrioridad(editar.prioridad)
       setEstado(editar.estado)
+      setTipo(editar.tipo ?? 'agenda')
       setJornales(Number(editar.jornales ?? 0))
       setAsignadoA(editar.asignado_a ?? '')
       setFechaVence(editar.fecha_vence ?? '')
       setNotas(editar.notas ?? '')
     } else {
       setTitulo(''); setDescripcion(''); setPrioridad('media')
-      setEstado('pendiente'); setJornales(0); setAsignadoA(''); setFechaVence(''); setNotas('')
+      setEstado('pendiente'); setTipo('agenda'); setJornales(0); setAsignadoA(''); setFechaVence(''); setNotas('')
     }
     setError(null); setConfirmDel(false); setNuevoComentario('')
   }, [abierto, editar])
@@ -784,8 +818,15 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, soySocioEdito
 
   const soloLectura = !puedeEditar
 
-  // El "tipo" ahora se deriva del rol del asignado (empleado=campo, socio=agenda).
+  // El asignado empleado suma jornales (por rol). El "tipo" ahora es el ÁREA de la tarea (campo/agenda).
   const asignadoEsEmpleado = (perfilPorId.get(asignadoA)?.rol === 'campo')
+
+  // Autopropuesta de tipo al elegir asignado (solo en tareas nuevas):
+  // si el asignado es empleado, casi seguro es tarea de campo.
+  useEffect(() => {
+    if (!abierto || editar) return
+    if (asignadoEsEmpleado) setTipo('campo')
+  }, [asignadoEsEmpleado, abierto, editar])
 
   function timestampsPorEstado(nuevo: Tarea['estado'], t: Tarea): Record<string, unknown> {
     const patch: Record<string, unknown> = {}
@@ -829,7 +870,7 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, soySocioEdito
       titulo: titulo.trim(),
       descripcion: descripcion.trim() || null,
       prioridad,
-      tipo: (asignadoEsEmpleado ? 'campo' : 'agenda') as Tarea['tipo'],
+      tipo,
       jornales: asignadoEsEmpleado ? Number(jornales) || 0 : 0,
       asignado_a: asignadoA || null,
       fecha_vence: fechaVence || null,
@@ -904,9 +945,28 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, soySocioEdito
             </div>
           </div>
         </div>
-        <div>
-          <label className="label">Fecha límite para realizar la tarea</label>
-          <input type="date" className="input" value={fechaVence} onChange={(e) => setFechaVence(e.target.value)} disabled={soloLectura} />
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="label">Área</label>
+            <div className="flex rounded-md border border-oliva-200 overflow-hidden text-sm font-semibold">
+              <button
+                type="button"
+                onClick={() => setTipo('campo')}
+                disabled={soloLectura}
+                className={`flex-1 py-2 ${tipo === 'campo' ? 'bg-green-700 text-white' : 'bg-white text-oliva-700 hover:bg-oliva-100'}`}
+              >🌱 Campo</button>
+              <button
+                type="button"
+                onClick={() => setTipo('agenda')}
+                disabled={soloLectura}
+                className={`flex-1 py-2 ${tipo === 'agenda' ? 'bg-oliva-800 text-oliva-50' : 'bg-white text-oliva-700 hover:bg-oliva-100'}`}
+              >📋 General</button>
+            </div>
+          </div>
+          <div>
+            <label className="label">Fecha límite para realizar la tarea</label>
+            <input type="date" className="input" value={fechaVence} onChange={(e) => setFechaVence(e.target.value)} disabled={soloLectura} />
+          </div>
         </div>
         {asignadoEsEmpleado && editar && estado === 'hecha' && (
           <div>
