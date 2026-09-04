@@ -17,6 +17,13 @@ interface Props {
   compact?: boolean
 }
 
+// Renderiza el par pesos + dólares en una línea (ambos si aplican, si no solo el que tenga monto)
+function ambosMontos(uyu: number, usd: number): string {
+  if (uyu > 0 && usd > 0) return `${money(uyu, 'UYU')} + ${money(usd, 'USD')}`
+  if (usd > 0) return money(usd, 'USD')
+  return money(uyu, 'UYU')
+}
+
 export function ReporteSemanalCard({ autoMarcarVisto = true, onVisto, compact }: Props) {
   const [rep, setRep] = useState<ReporteSemanal | null>(null)
   const [cargando, setCargando] = useState(true)
@@ -33,8 +40,9 @@ export function ReporteSemanalCard({ autoMarcarVisto = true, onVisto, compact }:
 
   const visto = reporteVisto(rep.semanaISO)
   const nuevo = !visto
-  const deltaClase = rep.deltaPct >= 0 ? 'text-green-700' : 'text-red-700'
-  const deltaSigno = rep.deltaPct >= 0 ? '↑' : '↓'
+  const deltaClaseUYU = rep.deltaPctUYU >= 0 ? 'text-green-700' : 'text-red-700'
+  const deltaClaseUSD = rep.deltaPctUSD >= 0 ? 'text-green-700' : 'text-red-700'
+  const sig = (n: number) => n >= 0 ? '↑' : '↓'
 
   function abrir() {
     setModal(true)
@@ -54,14 +62,9 @@ export function ReporteSemanalCard({ autoMarcarVisto = true, onVisto, compact }:
         >
           <span className="text-[10px] font-bold uppercase tracking-widest text-oliva-500 shrink-0">Reporte sem.</span>
           <span className="text-xs text-oliva-600 shrink-0 hidden sm:inline">{rep.desde}–{rep.hasta}</span>
-          <span className="text-sm font-bold text-oliva-900 tabular-nums">{money(rep.totalFacturado)}</span>
+          <span className="text-sm font-bold text-oliva-900 tabular-nums">{ambosMontos(rep.totalUYU, rep.totalUSD)}</span>
           <span className="text-[11px] text-oliva-500">·</span>
           <span className="text-xs text-oliva-700">{rep.cantidadVentas} vta.</span>
-          {rep.totalSemanaAnterior > 0 && (
-            <span className={`text-xs font-semibold tabular-nums ${deltaClase}`}>
-              {deltaSigno} {Math.abs(rep.deltaPct).toFixed(0)}%
-            </span>
-          )}
           {nuevo && (
             <span className="text-[9px] uppercase tracking-wide rounded-full bg-aceite-500 text-white px-1.5 py-0.5 font-bold">nuevo</span>
           )}
@@ -85,12 +88,7 @@ export function ReporteSemanalCard({ autoMarcarVisto = true, onVisto, compact }:
             </div>
           </div>
           <div className="text-right">
-            <div className="text-2xl font-semibold text-oliva-900 tabular-nums">{money(rep.totalFacturado)}</div>
-            {rep.totalSemanaAnterior > 0 && (
-              <div className={`text-xs tabular-nums ${deltaClase}`}>
-                {deltaSigno} {Math.abs(rep.deltaPct).toFixed(0)}% vs semana anterior
-              </div>
-            )}
+            <div className="text-2xl font-semibold text-oliva-900 tabular-nums">{ambosMontos(rep.totalUYU, rep.totalUSD)}</div>
           </div>
         </div>
         <div className="mt-3 flex justify-end">
@@ -103,38 +101,69 @@ export function ReporteSemanalCard({ autoMarcarVisto = true, onVisto, compact }:
 
       <Dialog abierto={modal} onCerrar={() => setModal(false)} titulo={`Reporte semanal · ${rep.desde} → ${rep.hasta}`} ancho="lg">
         <div className="space-y-5">
-          {/* KPIs */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <Kpi titulo="Total" valor={money(rep.totalFacturado)} />
-            <Kpi titulo="Ventas" valor={rep.cantidadVentas.toString()} />
-            <Kpi titulo="Ticket prom." valor={money(rep.ticketPromedio)} />
+          {/* KPIs - separados por moneda */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-lg bg-oliva-50 border border-oliva-100 p-3">
+              <div className="text-[11px] uppercase tracking-wide text-oliva-600">Total en pesos</div>
+              <div className="text-lg font-semibold text-oliva-900 tabular-nums">{money(rep.totalUYU, 'UYU')}</div>
+              <div className="text-[11px] text-oliva-500 mt-0.5">{rep.cantUYU} venta{rep.cantUYU === 1 ? '' : 's'}</div>
+            </div>
+            <div className="rounded-lg bg-oliva-50 border border-oliva-100 p-3">
+              <div className="text-[11px] uppercase tracking-wide text-oliva-600">Total en dólares</div>
+              <div className="text-lg font-semibold text-oliva-900 tabular-nums">{money(rep.totalUSD, 'USD')}</div>
+              <div className="text-[11px] text-oliva-500 mt-0.5">{rep.cantUSD} venta{rep.cantUSD === 1 ? '' : 's'}</div>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Kpi titulo="Cant. ventas" valor={rep.cantidadVentas.toString()} />
             <Kpi titulo="🛵 Envíos" valor={rep.cantidadEnvios.toString()} />
           </div>
 
           {/* Comparativo */}
-          <div className="rounded-xl border border-oliva-100 bg-oliva-50/60 p-4">
-            <div className="text-xs uppercase tracking-wide text-oliva-600 mb-1">Comparativo</div>
+          <div className="rounded-xl border border-oliva-100 bg-oliva-50/60 p-4 space-y-2">
+            <div className="text-xs uppercase tracking-wide text-oliva-600">Comparativo vs semana anterior</div>
             <div className="text-sm text-oliva-800">
-              Semana anterior: <b className="tabular-nums">{money(rep.totalSemanaAnterior)}</b> ({rep.ventasSemanaAnterior} ventas).
+              Pesos: <b className="tabular-nums">{money(rep.totalUYUAnterior, 'UYU')}</b>
               {' '}
-              <span className={deltaClase + ' font-semibold'}>
-                {deltaSigno} {Math.abs(rep.deltaPct).toFixed(1)}%
-              </span>
+              {rep.totalUYUAnterior > 0 && (
+                <span className={deltaClaseUYU + ' font-semibold ml-1'}>
+                  {sig(rep.deltaPctUYU)} {Math.abs(rep.deltaPctUYU).toFixed(1)}%
+                </span>
+              )}
             </div>
+            <div className="text-sm text-oliva-800">
+              Dólares: <b className="tabular-nums">{money(rep.totalUSDAnterior, 'USD')}</b>
+              {' '}
+              {rep.totalUSDAnterior > 0 && (
+                <span className={deltaClaseUSD + ' font-semibold ml-1'}>
+                  {sig(rep.deltaPctUSD)} {Math.abs(rep.deltaPctUSD).toFixed(1)}%
+                </span>
+              )}
+            </div>
+            <div className="text-xs text-oliva-600">{rep.ventasSemanaAnterior} ventas la semana anterior.</div>
           </div>
 
-          {/* Por socio */}
+          {/* Por socio - con ambas columnas */}
           <Seccion titulo="Ventas por socio">
             {rep.porSocio.length === 0 ? (
               <div className="text-sm text-oliva-600 italic">Sin datos.</div>
             ) : (
               <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-oliva-100 text-[10px] uppercase tracking-wide text-oliva-500">
+                    <th className="py-1 text-left font-semibold">Socio</th>
+                    <th className="py-1 text-right font-semibold">Vtas.</th>
+                    <th className="py-1 text-right font-semibold">Pesos</th>
+                    <th className="py-1 text-right font-semibold">Dólares</th>
+                  </tr>
+                </thead>
                 <tbody>
                   {rep.porSocio.map((s) => (
                     <tr key={s.nombre} className="border-b border-oliva-100/70 last:border-0">
                       <td className="py-1.5 text-oliva-800">{s.nombre}</td>
-                      <td className="py-1.5 text-right text-oliva-600 text-xs">{s.count} vta.</td>
-                      <td className="py-1.5 text-right tabular-nums font-medium text-oliva-900">{money(s.total)}</td>
+                      <td className="py-1.5 text-right text-oliva-600 text-xs">{s.count}</td>
+                      <td className={`py-1.5 text-right tabular-nums font-medium ${s.uyu > 0 ? 'text-oliva-900' : 'text-oliva-300'}`}>{s.uyu > 0 ? money(s.uyu, 'UYU') : '—'}</td>
+                      <td className={`py-1.5 text-right tabular-nums font-medium ${s.usd > 0 ? 'text-oliva-900' : 'text-oliva-300'}`}>{s.usd > 0 ? money(s.usd, 'USD') : '—'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -142,18 +171,27 @@ export function ReporteSemanalCard({ autoMarcarVisto = true, onVisto, compact }:
             )}
           </Seccion>
 
-          {/* Top clientes */}
+          {/* Top clientes - con ambas columnas */}
           <Seccion titulo="Top 5 clientes">
             {rep.topClientes.length === 0 ? (
               <div className="text-sm text-oliva-600 italic">Sin datos.</div>
             ) : (
               <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-oliva-100 text-[10px] uppercase tracking-wide text-oliva-500">
+                    <th className="py-1 text-left font-semibold">Cliente</th>
+                    <th className="py-1 text-right font-semibold">Vtas.</th>
+                    <th className="py-1 text-right font-semibold">Pesos</th>
+                    <th className="py-1 text-right font-semibold">Dólares</th>
+                  </tr>
+                </thead>
                 <tbody>
                   {rep.topClientes.map((c, i) => (
                     <tr key={c.nombre + i} className="border-b border-oliva-100/70 last:border-0">
                       <td className="py-1.5 text-oliva-800">#{i + 1} {c.nombre}</td>
-                      <td className="py-1.5 text-right text-oliva-600 text-xs">{c.count} vta.</td>
-                      <td className="py-1.5 text-right tabular-nums font-medium">{money(c.total)}</td>
+                      <td className="py-1.5 text-right text-oliva-600 text-xs">{c.count}</td>
+                      <td className={`py-1.5 text-right tabular-nums font-medium ${c.uyu > 0 ? 'text-oliva-900' : 'text-oliva-300'}`}>{c.uyu > 0 ? money(c.uyu, 'UYU') : '—'}</td>
+                      <td className={`py-1.5 text-right tabular-nums font-medium ${c.usd > 0 ? 'text-oliva-900' : 'text-oliva-300'}`}>{c.usd > 0 ? money(c.usd, 'USD') : '—'}</td>
                     </tr>
                   ))}
                 </tbody>

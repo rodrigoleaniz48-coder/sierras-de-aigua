@@ -5,16 +5,21 @@ export interface ReporteSemanal {
   desde: string            // 'YYYY-MM-DD' (lunes)
   hasta: string            // 'YYYY-MM-DD' (domingo)
   cantidadVentas: number
-  totalFacturado: number
-  ticketPromedio: number
+  // Totales separados por moneda original (sin conversión cruzada)
+  totalUYU: number         // suma de ventas cargadas en pesos
+  totalUSD: number         // suma de ventas cargadas en dólares (recuperado como total/cotizacion)
+  cantUYU: number
+  cantUSD: number
   cantidadEnvios: number
-  porSocio: Array<{ nombre: string; count: number; total: number }>
-  topClientes: Array<{ nombre: string; count: number; total: number }>
+  porSocio: Array<{ nombre: string; count: number; uyu: number; usd: number }>
+  topClientes: Array<{ nombre: string; count: number; uyu: number; usd: number }>
   topPresentaciones: Array<{ label: string; unidades: number; total: number }>
-  // Comparativo vs semana anterior
-  totalSemanaAnterior: number
+  // Comparativo vs semana anterior (en pesos, ya que la mayoría de ventas son UYU)
+  totalUYUAnterior: number
+  totalUSDAnterior: number
   ventasSemanaAnterior: number
-  deltaPct: number         // % de variación de totalFacturado vs semana anterior
+  deltaPctUYU: number
+  deltaPctUSD: number
 }
 
 /** Devuelve las fechas [lunes, domingo] de la semana que contiene la fecha dada. */
@@ -62,7 +67,7 @@ export async function generarReporteSemanaPasada(): Promise<ReporteSemanal> {
   })
   if (rpcErr) throw new Error('Error cargando reporte: ' + rpcErr.message)
   const dataAll = rpcData as {
-    ventas: Array<{ id: number; fecha: string; cliente_id: number | null; socio_id: string; total: number; envio: boolean; estado: string; promocion_comercial?: boolean }>
+    ventas: Array<{ id: number; fecha: string; cliente_id: number | null; socio_id: string; total: number; envio: boolean; estado: string; promocion_comercial?: boolean; moneda?: 'UYU' | 'USD' | null; cotizacion?: number | null }>
     items: Array<{ venta_id: number; presentacion_id: number; unidades: number; subtotal: number }>
     clientes: Array<{ id: number; nombre: string }>
     perfiles: Array<{ id: string; nombre: string }>
@@ -76,39 +81,53 @@ export async function generarReporteSemanaPasada(): Promise<ReporteSemanal> {
   const pres = new Map((dataAll.presentaciones ?? []).map((p) => [p.id, p]))
   const prods = new Map((dataAll.productos ?? []).map((p) => [p.id, p.nombre]))
 
+  // Los totales en BD siempre están en UYU. Si moneda='USD' y cotizacion>0, recuperamos el USD original.
+  const esUSD = (v: { moneda?: string | null; cotizacion?: number | null }) => (v.moneda ?? 'UYU') === 'USD' && !!v.cotizacion && Number(v.cotizacion) > 0
+  const montoUSD = (v: { total: number; cotizacion?: number | null }) => Number(v.total) / Number(v.cotizacion)
+
   const ventasSemana = ventas.filter((v) => v.fecha >= rango.desde && v.fecha <= rango.hasta)
   const ventasAnt = ventas.filter((v) => v.fecha >= rangoAnt.desde && v.fecha <= rangoAnt.hasta)
 
-  const totalFacturado = ventasSemana.reduce((s, v) => s + Number(v.total), 0)
-  const totalSemanaAnterior = ventasAnt.reduce((s, v) => s + Number(v.total), 0)
+  const totalUYU = ventasSemana.filter((v) => !esUSD(v)).reduce((s, v) => s + Number(v.total), 0)
+  const totalUSD = ventasSemana.filter((v) => esUSD(v)).reduce((s, v) => s + montoUSD(v), 0)
+  const totalUYUAnterior = ventasAnt.filter((v) => !esUSD(v)).reduce((s, v) => s + Number(v.total), 0)
+  const totalUSDAnterior = ventasAnt.filter((v) => esUSD(v)).reduce((s, v) => s + montoUSD(v), 0)
+  const cantUYU = ventasSemana.filter((v) => !esUSD(v)).length
+  const cantUSD = ventasSemana.filter((v) => esUSD(v)).length
   const cantidadVentas = ventasSemana.length
   const cantidadEnvios = ventasSemana.filter((v) => v.envio).length
-  const ticketPromedio = cantidadVentas > 0 ? totalFacturado / cantidadVentas : 0
-  const deltaPct = totalSemanaAnterior > 0
-    ? ((totalFacturado - totalSemanaAnterior) / totalSemanaAnterior) * 100
-    : (totalFacturado > 0 ? 100 : 0)
+  const deltaPctUYU = totalUYUAnterior > 0
+    ? ((totalUYU - totalUYUAnterior) / totalUYUAnterior) * 100
+    : (totalUYU > 0 ? 100 : 0)
+  const deltaPctUSD = totalUSDAnterior > 0
+    ? ((totalUSD - totalUSDAnterior) / totalUSDAnterior) * 100
+    : (totalUSD > 0 ? 100 : 0)
 
-  // Por socio
-  const mapSocio = new Map<string, { count: number; total: number }>()
+  // Por socio (con ambas monedas separadas)
+  const mapSocio = new Map<string, { count: number; uyu: number; usd: number }>()
   for (const v of ventasSemana) {
     const nombre = socios.get(v.socio_id) ?? '—'
-    const g = mapSocio.get(nombre) ?? { count: 0, total: 0 }
-    g.count += 1; g.total += Number(v.total)
+    const g = mapSocio.get(nombre) ?? { count: 0, uyu: 0, usd: 0 }
+    g.count += 1
+    if (esUSD(v)) g.usd += montoUSD(v); else g.uyu += Number(v.total)
     mapSocio.set(nombre, g)
   }
-  const porSocio = [...mapSocio.entries()].map(([nombre, g]) => ({ nombre, ...g })).sort((a, b) => b.total - a.total)
+  const porSocio = [...mapSocio.entries()]
+    .map(([nombre, g]) => ({ nombre, ...g }))
+    .sort((a, b) => (b.uyu + b.usd * 40) - (a.uyu + a.usd * 40))
 
-  // Top clientes
-  const mapCli = new Map<number, { count: number; total: number }>()
+  // Top clientes (con ambas monedas separadas)
+  const mapCli = new Map<number, { count: number; uyu: number; usd: number }>()
   for (const v of ventasSemana) {
     if (v.cliente_id == null) continue
-    const g = mapCli.get(v.cliente_id) ?? { count: 0, total: 0 }
-    g.count += 1; g.total += Number(v.total)
+    const g = mapCli.get(v.cliente_id) ?? { count: 0, uyu: 0, usd: 0 }
+    g.count += 1
+    if (esUSD(v)) g.usd += montoUSD(v); else g.uyu += Number(v.total)
     mapCli.set(v.cliente_id, g)
   }
   const topClientes = [...mapCli.entries()]
     .map(([id, g]) => ({ nombre: clientes.get(id) ?? '—', ...g }))
-    .sort((a, b) => b.total - a.total)
+    .sort((a, b) => (b.uyu + b.usd * 40) - (a.uyu + a.usd * 40))
     .slice(0, 5)
 
   // Top presentaciones (por unidades)
@@ -134,15 +153,19 @@ export async function generarReporteSemanaPasada(): Promise<ReporteSemanal> {
     desde: rango.desde,
     hasta: rango.hasta,
     cantidadVentas,
-    totalFacturado,
-    ticketPromedio,
+    totalUYU,
+    totalUSD,
+    cantUYU,
+    cantUSD,
     cantidadEnvios,
     porSocio,
     topClientes,
     topPresentaciones,
-    totalSemanaAnterior,
+    totalUYUAnterior,
+    totalUSDAnterior,
     ventasSemanaAnterior: ventasAnt.length,
-    deltaPct,
+    deltaPctUYU,
+    deltaPctUSD,
   }
 }
 
