@@ -342,10 +342,13 @@ function GastoDialog({
   }, [abierto, catsDialog.length])
 
   // Al cambiar tipo, ajustar categoría a la lista correspondiente
+  // y limpiar campos que no aplican para adelanto
   useEffect(() => {
     const adelantoSlugs = ['aceite_efectivo', 'otras_ventas_efectivo', 'otros']
     if (tipo === 'adelanto') {
       if (!adelantoSlugs.includes(categoria)) setCategoria('aceite_efectivo')
+      setMetodoPago('efectivo')
+      setCuentaId('')
     } else {
       if (adelantoSlugs.slice(0, 2).includes(categoria)) setCategoria('varios')
     }
@@ -426,8 +429,40 @@ function GastoDialog({
   }
 
   return (
-    <Dialog abierto={abierto} onCerrar={onCerrar} titulo={editar ? `Gasto del ${editar.fecha}` : 'Nuevo gasto'} ancho="md">
+    <Dialog abierto={abierto} onCerrar={onCerrar} titulo={editar ? `${tipo === 'adelanto' ? 'Adelanto' : 'Gasto'} del ${editar.fecha}` : (tipo === 'adelanto' ? 'Nuevo adelanto' : 'Nuevo gasto')} ancho="md">
       <form onSubmit={guardar} className="space-y-4">
+        {/* TIPO — primero */}
+        <div className="rounded-xl border border-oliva-100 bg-oliva-50/60 p-3 space-y-2">
+          <div className="text-[11px] uppercase tracking-wide text-oliva-600 font-semibold mb-1">Tipo</div>
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input type="radio" name="tipoGasto" className="h-4 w-4 mt-0.5 accent-oliva-700" checked={tipo === 'normal'} onChange={() => setTipo('normal')} disabled={soloLectura} />
+            <div>
+              <div className="text-sm text-oliva-800 font-medium">Gasto normal</div>
+              <div className="text-[11px] text-oliva-600">Gasto operativo pagado por la empresa.</div>
+            </div>
+          </label>
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input type="radio" name="tipoGasto" className="h-4 w-4 mt-0.5 accent-oliva-700" checked={tipo === 'reembolsable'} onChange={() => setTipo('reembolsable')} disabled={soloLectura} />
+            <div>
+              <div className="text-sm text-oliva-800 font-medium">Reembolsable</div>
+              <div className="text-[11px] text-oliva-600">Lo puse de mi bolsillo, la empresa me lo tiene que devolver.</div>
+            </div>
+          </label>
+          {tipo === 'reembolsable' && (
+            <label className="flex items-center gap-2 cursor-pointer pl-6">
+              <input type="checkbox" className="h-4 w-4 accent-oliva-700" checked={reembolsado} onChange={(e) => setReembolsado(e.target.checked)} disabled={soloLectura} />
+              <span className="text-sm text-oliva-800">Ya me lo reembolsaron</span>
+            </label>
+          )}
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input type="radio" name="tipoGasto" className="h-4 w-4 mt-0.5 accent-oliva-700" checked={tipo === 'adelanto'} onChange={() => setTipo('adelanto')} disabled={soloLectura} />
+            <div>
+              <div className="text-sm text-oliva-800 font-medium">Adelanto a cuenta de sueldo</div>
+              <div className="text-[11px] text-oliva-600">Me llevé plata de la caja/cobros. Se descuenta de mi sueldo, no cuenta como gasto operativo.</div>
+            </div>
+          </label>
+        </div>
+
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="label">Fecha</label>
@@ -465,56 +500,29 @@ function GastoDialog({
           </div>
         </div>
         <div>
-          <label className="label">Descripción (opcional)</label>
-          <input className="input" value={descripcion} onChange={(e) => setDescripcion(e.target.value)} placeholder="ej: gasoil Ancap Aiguá" disabled={soloLectura} />
+          <label className="label">{tipo === 'adelanto' ? 'Notas (opcional)' : 'Descripción (opcional)'}</label>
+          <input className="input" value={descripcion} onChange={(e) => setDescripcion(e.target.value)} placeholder={tipo === 'adelanto' ? 'ej: para comprar comida familia' : 'ej: gasoil Ancap Aiguá'} disabled={soloLectura} />
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="label">Método de pago</label>
-            <select className="input" value={metodoPago} onChange={(e) => setMetodoPago(e.target.value)} disabled={soloLectura}>
-              {METODOS.map((m) => <option key={m} value={m}>{m.replace('_', ' ')}</option>)}
-            </select>
+        {/* Método y cuenta: solo cuando NO es adelanto (adelanto es siempre efectivo caja) */}
+        {tipo !== 'adelanto' && (
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label">Método de pago</label>
+              <select className="input" value={metodoPago} onChange={(e) => setMetodoPago(e.target.value)} disabled={soloLectura}>
+                {METODOS.map((m) => <option key={m} value={m}>{m.replace('_', ' ')}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="label">Cuenta origen</label>
+              <select className="input" value={cuentaId} onChange={(e) => setCuentaId(e.target.value)} disabled={soloLectura}>
+                <option value="">— efectivo / no aplica —</option>
+                {cuentas.filter((c) => c.moneda === moneda).map((c) => (
+                  <option key={c.id} value={String(c.id)}>{c.nombre}</option>
+                ))}
+              </select>
+            </div>
           </div>
-          <div>
-            <label className="label">Cuenta origen</label>
-            <select className="input" value={cuentaId} onChange={(e) => setCuentaId(e.target.value)} disabled={soloLectura}>
-              <option value="">— efectivo / no aplica —</option>
-              {cuentas.filter((c) => c.moneda === moneda).map((c) => (
-                <option key={c.id} value={String(c.id)}>{c.nombre}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-        <div className="rounded-xl border border-oliva-100 bg-oliva-50/60 p-3 space-y-2">
-          <div className="text-[11px] uppercase tracking-wide text-oliva-600 font-semibold mb-1">Tipo</div>
-          <label className="flex items-start gap-2 cursor-pointer">
-            <input type="radio" name="tipoGasto" className="h-4 w-4 mt-0.5 accent-oliva-700" checked={tipo === 'normal'} onChange={() => setTipo('normal')} disabled={soloLectura} />
-            <div>
-              <div className="text-sm text-oliva-800 font-medium">Gasto normal</div>
-              <div className="text-[11px] text-oliva-600">Gasto operativo pagado por la empresa.</div>
-            </div>
-          </label>
-          <label className="flex items-start gap-2 cursor-pointer">
-            <input type="radio" name="tipoGasto" className="h-4 w-4 mt-0.5 accent-oliva-700" checked={tipo === 'reembolsable'} onChange={() => setTipo('reembolsable')} disabled={soloLectura} />
-            <div>
-              <div className="text-sm text-oliva-800 font-medium">Reembolsable</div>
-              <div className="text-[11px] text-oliva-600">Lo puse de mi bolsillo, la empresa me lo tiene que devolver.</div>
-            </div>
-          </label>
-          {tipo === 'reembolsable' && (
-            <label className="flex items-center gap-2 cursor-pointer pl-6">
-              <input type="checkbox" className="h-4 w-4 accent-oliva-700" checked={reembolsado} onChange={(e) => setReembolsado(e.target.checked)} disabled={soloLectura} />
-              <span className="text-sm text-oliva-800">Ya me lo reembolsaron</span>
-            </label>
-          )}
-          <label className="flex items-start gap-2 cursor-pointer">
-            <input type="radio" name="tipoGasto" className="h-4 w-4 mt-0.5 accent-oliva-700" checked={tipo === 'adelanto'} onChange={() => setTipo('adelanto')} disabled={soloLectura} />
-            <div>
-              <div className="text-sm text-oliva-800 font-medium">Adelanto a cuenta de sueldo</div>
-              <div className="text-[11px] text-oliva-600">Me llevé plata de la caja/cobros. Se descuenta de mi sueldo, no cuenta como gasto operativo.</div>
-            </div>
-          </label>
-        </div>
+        )}
 
         {error && <div className="text-sm text-red-700">{error}</div>}
 
