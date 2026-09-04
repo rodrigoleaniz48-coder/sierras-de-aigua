@@ -341,6 +341,17 @@ function GastoDialog({
     })
   }, [abierto, catsDialog.length])
 
+  // Al cambiar tipo, ajustar categoría a la lista correspondiente
+  useEffect(() => {
+    const adelantoSlugs = ['aceite_efectivo', 'otras_ventas_efectivo', 'otros']
+    if (tipo === 'adelanto') {
+      if (!adelantoSlugs.includes(categoria)) setCategoria('aceite_efectivo')
+    } else {
+      if (adelantoSlugs.slice(0, 2).includes(categoria)) setCategoria('varios')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tipo])
+
   // Cargar cuentas
   useEffect(() => {
     if (!abierto || cuentas.length > 0) return
@@ -423,10 +434,20 @@ function GastoDialog({
             <input className="input" type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} required disabled={soloLectura} />
           </div>
           <div>
-            <label className="label">Categoría</label>
+            <label className="label">{tipo === 'adelanto' ? 'Origen del efectivo' : 'Categoría'}</label>
             <select className="input" value={categoria} onChange={(e) => setCategoria(e.target.value)} disabled={soloLectura}>
-              {catsDialog.length === 0 && <option value={categoria}>{categoria || '—'}</option>}
-              {catsDialog.map((c) => <option key={c.slug} value={c.slug}>{c.nombre}</option>)}
+              {tipo === 'adelanto' ? (
+                <>
+                  <option value="aceite_efectivo">Aceite efectivo</option>
+                  <option value="otras_ventas_efectivo">Otras ventas en efectivo</option>
+                  <option value="otros">Otros</option>
+                </>
+              ) : (
+                <>
+                  {catsDialog.length === 0 && <option value={categoria}>{categoria || '—'}</option>}
+                  {catsDialog.map((c) => <option key={c.slug} value={c.slug}>{c.nombre}</option>)}
+                </>
+              )}
             </select>
           </div>
         </div>
