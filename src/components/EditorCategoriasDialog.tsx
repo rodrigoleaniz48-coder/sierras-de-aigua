@@ -92,8 +92,9 @@ function Fila({ c, onRen, onTog, onDel }: { c: Categoria; onRen: (n: string) => 
   const [edit, setEdit] = useState(false)
   const [v, setV] = useState(c.nombre)
   useEffect(() => { setV(c.nombre) }, [c.nombre])
+  const btn = 'shrink-0 h-8 w-8 rounded-md flex items-center justify-center text-sm transition'
   return (
-    <div className={`flex items-center gap-2 rounded-md px-2 py-1.5 ${c.activo ? 'bg-white' : 'bg-oliva-50/60 opacity-60'}`}>
+    <div className={`flex items-center gap-2 rounded-md px-2 py-1.5 border ${c.activo ? 'bg-white border-oliva-100' : 'bg-oliva-50/60 border-oliva-100 opacity-70'}`}>
       {edit ? (
         <input
           className="input flex-1 py-1"
@@ -104,16 +105,29 @@ function Fila({ c, onRen, onTog, onDel }: { c: Categoria; onRen: (n: string) => 
           onBlur={() => { onRen(v); setEdit(false) }}
         />
       ) : (
-        <button className="flex-1 text-left text-sm text-oliva-900 hover:text-oliva-700" onClick={() => setEdit(true)}>
+        <div className="flex-1 min-w-0 text-sm text-oliva-900 truncate" title={c.nombre}>
           {c.nombre}
-        </button>
+          {!c.activo && <span className="ml-2 text-[10px] uppercase tracking-wide text-oliva-500">inactiva</span>}
+        </div>
       )}
-      <button className="text-[10px] uppercase tracking-wide text-oliva-600 hover:text-oliva-900 underline" onClick={onTog}>
-        {c.activo ? 'desactivar' : 'activar'}
-      </button>
-      <button className="text-[10px] uppercase tracking-wide text-red-700 hover:text-red-900 underline" onClick={onDel}>
-        borrar
-      </button>
+      <button
+        type="button"
+        className={`${btn} bg-oliva-50 hover:bg-oliva-100 text-oliva-700`}
+        onClick={() => setEdit(true)}
+        title="Renombrar"
+      >✏️</button>
+      <button
+        type="button"
+        className={`${btn} bg-oliva-50 hover:bg-oliva-100 ${c.activo ? 'text-oliva-700' : 'text-green-700'}`}
+        onClick={onTog}
+        title={c.activo ? 'Desactivar (deja de aparecer en el desplegable)' : 'Activar'}
+      >{c.activo ? '👁' : '↻'}</button>
+      <button
+        type="button"
+        className={`${btn} bg-red-50 hover:bg-red-100 text-red-700`}
+        onClick={onDel}
+        title="Eliminar"
+      >🗑</button>
     </div>
   )
 }
