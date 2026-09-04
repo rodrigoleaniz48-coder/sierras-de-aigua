@@ -131,7 +131,7 @@ export function Gastos() {
               🏷️ Categorías
             </button>
           )}
-          <button className="btn-primary" onClick={() => setNuevo(true)}>+ Nuevo gasto</button>
+          <button className="btn-primary" onClick={() => setNuevo(true)}>+ Nuevo gasto / adelanto</button>
         </div>
       </div>
 
@@ -219,7 +219,7 @@ export function Gastos() {
         <div className="card p-6 text-sm text-oliva-700">Cargando…</div>
       ) : filtrados.length === 0 ? (
         <div className="card p-6 text-sm text-oliva-700">
-          Sin gastos en este período. Cargá el primero con <b>+ Nuevo gasto</b>.
+          Sin gastos en este período. Cargá el primero con <b>+ Nuevo gasto / adelanto</b>.
         </div>
       ) : (
         <div className="card p-0 overflow-x-auto">
