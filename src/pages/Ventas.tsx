@@ -77,7 +77,7 @@ export function Ventas() {
     const [v, c, s, u] = await Promise.all([
       supabase.from('ventas').select('*').order('fecha', { ascending: false }).order('id', { ascending: false }),
       supabase.from('clientes').select('*').order('nombre'),
-      supabase.from('perfiles').select('id,nombre').eq('activo', true).order('nombre'),
+      supabase.from('perfiles').select('id,nombre').eq('activo', true).neq('rol', 'campo').order('nombre'),
       supabase.from('ubicaciones').select('id,nombre,activo').eq('activo', true).order('id'),
     ])
     setVentas((v.data as Venta[]) ?? [])
