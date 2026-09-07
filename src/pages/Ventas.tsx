@@ -63,6 +63,7 @@ export function Ventas() {
   const [ventaDetalleId, setVentaDetalleId] = useState<number | null>(null)
   const [ventaEnEdicion, setVentaEnEdicion] = useState<Venta | null>(null)
   const [cadeteAbierto, setCadeteAbierto] = useState(false)
+  const [resumenCadeteAbierto, setResumenCadeteAbierto] = useState(false)
 
   const [filtroSocio, setFiltroSocio] = useState<string>('todos')
   const [soloEnvio, setSoloEnvio] = useState(false)
@@ -158,6 +159,7 @@ export function Ventas() {
         </div>
         <div className="flex gap-2 flex-wrap">
           <button className="btn-secondary" onClick={() => setCadeteAbierto(true)}>🛵 Lista para cadete</button>
+          <button className="btn-secondary" onClick={() => setResumenCadeteAbierto(true)}>💵 Pago mensual cadete</button>
           {puedeEscribir && (
             <button className="btn-primary" onClick={() => setNueva(true)}>+ Nueva venta</button>
           )}
@@ -264,6 +266,12 @@ export function Ventas() {
         desde={filtroDesde}
         hasta={filtroHasta}
         onCerrar={() => setCadeteAbierto(false)}
+      />
+      <ResumenMensualCadeteDialog
+        abierto={resumenCadeteAbierto}
+        ventas={ventas}
+        clientes={clientes}
+        onCerrar={() => setResumenCadeteAbierto(false)}
       />
     </div>
   )
@@ -1960,6 +1968,188 @@ function VentaDetalleDialog({
             <button className="btn-secondary" onClick={onCerrar}>Cerrar</button>
           </div>
         )}
+      </div>
+    </Dialog>
+  )
+}
+
+// ---------- Diálogo Resumen mensual del cadete (para pago) ----------
+
+function ResumenMensualCadeteDialog({
+  abierto, ventas, clientes, onCerrar,
+}: {
+  abierto: boolean
+  ventas: Venta[]
+  clientes: Cliente[]
+  onCerrar: () => void
+}) {
+  const hoyD = new Date()
+  const [anio, setAnio] = useState<string>(String(hoyD.getFullYear()))
+  const [mes, setMes] = useState<string>(String(hoyD.getMonth() + 1).padStart(2, '0'))
+  const [copiado, setCopiado] = useState(false)
+  const [precioUnitario, setPrecioUnitario] = useState<string>('')
+
+  useEffect(() => {
+    if (!abierto) return
+    setCopiado(false)
+  }, [abierto, mes, anio])
+
+  const desde = `${anio}-${mes}-01`
+  const ult = new Date(Number(anio), Number(mes), 0).getDate()
+  const hasta = `${anio}-${mes}-${String(ult).padStart(2, '0')}`
+  const nombreMes = new Date(Number(anio), Number(mes) - 1, 1).toLocaleString('es-UY', { month: 'long' })
+
+  const clientePorId = useMemo(() => new Map(clientes.map((c) => [c.id, c])), [clientes])
+
+  const enviosMes = useMemo(() => {
+    return ventas
+      .filter((v) => v.envio && v.estado !== 'cancelado' && v.fecha >= desde && v.fecha <= hasta)
+      .sort((a, b) => a.fecha === b.fecha ? a.id - b.id : a.fecha.localeCompare(b.fecha))
+  }, [ventas, desde, hasta])
+
+  // Precio efectivo por envío: si el usuario ingresó un precio unitario, se usa ése;
+  // si no, usa el costo_envio guardado en cada venta.
+  const precioUnit = Number(precioUnitario) || 0
+  const totalPago = enviosMes.reduce((s, v) => {
+    const p = precioUnit > 0 ? precioUnit : Number(v.costo_envio) || 0
+    return s + p
+  }, 0)
+
+  function armarMensaje(): string {
+    const partes: string[] = []
+    partes.push(`*Pago cadete — ${nombreMes} ${anio}*`)
+    partes.push('')
+    if (enviosMes.length === 0) {
+      partes.push('No hubo envíos este mes.')
+      return partes.join('\n')
+    }
+    enviosMes.forEach((v, i) => {
+      const cli = v.cliente_id ? clientePorId.get(v.cliente_id) : null
+      const fecha = new Date(v.fecha + 'T00:00:00').toLocaleDateString('es-UY', { day: '2-digit', month: '2-digit' })
+      const p = precioUnit > 0 ? precioUnit : Number(v.costo_envio) || 0
+      partes.push(`${i + 1}. ${fecha} · ${cli?.nombre ?? 'sin cliente'} — ${money(p)}`)
+    })
+    partes.push('')
+    partes.push(`*Total (${enviosMes.length} envío${enviosMes.length === 1 ? '' : 's'}): ${money(totalPago)}*`)
+    partes.push('')
+    partes.push('Gracias! 🙌')
+    return partes.join('\n')
+  }
+
+  async function copiar() {
+    try {
+      await navigator.clipboard.writeText(armarMensaje())
+      setCopiado(true)
+      setTimeout(() => setCopiado(false), 2000)
+    } catch { alert('No se pudo copiar. Seleccioná manualmente.') }
+  }
+
+  function abrirWA() {
+    const texto = encodeURIComponent(armarMensaje())
+    const url = `https://wa.me/${CADETE_MVD_WA}?text=${texto}`
+    window.open(url, '_blank')
+  }
+
+  const anios = [hoyD.getFullYear() - 1, hoyD.getFullYear()]
+
+  return (
+    <Dialog abierto={abierto} onCerrar={onCerrar} titulo="Pago mensual del cadete" ancho="lg">
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 items-end">
+          <div>
+            <label className="label">Mes</label>
+            <select className="input" value={mes} onChange={(e) => setMes(e.target.value)}>
+              {['01','02','03','04','05','06','07','08','09','10','11','12'].map((m) => (
+                <option key={m} value={m}>{new Date(2000, Number(m) - 1, 1).toLocaleString('es-UY', { month: 'long' })}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="label">Año</label>
+            <select className="input" value={anio} onChange={(e) => setAnio(e.target.value)}>
+              {anios.map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="label">Precio por envío (opcional)</label>
+            <input
+              className="input tabular-nums"
+              type="number"
+              min="0"
+              step="1"
+              placeholder="usa el costo guardado en cada venta"
+              value={precioUnitario}
+              onChange={(e) => setPrecioUnitario(e.target.value)}
+            />
+            <div className="text-[10px] text-oliva-500 mt-1">Si lo dejás vacío, cuenta el costo de envío que cargaste en cada venta.</div>
+          </div>
+        </div>
+
+        {/* KPIs */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="panel">
+            <div className="text-[10px] font-bold uppercase tracking-widest text-oliva-500">Envíos del mes</div>
+            <div className="text-2xl font-extrabold text-oliva-900 mt-1">{enviosMes.length}</div>
+          </div>
+          <div className="panel">
+            <div className="text-[10px] font-bold uppercase tracking-widest text-oliva-500">Total a pagar</div>
+            <div className="text-2xl font-extrabold text-oliva-900 mt-1 tabular-nums">{money(totalPago)}</div>
+          </div>
+        </div>
+
+        {/* Lista de envíos */}
+        {enviosMes.length === 0 ? (
+          <div className="card p-4 text-sm text-oliva-700 text-center">No hubo envíos con cadete en {nombreMes} {anio}.</div>
+        ) : (
+          <div className="card p-0 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-oliva-50/70 text-[10px] uppercase tracking-widest text-oliva-500">
+                <tr>
+                  <th className="py-2 px-3 text-left">#</th>
+                  <th className="py-2 px-3 text-left">Fecha</th>
+                  <th className="py-2 px-3 text-left">Cliente</th>
+                  <th className="py-2 px-3 text-right">Costo</th>
+                </tr>
+              </thead>
+              <tbody>
+                {enviosMes.map((v, i) => {
+                  const cli = v.cliente_id ? clientePorId.get(v.cliente_id) : null
+                  const p = precioUnit > 0 ? precioUnit : Number(v.costo_envio) || 0
+                  return (
+                    <tr key={v.id} className="border-t border-oliva-100">
+                      <td className="py-2 px-3 tabular-nums font-semibold text-oliva-900">{i + 1}</td>
+                      <td className="py-2 px-3 text-oliva-700">{v.fecha}</td>
+                      <td className="py-2 px-3 text-oliva-800">{cli?.nombre ?? '—'}</td>
+                      <td className="py-2 px-3 text-right tabular-nums font-medium">{money(p)}</td>
+                    </tr>
+                  )
+                })}
+                <tr className="border-t-2 border-oliva-300 bg-oliva-50/60">
+                  <td colSpan={3} className="py-2 px-3 text-right font-bold text-oliva-900 uppercase tracking-wide text-xs">Total</td>
+                  <td className="py-2 px-3 text-right font-bold text-oliva-900 tabular-nums">{money(totalPago)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Preview del mensaje */}
+        {enviosMes.length > 0 && (
+          <div>
+            <div className="text-[10px] font-bold uppercase tracking-widest text-oliva-500 mb-1">Mensaje para el cadete</div>
+            <pre className="text-xs bg-oliva-50 border border-oliva-100 rounded-md p-3 whitespace-pre-wrap font-sans max-h-60 overflow-y-auto">{armarMensaje()}</pre>
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2 pt-2 border-t border-oliva-100">
+          <button type="button" className="btn-secondary" onClick={onCerrar}>Cerrar</button>
+          {enviosMes.length > 0 && (
+            <>
+              <button type="button" className="btn-secondary" onClick={copiar}>{copiado ? '✅ Copiado' : '📋 Copiar mensaje'}</button>
+              <button type="button" className="btn-primary" onClick={abrirWA}>🛵 Abrir WhatsApp</button>
+            </>
+          )}
+        </div>
       </div>
     </Dialog>
   )
