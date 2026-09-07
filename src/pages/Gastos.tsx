@@ -64,7 +64,7 @@ export function Gastos() {
     setCargando(true)
     const [g, s, c] = await Promise.all([
       supabase.from('gastos').select('*').order('fecha', { ascending: false }).order('id', { ascending: false }),
-      supabase.from('perfiles').select('id,nombre').eq('activo', true).order('nombre'),
+      supabase.from('perfiles').select('id,nombre').eq('activo', true).neq('rol', 'campo').order('nombre'),
       supabase.from('categorias_gasto').select('*').eq('activo', true).order('orden').order('nombre'),
     ])
     setGastos((g.data as Gasto[]) ?? [])

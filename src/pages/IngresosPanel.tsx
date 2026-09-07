@@ -52,7 +52,7 @@ export function IngresosPanel() {
     const [i, c, p, cb] = await Promise.all([
       supabase.from('ingresos').select('*').order('fecha', { ascending: false }).order('id', { ascending: false }),
       supabase.from('categorias_ingreso').select('*').eq('activo', true).order('orden'),
-      supabase.from('perfiles').select('id,nombre,cuenta_default_id').eq('activo', true).order('nombre'),
+      supabase.from('perfiles').select('id,nombre,cuenta_default_id').eq('activo', true).neq('rol', 'campo').order('nombre'),
       supabase.from('cuentas_bancarias').select('id,nombre,moneda').eq('activo', true).order('id'),
     ])
     setIngresos((i.data as Ingreso[]) ?? [])
