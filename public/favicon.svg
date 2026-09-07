@@ -1,12 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="12" fill="#829378"/>
-  <g fill="#ffffff" transform="translate(6,20)">
-    <ellipse cx="26" cy="24" rx="24" ry="3"/>
-    <path d="M 3 23 L 3 12 L 24 4 L 45 8 L 49 23 Z"/>
-    <g fill="#829378">
-      <rect x="9" y="14" width="4" height="9"/>
-      <rect x="16" y="14" width="4" height="9"/>
-      <path d="M 28 23 L 28 15 Q 36 11 44 15 L 44 23 Z"/>
+  <rect width="64" height="64" rx="10" fill="#faf7f2"/>
+  <g fill="#5A3E2A" transform="translate(6,18)">
+    <ellipse cx="26" cy="28" rx="26" ry="2.5"/>
+    <path d="M 2 27 L 2 15 L 8 12 L 8 7 L 30 4 L 42 10 L 46 27 Z"/>
+    <path d="M 28 4 L 33 2 L 33 6 L 28 7 Z"/>
+    <g fill="#faf7f2">
+      <rect x="6"  y="16" width="4" height="10"/>
+      <rect x="12" y="16" width="4" height="10"/>
+      <rect x="18" y="16" width="4" height="10"/>
     </g>
+    <path fill="#faf7f2" d="M 25 27 L 25 18 Q 25 14 31 14 Q 37 14 37 18 L 37 27 Z"/>
+    <rect x="2" y="14" width="42" height="1.5"/>
   </g>
 </svg>

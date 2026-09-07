@@ -1,25 +1,54 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <!-- Fondo verde salvia con corners redondeados (safe zone maskable) -->
-  <rect width="512" height="512" rx="96" fill="#829378"/>
-  <!-- Silueta estilizada del galpón: tejado inclinado + 2 ventanas + arco -->
-  <g fill="#ffffff" transform="translate(72,150)">
-    <!-- Base con pasto (elipse curvada) -->
-    <ellipse cx="184" cy="205" rx="176" ry="18"/>
-    <!-- Cuerpo del galpón: polígono con tejado inclinado -->
-    <path d="M 20 200 L 20 100 L 172 30 L 320 60 L 348 200 Z"/>
-    <!-- Recortes negativos (fondo verde asomando) -->
-    <g fill="#829378">
-      <!-- Ventana izquierda alta -->
-      <rect x="60" y="115" width="30" height="70"/>
-      <!-- Ventana centro -->
-      <rect x="112" y="115" width="30" height="70"/>
-      <!-- Arco (puerta grande a la derecha) -->
-      <path d="M 200 200 L 200 130 Q 258 90 316 130 L 316 200 Z"/>
-      <!-- Detalle del ángulo del tejado -->
-      <path d="M 172 45 L 200 30 L 200 55 Z"/>
+  <!-- Fondo blanco crema, corners redondeados (safe zone maskable) -->
+  <rect width="512" height="512" rx="96" fill="#faf7f2"/>
+
+  <!-- Caserío en marrón institucional #5A3E2A, centrado -->
+  <g fill="#5A3E2A" transform="translate(64,120)">
+
+    <!-- Base elíptica (suelo con perspectiva) -->
+    <ellipse cx="192" cy="252" rx="192" ry="20"/>
+
+    <!-- Cuerpo del caserío -->
+    <!-- Silueta principal: techo a dos aguas asimétrico + cuerpo trapezoidal -->
+    <path d="
+      M 10 240
+      L 10 130
+      L 60 105
+      L 60 65
+      L 240 40
+      L 340 88
+      L 374 240
+      Z
+    "/>
+
+    <!-- Pico central del techo (triángulo que sobresale) -->
+    <path d="M 226 40 L 260 20 L 260 55 L 226 60 Z"/>
+
+    <!-- Ventanas rectangulares altas (frente, en negativo=fondo) -->
+    <g fill="#faf7f2">
+      <rect x="34"  y="140" width="26" height="80" rx="1"/>
+      <rect x="80"  y="140" width="26" height="80" rx="1"/>
+      <rect x="126" y="140" width="26" height="80" rx="1"/>
     </g>
-    <!-- Pastito -->
-    <path d="M 40 195 L 30 175 L 35 175 L 40 190 L 45 175 L 50 175 Z"/>
-    <path d="M 330 195 L 322 175 L 327 175 L 332 190 L 337 175 L 342 175 Z"/>
+
+    <!-- Arco grande a la derecha (puerta abierta, negativo) -->
+    <path fill="#faf7f2" d="
+      M 200 240
+      L 200 155
+      Q 200 118 250 118
+      Q 300 118 300 155
+      L 300 240
+      Z
+    "/>
+
+    <!-- Franja horizontal del techo -->
+    <rect x="10" y="120" width="330" height="8"/>
+
+    <!-- Pastito a los costados -->
+    <g>
+      <path d="M 30 240 L 24 218 L 27 218 L 30 232 L 33 218 L 36 218 Z"/>
+      <path d="M 355 240 L 349 218 L 352 218 L 355 232 L 358 218 L 361 218 Z"/>
+      <path d="M 12 240 L 8 220 L 10 220 L 12 232 L 14 220 L 16 220 Z"/>
+    </g>
   </g>
 </svg>
