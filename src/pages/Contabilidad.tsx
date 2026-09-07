@@ -84,11 +84,15 @@ export function Contabilidad() {
 // ============================================================
 // Estado de resultados
 // ============================================================
+interface VentaMon { id: number; fecha: string; total: number; con_factura: boolean; ubicacion_id: number; cliente_id: number | null; moneda?: 'UYU' | 'USD' | null; cotizacion?: number | null }
+interface IngresoMan { id: number; fecha: string; monto: number; moneda: 'UYU' | 'USD'; categoria_id: number | null; socio_id: string | null }
+
 function EstadoResultados() {
   const hoy = new Date()
   const [mes, setMes] = useState<string>(String(hoy.getMonth() + 1).padStart(2, '0'))
   const [anio, setAnio] = useState<string>(String(hoy.getFullYear()))
-  const [ventas, setVentas] = useState<Venta[]>([])
+  const [ventas, setVentas] = useState<VentaMon[]>([])
+  const [ingresos, setIngresos] = useState<IngresoMan[]>([])
   const [gastos, setGastos] = useState<Gasto[]>([])
   const [cargando, setCargando] = useState(true)
 
@@ -99,20 +103,36 @@ function EstadoResultados() {
   useEffect(() => {
     setCargando(true)
     Promise.all([
-      supabase.from('ventas').select('id,fecha,total,con_factura,ubicacion_id,cliente_id').gte('fecha', desde).lte('fecha', hasta).neq('estado', 'cancelado').eq('promocion_comercial', false),
+      supabase.from('ventas').select('id,fecha,total,con_factura,ubicacion_id,cliente_id,moneda,cotizacion').gte('fecha', desde).lte('fecha', hasta).neq('estado', 'cancelado').eq('promocion_comercial', false),
       supabase.from('gastos').select('id,fecha,monto,moneda,descripcion,categoria,socio_id').gte('fecha', desde).lte('fecha', hasta).eq('es_adelanto', false),
-    ]).then(([v, g]) => {
-      setVentas((v.data as Venta[]) ?? [])
+      supabase.from('ingresos').select('id,fecha,monto,moneda,categoria_id,socio_id').gte('fecha', desde).lte('fecha', hasta),
+    ]).then(([v, g, i]) => {
+      setVentas((v.data as VentaMon[]) ?? [])
       setGastos((g.data as Gasto[]) ?? [])
+      setIngresos((i.data as IngresoMan[]) ?? [])
       setCargando(false)
     })
   }, [desde, hasta])
 
-  const totalVentas = ventas.reduce((s, v) => s + Number(v.total), 0)
-  const ventasConFactura = ventas.filter((v) => v.con_factura).reduce((s, v) => s + Number(v.total), 0)
+  // Los totales en BD (ventas.total) están en UYU. Si moneda=USD, el USD original = total/cotizacion.
+  const ventaEsUSD = (v: VentaMon) => (v.moneda ?? 'UYU') === 'USD' && !!v.cotizacion && Number(v.cotizacion) > 0
+  const ventaUSD = (v: VentaMon) => Number(v.total) / Number(v.cotizacion)
+
+  // Ingresos (ventas + ingresos manuales) por moneda
+  const ventasUYU = ventas.filter((v) => !ventaEsUSD(v)).reduce((s, v) => s + Number(v.total), 0)
+  const ventasUSD = ventas.filter((v) => ventaEsUSD(v)).reduce((s, v) => s + ventaUSD(v), 0)
+  const ingresosManUYU = ingresos.filter((i) => i.moneda === 'UYU').reduce((s, i) => s + Number(i.monto), 0)
+  const ingresosManUSD = ingresos.filter((i) => i.moneda === 'USD').reduce((s, i) => s + Number(i.monto), 0)
+  const totalIngresosUYU = ventasUYU + ingresosManUYU
+  const totalIngresosUSD = ventasUSD + ingresosManUSD
+
+  const ventasConFactura = ventas.reduce((s, v) => s + (v.con_factura ? Number(v.total) : 0), 0)
+
+  // Egresos por moneda
   const gastosUYU = gastos.filter((g) => g.moneda === 'UYU').reduce((s, g) => s + Number(g.monto), 0)
   const gastosUSD = gastos.filter((g) => g.moneda === 'USD').reduce((s, g) => s + Number(g.monto), 0)
-  const margenUYU = totalVentas - gastosUYU
+  const margenUYU = totalIngresosUYU - gastosUYU
+  const margenUSD = totalIngresosUSD - gastosUSD
 
   // Egresos por categoría (UYU)
   const porCat = new Map<string, number>()
@@ -145,27 +165,58 @@ function EstadoResultados() {
       {cargando ? (
         <div className="card p-6 text-sm text-oliva-700">Cargando…</div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="card p-5 space-y-3">
-            <div className="text-xs uppercase tracking-wide text-oliva-600">Ingresos (ventas)</div>
-            <div className="text-3xl font-semibold text-oliva-900 tabular-nums">{money(totalVentas)}</div>
-            <div className="text-xs text-oliva-600">
-              {ventas.length} ventas · {money(ventasConFactura)} con factura ({totalVentas > 0 ? Math.round(ventasConFactura / totalVentas * 100) : 0}%)
+        <>
+          {/* Resumen total del mes en pesos */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="card p-5 space-y-2">
+              <div className="text-xs uppercase tracking-wide text-oliva-600">Ingresos del mes (pesos)</div>
+              <div className="text-3xl font-semibold text-oliva-900 tabular-nums">{money(totalIngresosUYU, 'UYU')}</div>
+              <div className="text-xs text-oliva-600 space-y-0.5">
+                <div>Ventas: <b className="tabular-nums">{money(ventasUYU, 'UYU')}</b> ({ventas.filter((v) => !ventaEsUSD(v)).length} vta.)</div>
+                <div>Otros ingresos: <b className="tabular-nums">{money(ingresosManUYU, 'UYU')}</b></div>
+                <div className="text-oliva-500">{money(ventasConFactura, 'UYU')} con factura</div>
+              </div>
+            </div>
+            <div className="card p-5 space-y-2">
+              <div className="text-xs uppercase tracking-wide text-oliva-600">Egresos del mes (pesos)</div>
+              <div className="text-3xl font-semibold text-oliva-900 tabular-nums">{money(gastosUYU, 'UYU')}</div>
+              <div className="text-xs text-oliva-600">
+                {gastos.filter((g) => g.moneda === 'UYU').length} gasto{gastos.filter((g) => g.moneda === 'UYU').length === 1 ? '' : 's'} — todos los usuarios
+              </div>
+            </div>
+            <div className={`card p-5 space-y-2 ${margenUYU >= 0 ? 'bg-oliva-50/60' : 'bg-red-50 border-red-200'}`}>
+              <div className="text-xs uppercase tracking-wide text-oliva-600">Margen del mes (pesos)</div>
+              <div className={`text-3xl font-semibold tabular-nums ${margenUYU >= 0 ? 'text-oliva-900' : 'text-red-700'}`}>{money(margenUYU, 'UYU')}</div>
+              <div className="text-xs text-oliva-600">Ingresos − Egresos</div>
             </div>
           </div>
-          <div className="card p-5 space-y-3">
-            <div className="text-xs uppercase tracking-wide text-oliva-600">Egresos (gastos)</div>
-            <div className="text-3xl font-semibold text-oliva-900 tabular-nums">{money(gastosUYU)}</div>
-            <div className="text-xs text-oliva-600">
-              {gastos.length} gastos · {gastosUSD > 0 ? `+ U$S ${gastosUSD.toFixed(2)}` : ''}
+
+          {/* Resumen total del mes en dólares (solo si hay movimiento) */}
+          {(totalIngresosUSD > 0 || gastosUSD > 0) && (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <div className="card p-5 space-y-2">
+                <div className="text-xs uppercase tracking-wide text-oliva-600">Ingresos del mes (dólares)</div>
+                <div className="text-3xl font-semibold text-oliva-900 tabular-nums">{money(totalIngresosUSD, 'USD')}</div>
+                <div className="text-xs text-oliva-600 space-y-0.5">
+                  <div>Ventas: <b className="tabular-nums">{money(ventasUSD, 'USD')}</b> ({ventas.filter((v) => ventaEsUSD(v)).length} vta.)</div>
+                  <div>Otros ingresos: <b className="tabular-nums">{money(ingresosManUSD, 'USD')}</b></div>
+                </div>
+              </div>
+              <div className="card p-5 space-y-2">
+                <div className="text-xs uppercase tracking-wide text-oliva-600">Egresos del mes (dólares)</div>
+                <div className="text-3xl font-semibold text-oliva-900 tabular-nums">{money(gastosUSD, 'USD')}</div>
+                <div className="text-xs text-oliva-600">
+                  {gastos.filter((g) => g.moneda === 'USD').length} gasto{gastos.filter((g) => g.moneda === 'USD').length === 1 ? '' : 's'}
+                </div>
+              </div>
+              <div className={`card p-5 space-y-2 ${margenUSD >= 0 ? 'bg-oliva-50/60' : 'bg-red-50 border-red-200'}`}>
+                <div className="text-xs uppercase tracking-wide text-oliva-600">Margen del mes (dólares)</div>
+                <div className={`text-3xl font-semibold tabular-nums ${margenUSD >= 0 ? 'text-oliva-900' : 'text-red-700'}`}>{money(margenUSD, 'USD')}</div>
+                <div className="text-xs text-oliva-600">Ingresos − Egresos</div>
+              </div>
             </div>
-          </div>
-          <div className={`card p-5 space-y-3 ${margenUYU >= 0 ? 'bg-oliva-50/60' : 'bg-red-50 border-red-200'}`}>
-            <div className="text-xs uppercase tracking-wide text-oliva-600">Margen UYU</div>
-            <div className={`text-3xl font-semibold tabular-nums ${margenUYU >= 0 ? 'text-oliva-900' : 'text-red-700'}`}>{money(margenUYU)}</div>
-            <div className="text-xs text-oliva-600">Ingresos − Egresos (solo UYU)</div>
-          </div>
-        </div>
+          )}
+        </>
       )}
 
       <div className="card p-4">
