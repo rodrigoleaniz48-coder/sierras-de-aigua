@@ -11,9 +11,9 @@
   "lang": "es-UY",
   "icons": [
     {
-      "src": "/sierras-de-aigua/icon-app.webp",
-      "sizes": "1920x1920",
-      "type": "image/webp",
+      "src": "/sierras-de-aigua/icon-app.png",
+      "sizes": "5333x5333",
+      "type": "image/png",
       "purpose": "any"
     },
     {

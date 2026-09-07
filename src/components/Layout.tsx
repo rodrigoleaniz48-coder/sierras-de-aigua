@@ -82,7 +82,7 @@ export function Layout() {
             <path d="M4 6h16M4 12h16M4 18h16" strokeLinecap="round"/>
           </svg>
         </button>
-        <img src={import.meta.env.BASE_URL + 'logo.webp'} alt="Sierras de Aiguá" className="h-12 w-auto" />
+        <img src={import.meta.env.BASE_URL + 'logo.png'} alt="Sierras de Aiguá" className="h-12 w-auto" />
         <div className="flex items-center gap-3">
           <button className="text-xs font-semibold text-oliva-700 underline" onClick={() => setCambiarPass(true)}>Clave</button>
           <button className="text-xs font-semibold text-oliva-700 underline" onClick={signOut}>Salir</button>
@@ -93,14 +93,12 @@ export function Layout() {
       <aside
         className={`${open ? 'block' : 'hidden'} lg:flex lg:flex-col w-full lg:w-[232px] shrink-0 border-r border-oliva-100 bg-white`}
       >
-        <div className="hidden lg:flex items-center gap-2.5 px-4 py-4 border-b border-oliva-100">
-          <div className="h-8 w-8 rounded-md bg-oliva-800 text-oliva-50 flex items-center justify-center font-extrabold text-[13px]">
-            SA
-          </div>
-          <div className="leading-tight">
-            <div className="text-[13px] font-bold text-oliva-900">Sierras de Aiguá</div>
-            <div className="text-[10px] text-oliva-500 tracking-wide">Gestión interna</div>
-          </div>
+        <div className="hidden lg:flex items-center justify-center px-4 py-4 border-b border-oliva-100">
+          <img
+            src={import.meta.env.BASE_URL + 'logo.png'}
+            alt="Sierras de Aiguá · Producción familiar"
+            className="h-20 w-auto"
+          />
         </div>
 
         <nav className="p-3 space-y-4 flex-1">
