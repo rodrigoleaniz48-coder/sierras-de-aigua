@@ -1,5 +1,6 @@
 // Paleta por producto — tonos claros para diferenciar variedades en Stock.
-// Verde = Blend suave · Rojo = Blend intenso · Azul = Picual · Amarillo = resto.
+// Verde = Blend suave · Rojo = Blend intenso · Azul = Picual ·
+// Amarillo = Premiado / Sin filtrar · Violeta = otros productos (no aceite).
 
 export type ColorProducto = {
   card: string   // fondo suave + borde para tarjetas/rows
@@ -33,6 +34,12 @@ const paleta: Record<string, ColorProducto> = {
     chip: 'bg-amber-100 text-amber-800',
     dot:  'bg-amber-400',
   },
+  violeta: {
+    card: 'bg-purple-50 border-purple-200',
+    fill: 'bg-gradient-to-t from-purple-400 to-purple-300',
+    chip: 'bg-purple-100 text-purple-800',
+    dot:  'bg-purple-400',
+  },
   gris: {
     card: 'bg-oliva-50 border-oliva-200',
     fill: 'bg-gradient-to-t from-oliva-300 to-oliva-200',
@@ -43,13 +50,20 @@ const paleta: Record<string, ColorProducto> = {
 
 /**
  * Devuelve el color asociado a un producto según su nombre.
- * Vacío / null => gris.
+ * - Blend suave / intenso → verde / rojo
+ * - Picual → azul
+ * - Premiado / sin filtrar (variedades de aceite) → amarillo
+ * - Cualquier otro producto que no sea aceite → violeta
+ * - Vacío / null → gris
  */
 export function colorProducto(nombre?: string | null): ColorProducto {
   if (!nombre) return paleta.gris
   const n = nombre.toLowerCase()
-  if (n.includes('suave'))   return paleta.verde
-  if (n.includes('intenso')) return paleta.rojo
-  if (n.includes('picual'))  return paleta.azul
-  return paleta.amarillo
+  if (n.includes('suave'))     return paleta.verde
+  if (n.includes('intenso'))   return paleta.rojo
+  if (n.includes('picual'))    return paleta.azul
+  if (n.includes('premiado'))  return paleta.amarillo
+  if (n.includes('sin filtrar') || n.includes('sin_filtrar')) return paleta.amarillo
+  if (n.includes('aceite'))    return paleta.amarillo // cualquier otro aceite (Elaia, blend genérico, etc.)
+  return paleta.violeta // productos que NO son aceite (aceituna, miel, jabón, vinagre, etc.)
 }
