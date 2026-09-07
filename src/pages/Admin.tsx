@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { Dialog } from '../components/Dialog'
 import { money } from '../lib/format'
+import { descargarBackupExcel } from '../lib/backupExcel'
 
 interface Producto {
   id: number
@@ -51,6 +52,22 @@ export function Admin() {
   const [nuevaPresProd, setNuevaPresProd] = useState<number | null>(null)
   const [editandoPres, setEditandoPres] = useState<Presentacion | null>(null)
   const [editorListas, setEditorListas] = useState(false)
+  const [descargando, setDescargando] = useState(false)
+
+  useEffect(() => {
+    if (!descargando) return
+    let cancel = false
+    ;(async () => {
+      try {
+        await descargarBackupExcel()
+      } catch (e) {
+        alert('Error generando backup: ' + (e as Error).message)
+      } finally {
+        if (!cancel) setDescargando(false)
+      }
+    })()
+    return () => { cancel = true }
+  }, [descargando])
 
   async function cargar() {
     setCargando(true)
@@ -144,7 +161,12 @@ export function Admin() {
         </div>
         <div className="flex gap-2">
           {puedeEditarMargenes && (
-            <button className="btn-secondary" onClick={() => setEditorListas(true)}>💰 Listas de precios</button>
+            <>
+              <button className="btn-secondary" onClick={() => setDescargando(true)} disabled={descargando}>
+                {descargando ? '⏳ Generando…' : '📥 Descargar backup'}
+              </button>
+              <button className="btn-secondary" onClick={() => setEditorListas(true)}>💰 Listas de precios</button>
+            </>
           )}
           <button className="btn-primary" onClick={() => setNuevoProd(true)}>+ Nuevo producto</button>
         </div>

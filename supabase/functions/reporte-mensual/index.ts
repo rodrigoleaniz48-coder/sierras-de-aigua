@@ -6,6 +6,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { PDFDocument, StandardFonts, rgb, type PDFPage, type PDFFont } from 'https://esm.sh/pdf-lib@1.17.1'
+import ExcelJS from 'https://esm.sh/exceljs@4.4.0'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -219,6 +220,11 @@ Deno.serve(async (req) => {
     const pdfBase64 = bytesToBase64(pdfBytes)
     const pdfName = `reporte-${y0}-${String(m0).padStart(2, '0')}.pdf`
 
+    // === Backup Excel adjunto ===
+    const xlsxBytes = await generarBackupXlsx(supa)
+    const xlsxBase64 = bytesToBase64(xlsxBytes)
+    const xlsxName = `backup-sierras-${y0}-${String(m0).padStart(2, '0')}.xlsx`
+
     // === Envío ===
     const toParam = url.searchParams.get('to')
     // Ojo: mientras no se verifique un dominio propio en Resend, sólo se puede
@@ -238,7 +244,10 @@ Deno.serve(async (req) => {
         to,
         subject,
         html,
-        attachments: [{ filename: pdfName, content: pdfBase64 }],
+        attachments: [
+          { filename: pdfName, content: pdfBase64 },
+          { filename: xlsxName, content: xlsxBase64 },
+        ],
       }),
     })
     const bodyResp = await resp.text()
@@ -248,7 +257,7 @@ Deno.serve(async (req) => {
       ok: true,
       periodo: `${desdeStr} .. ${hastaStr}`,
       enviado_a: to,
-      adjunto: pdfName,
+      adjuntos: [pdfName, xlsxName],
       subject,
       totales: {
         ventas_uyu: Math.round(totalUYU),
@@ -688,4 +697,223 @@ async function renderPDF(d: Omit<RenderData, 'APP_URL'>): Promise<Uint8Array> {
   texto('Reporte generado automaticamente. Pesos y dolares se muestran por separado para conciliacion.', { size: 8, color: gris })
 
   return await doc.save()
+}
+
+// ================== BACKUP EXCEL ==================
+
+// deno-lint-ignore no-explicit-any
+async function generarBackupXlsx(supa: any): Promise<Uint8Array> {
+  const wb = new ExcelJS.Workbook()
+  wb.creator = 'Sierras de Aigua'
+  wb.created = new Date()
+
+  function addSheet(nombre: string, rows: Record<string, unknown>[], cols: { header: string; key: string; width?: number }[]) {
+    const ws = wb.addWorksheet(nombre.slice(0, 30))
+    ws.columns = cols.map((c) => ({ header: c.header, key: c.key, width: c.width ?? 15 }))
+    const head = ws.getRow(1)
+    head.font = { bold: true, color: { argb: 'FFFFFFFF' } }
+    head.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2F3D2A' } }
+    head.height = 22
+    head.alignment = { vertical: 'middle', horizontal: 'left' }
+    for (const r of rows) ws.addRow(r)
+    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: cols.length } }
+    ws.views = [{ state: 'frozen', ySplit: 1 }]
+  }
+
+  const [perfR, ubicR, cbR, cliR, catGR, presR, prodR] = await Promise.all([
+    supa.from('perfiles').select('id,nombre'),
+    supa.from('ubicaciones').select('id,nombre'),
+    supa.from('cuentas_bancarias').select('id,nombre'),
+    supa.from('clientes').select('id,nombre'),
+    supa.from('categorias_gasto').select('slug,nombre'),
+    supa.from('presentaciones').select('id,nombre,producto_id'),
+    supa.from('productos').select('id,nombre'),
+  ])
+  // deno-lint-ignore no-explicit-any
+  const perfN = new Map((perfR.data ?? []).map((x: any) => [x.id, x.nombre]))
+  // deno-lint-ignore no-explicit-any
+  const ubicN = new Map((ubicR.data ?? []).map((x: any) => [x.id, x.nombre]))
+  // deno-lint-ignore no-explicit-any
+  const cbN = new Map((cbR.data ?? []).map((x: any) => [x.id, x.nombre]))
+  // deno-lint-ignore no-explicit-any
+  const cliN = new Map((cliR.data ?? []).map((x: any) => [x.id, x.nombre]))
+  // deno-lint-ignore no-explicit-any
+  const catN = new Map((catGR.data ?? []).map((x: any) => [x.slug, x.nombre]))
+  // deno-lint-ignore no-explicit-any
+  const presMap = new Map((presR.data ?? []).map((x: any) => [x.id, x]))
+  // deno-lint-ignore no-explicit-any
+  const prodN = new Map((prodR.data ?? []).map((x: any) => [x.id, x.nombre]))
+
+  // 1) Ventas
+  const { data: ventas } = await supa.from('ventas').select('*').order('fecha', { ascending: false }).order('id', { ascending: false })
+  addSheet('Ventas', (ventas ?? []).map((v: Record<string, unknown>) => ({
+    id: v.id, fecha: v.fecha,
+    cliente: v.cliente_id ? cliN.get(v.cliente_id as number) ?? '' : '',
+    socio: perfN.get(v.socio_id as string) ?? '',
+    ubicacion: ubicN.get(v.ubicacion_id as number) ?? '',
+    canal: v.canal, forma_pago: v.forma_pago, estado: v.estado,
+    con_factura: v.con_factura, envio: v.envio, entregado: v.entregado, cobrado: v.cobrado,
+    moneda: v.moneda, cotizacion: v.cotizacion,
+    subtotal: Number(v.subtotal), iva: Number(v.iva), total: Number(v.total),
+    costo_envio: Number(v.costo_envio),
+    notas: v.notas,
+    cuenta_destino: v.cuenta_id ? cbN.get(v.cuenta_id as number) ?? '' : '',
+    creado_en: v.creado_en,
+  })), [
+    { header: 'ID', key: 'id', width: 6 },
+    { header: 'Fecha', key: 'fecha', width: 12 },
+    { header: 'Cliente', key: 'cliente', width: 30 },
+    { header: 'Socio', key: 'socio', width: 12 },
+    { header: 'Ubicacion', key: 'ubicacion', width: 14 },
+    { header: 'Canal', key: 'canal', width: 12 },
+    { header: 'Forma pago', key: 'forma_pago', width: 14 },
+    { header: 'Estado', key: 'estado', width: 12 },
+    { header: 'Con factura', key: 'con_factura', width: 12 },
+    { header: 'Envio', key: 'envio', width: 8 },
+    { header: 'Entregado', key: 'entregado', width: 10 },
+    { header: 'Cobrado', key: 'cobrado', width: 10 },
+    { header: 'Moneda', key: 'moneda', width: 8 },
+    { header: 'Cotizacion', key: 'cotizacion', width: 10 },
+    { header: 'Subtotal UYU', key: 'subtotal', width: 12 },
+    { header: 'IVA UYU', key: 'iva', width: 10 },
+    { header: 'Total UYU', key: 'total', width: 12 },
+    { header: 'Costo envio', key: 'costo_envio', width: 12 },
+    { header: 'Notas', key: 'notas', width: 30 },
+    { header: 'Cuenta destino', key: 'cuenta_destino', width: 20 },
+    { header: 'Creado', key: 'creado_en', width: 20 },
+  ])
+
+  // 2) Gastos
+  const { data: gastos2 } = await supa.from('gastos').select('*').order('fecha', { ascending: false }).order('id', { ascending: false })
+  addSheet('Gastos', (gastos2 ?? []).map((g: Record<string, unknown>) => ({
+    id: g.id, fecha: g.fecha,
+    socio: perfN.get(g.socio_id as string) ?? '',
+    categoria: catN.get(g.categoria as string) ?? g.categoria,
+    monto: Number(g.monto), moneda: g.moneda, metodo_pago: g.metodo_pago,
+    cuenta_origen: g.cuenta_id ? cbN.get(g.cuenta_id as number) ?? '' : '',
+    reembolsable: g.reembolsable, reembolsado: g.reembolsado, es_adelanto: g.es_adelanto,
+    descripcion: g.descripcion,
+    creado_en: g.creado_en,
+  })), [
+    { header: 'ID', key: 'id', width: 6 },
+    { header: 'Fecha', key: 'fecha', width: 12 },
+    { header: 'Socio', key: 'socio', width: 12 },
+    { header: 'Categoria', key: 'categoria', width: 22 },
+    { header: 'Monto', key: 'monto', width: 12 },
+    { header: 'Moneda', key: 'moneda', width: 8 },
+    { header: 'Metodo pago', key: 'metodo_pago', width: 14 },
+    { header: 'Cuenta origen', key: 'cuenta_origen', width: 20 },
+    { header: 'Reembolsable', key: 'reembolsable', width: 12 },
+    { header: 'Reembolsado', key: 'reembolsado', width: 12 },
+    { header: 'Adelanto', key: 'es_adelanto', width: 10 },
+    { header: 'Descripcion', key: 'descripcion', width: 40 },
+    { header: 'Creado', key: 'creado_en', width: 20 },
+  ])
+
+  // 3) Clientes
+  const { data: clientesAll } = await supa.from('clientes').select('*').order('nombre')
+  addSheet('Clientes', (clientesAll ?? []).map((c: Record<string, unknown>) => ({
+    id: c.id, nombre: c.nombre, tipo: c.tipo,
+    telefono: c.telefono, whatsapp: c.whatsapp, email: c.email,
+    direccion: c.direccion, localidad: c.localidad, rut: c.rut,
+    condiciones_pago: c.condiciones_pago,
+    socio_asignado: c.socio_asignado ? perfN.get(c.socio_asignado as string) ?? '' : '',
+    notas: c.notas, origen: c.origen, actualizado_en: c.actualizado_en,
+  })), [
+    { header: 'ID', key: 'id', width: 6 },
+    { header: 'Nombre', key: 'nombre', width: 30 },
+    { header: 'Tipo', key: 'tipo', width: 14 },
+    { header: 'Telefono', key: 'telefono', width: 14 },
+    { header: 'WhatsApp', key: 'whatsapp', width: 14 },
+    { header: 'Email', key: 'email', width: 25 },
+    { header: 'Direccion', key: 'direccion', width: 40 },
+    { header: 'Localidad', key: 'localidad', width: 15 },
+    { header: 'RUT', key: 'rut', width: 15 },
+    { header: 'Cond. pago', key: 'condiciones_pago', width: 15 },
+    { header: 'Socio asignado', key: 'socio_asignado', width: 15 },
+    { header: 'Notas', key: 'notas', width: 30 },
+    { header: 'Origen', key: 'origen', width: 12 },
+    { header: 'Actualizado', key: 'actualizado_en', width: 20 },
+  ])
+
+  // 4) Tareas
+  const { data: tareasAll } = await supa.from('tareas').select('*').order('fecha_creada', { ascending: false })
+  addSheet('Tareas', (tareasAll ?? []).map((t: Record<string, unknown>) => ({
+    id: t.id, titulo: t.titulo, descripcion: t.descripcion,
+    prioridad: t.prioridad, estado: t.estado, tipo: t.tipo, jornales: Number(t.jornales ?? 0),
+    asignado: perfN.get(t.asignado_a as string) ?? '',
+    creado_por: perfN.get(t.creado_por as string) ?? '',
+    fecha_creada: t.fecha_creada, fecha_vence: t.fecha_vence,
+    fecha_iniciada: t.fecha_iniciada, fecha_completada: t.fecha_completada,
+    notas: t.notas,
+  })), [
+    { header: 'ID', key: 'id', width: 6 },
+    { header: 'Titulo', key: 'titulo', width: 40 },
+    { header: 'Descripcion', key: 'descripcion', width: 30 },
+    { header: 'Prioridad', key: 'prioridad', width: 10 },
+    { header: 'Estado', key: 'estado', width: 12 },
+    { header: 'Tipo', key: 'tipo', width: 10 },
+    { header: 'Jornales', key: 'jornales', width: 10 },
+    { header: 'Asignado', key: 'asignado', width: 12 },
+    { header: 'Creado por', key: 'creado_por', width: 12 },
+    { header: 'Creada', key: 'fecha_creada', width: 20 },
+    { header: 'Vence', key: 'fecha_vence', width: 12 },
+    { header: 'Iniciada', key: 'fecha_iniciada', width: 20 },
+    { header: 'Completada', key: 'fecha_completada', width: 20 },
+    { header: 'Notas', key: 'notas', width: 30 },
+  ])
+
+  // 5) Movimientos bancarios
+  const { data: movsAll } = await supa.from('movimientos_bancarios').select('*').order('fecha', { ascending: false })
+  addSheet('Movimientos bancarios', (movsAll ?? []).map((m: Record<string, unknown>) => ({
+    id: m.id, fecha: m.fecha,
+    cuenta: cbN.get(m.cuenta_id as number) ?? '',
+    descripcion: m.descripcion,
+    debito: Number(m.debito), credito: Number(m.credito), monto: Number(m.monto),
+    saldo: m.saldo !== null ? Number(m.saldo) : null,
+    conc_gasto: m.conciliado_gasto_id, conc_venta: m.conciliado_venta_id,
+    categoria_manual: m.categoria_manual,
+    transf_interna: m.es_transferencia_interna,
+    nota: m.nota,
+  })), [
+    { header: 'ID', key: 'id', width: 6 },
+    { header: 'Fecha', key: 'fecha', width: 12 },
+    { header: 'Cuenta', key: 'cuenta', width: 20 },
+    { header: 'Descripcion', key: 'descripcion', width: 40 },
+    { header: 'Debito', key: 'debito', width: 12 },
+    { header: 'Credito', key: 'credito', width: 12 },
+    { header: 'Monto', key: 'monto', width: 12 },
+    { header: 'Saldo', key: 'saldo', width: 12 },
+    { header: 'Conc. gasto', key: 'conc_gasto', width: 12 },
+    { header: 'Conc. venta', key: 'conc_venta', width: 12 },
+    { header: 'Categoria manual', key: 'categoria_manual', width: 20 },
+    { header: 'Transf. interna', key: 'transf_interna', width: 14 },
+    { header: 'Nota', key: 'nota', width: 30 },
+  ])
+
+  // 6) Stock actual
+  const { data: stockAll } = await supa.from('stock').select('*')
+  addSheet('Stock actual', (stockAll ?? []).map((s: Record<string, unknown>) => {
+    // deno-lint-ignore no-explicit-any
+    const p = presMap.get(s.presentacion_id as number) as any
+    return {
+      id: s.id,
+      producto: p ? prodN.get(p.producto_id) ?? '' : '',
+      presentacion: p?.nombre ?? '',
+      ubicacion: ubicN.get(s.ubicacion_id as number) ?? '',
+      unidades: Number(s.unidades),
+      actualizado_en: s.actualizado_en,
+    }
+  // deno-lint-ignore no-explicit-any
+  }).sort((a: any, b: any) => (a.producto || '').localeCompare(b.producto || '') || (a.presentacion || '').localeCompare(b.presentacion || '')), [
+    { header: 'ID', key: 'id', width: 6 },
+    { header: 'Producto', key: 'producto', width: 25 },
+    { header: 'Presentacion', key: 'presentacion', width: 18 },
+    { header: 'Ubicacion', key: 'ubicacion', width: 15 },
+    { header: 'Unidades', key: 'unidades', width: 10 },
+    { header: 'Actualizado', key: 'actualizado_en', width: 20 },
+  ])
+
+  const buf = await wb.xlsx.writeBuffer()
+  return new Uint8Array(buf as ArrayBuffer)
 }
