@@ -12,14 +12,8 @@
   "icons": [
     {
       "src": "/sierras-de-aigua/icon-app.png",
-      "sizes": "5333x5333",
+      "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "/sierras-de-aigua/icon-app.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
       "purpose": "any maskable"
     }
   ]
