@@ -392,6 +392,13 @@ function PresentacionDialog({ abierto, productoId, editar, onCerrar, onOk }: {
     setCotizacionFuente(`BCU ${c.fecha}`)
   }
 
+  // Al abrir en USD (default para nueva presentación), auto-traer la cotización BCU
+  useEffect(() => {
+    if (!abierto || editar || monedaCosto !== 'USD' || Number(cotizacion) > 0 || cargandoBcu) return
+    traerCotizacion()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [abierto, editar, monedaCosto])
+
   useEffect(() => {
     if (!abierto) return
     if (editar) {
@@ -464,20 +471,19 @@ function PresentacionDialog({ abierto, productoId, editar, onCerrar, onOk }: {
               <input className="input tabular-nums flex-1" type="number" min="0" step="0.1" value={costoEnv} onChange={(e) => setCostoEnv(e.target.value)} placeholder={monedaCosto === 'USD' ? 'ej. 4.5' : 'ej. 180'} />
             </div>
             {monedaCosto === 'USD' && (
-              <div className="flex gap-2 items-center mt-2">
-                <input
-                  className="input tabular-nums w-24 text-xs"
-                  type="number" min="0" step="0.01"
-                  placeholder="cotiz."
-                  value={cotizacion}
-                  onChange={(e) => { setCotizacion(e.target.value); setCotizacionFuente('manual') }}
-                />
-                <button type="button" className="text-xs text-oliva-700 hover:text-oliva-900 underline" onClick={traerCotizacion} disabled={cargandoBcu}>
-                  {cargandoBcu ? '⏳ trayendo…' : '↻ traer del BCU'}
-                </button>
-                {cotizacionFuente && <span className="text-[10px] text-oliva-500">{cotizacionFuente}</span>}
-                {Number(cotizacion) > 0 && Number(costoEnv) > 0 && (
-                  <span className="text-[11px] text-oliva-600 ml-auto">≈ ${(Number(costoEnv) * Number(cotizacion)).toLocaleString('es-UY', { maximumFractionDigits: 0 })} UYU al guardar</span>
+              <div className="flex gap-2 items-center mt-2 text-[11px] text-oliva-600 flex-wrap">
+                {cargandoBcu ? (
+                  <span>⏳ trayendo cotización del BCU…</span>
+                ) : Number(cotizacion) > 0 ? (
+                  <>
+                    <span>Cotización {cotizacionFuente || 'automática'}: <b>$ {Number(cotizacion).toLocaleString('es-UY', { maximumFractionDigits: 2 })}</b></span>
+                    <button type="button" className="text-oliva-500 hover:text-oliva-800 underline" onClick={traerCotizacion}>↻ actualizar</button>
+                    {Number(costoEnv) > 0 && (
+                      <span className="ml-auto">≈ <b>${(Number(costoEnv) * Number(cotizacion)).toLocaleString('es-UY', { maximumFractionDigits: 0 })} UYU</b></span>
+                    )}
+                  </>
+                ) : (
+                  <button type="button" className="text-oliva-700 hover:text-oliva-900 underline" onClick={traerCotizacion}>traer cotización del BCU</button>
                 )}
               </div>
             )}
