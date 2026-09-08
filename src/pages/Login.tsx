@@ -31,7 +31,7 @@ export function Login() {
     <div className="min-h-screen grid place-items-center bg-gradient-to-br from-oliva-50 via-white to-tierra-100 p-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-6">
-          <img src={import.meta.env.BASE_URL + 'logo.webp'} alt="Sierras de Aiguá" className="mx-auto h-72 sm:h-96 w-auto" />
+          <img src={import.meta.env.BASE_URL + 'logo.png'} alt="Sierras de Aiguá" className="mx-auto h-64 sm:h-80 w-auto" />
           <p className="mt-2 text-sm text-oliva-700">Gestión interna</p>
         </div>
 
