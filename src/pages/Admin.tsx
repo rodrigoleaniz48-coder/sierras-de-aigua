@@ -21,6 +21,8 @@ interface Presentacion {
   unidad: string
   precio_minorista: number
   precio_mayorista: number
+  precio_minorista_usd: number | null
+  precio_mayorista_usd: number | null
   iva_pct: number
   stock_minimo: number
   activo: boolean
@@ -161,7 +163,10 @@ export function Admin() {
     const costoEnv = costoEnvasadoTotal(pr)
     const costoAceite = esAceite && litros > 0 ? litros * Number(costoAceiteUsd) * cotBcu : 0
     const costoTotal = costoEnv + costoAceite
-    const precioMin = Number(pr.precio_minorista || 0)
+    // Precio minorista: si tiene USD, convertir con BCU. Sino usar UYU tal cual.
+    const precioMin = (pr.precio_minorista_usd !== null && pr.precio_minorista_usd !== undefined && Number(pr.precio_minorista_usd) > 0)
+      ? Number(pr.precio_minorista_usd) * cotBcu
+      : Number(pr.precio_minorista || 0)
     const precioDistUyu = precioDist.get(pr.id) ?? 0
     const margenMinPct = precioMin > 0 ? ((precioMin - costoTotal) / precioMin) * 100 : 0
     const margenDistPct = precioDistUyu > 0 ? ((precioDistUyu - costoTotal) / precioDistUyu) * 100 : 0
@@ -390,6 +395,8 @@ function PresentacionDialog({ abierto, productoId, editar, onCerrar, onOk }: {
   const [unidad, setUnidad] = useState<string>('botella')
   const [precioMin, setPrecioMin] = useState<string>('0')
   const [precioMay, setPrecioMay] = useState<string>('0')
+  const [monedaPrecioMin, setMonedaPrecioMin] = useState<'UYU' | 'USD'>('UYU')
+  const [monedaPrecioMay, setMonedaPrecioMay] = useState<'UYU' | 'USD'>('UYU')
   const [ivaPct, setIvaPct] = useState<string>('10')
   const [stockMin, setStockMin] = useState<string>('0')
   const [costoEnv, setCostoEnv] = useState<string>('0')
@@ -422,7 +429,16 @@ function PresentacionDialog({ abierto, productoId, editar, onCerrar, onOk }: {
     if (!abierto) return
     if (editar) {
       setNombre(editar.nombre); setVolumenMl(editar.volumen_ml?.toString() ?? ''); setUnidad(editar.unidad)
-      setPrecioMin(String(editar.precio_minorista)); setPrecioMay(String(editar.precio_mayorista))
+      if (editar.precio_minorista_usd !== null && editar.precio_minorista_usd !== undefined) {
+        setPrecioMin(String(editar.precio_minorista_usd)); setMonedaPrecioMin('USD')
+      } else {
+        setPrecioMin(String(editar.precio_minorista)); setMonedaPrecioMin('UYU')
+      }
+      if (editar.precio_mayorista_usd !== null && editar.precio_mayorista_usd !== undefined) {
+        setPrecioMay(String(editar.precio_mayorista_usd)); setMonedaPrecioMay('USD')
+      } else {
+        setPrecioMay(String(editar.precio_mayorista)); setMonedaPrecioMay('UYU')
+      }
       setIvaPct(String(editar.iva_pct)); setStockMin(String(editar.stock_minimo))
       // Cargar según cuál moneda tenga guardada la presentación
       if (editar.costo_envasado_usd !== null && editar.costo_envasado_usd !== undefined) {
@@ -437,6 +453,7 @@ function PresentacionDialog({ abierto, productoId, editar, onCerrar, onOk }: {
     } else {
       setNombre(''); setVolumenMl(''); setUnidad('botella')
       setPrecioMin('0'); setPrecioMay('0'); setIvaPct('10'); setStockMin('0'); setCostoEnv('0'); setActivo(true)
+      setMonedaPrecioMin('UYU'); setMonedaPrecioMay('UYU')
       setMonedaCosto('USD'); setCotizacion(''); setCotizacionFuente('')
     }
     setError(null)
@@ -453,8 +470,10 @@ function PresentacionDialog({ abierto, productoId, editar, onCerrar, onOk }: {
       nombre: nombre.trim(),
       volumen_ml: volumenMl ? Number(volumenMl) : null,
       unidad,
-      precio_minorista: Number(precioMin) || 0,
-      precio_mayorista: Number(precioMay) || 0,
+      precio_minorista: monedaPrecioMin === 'UYU' ? (Number(precioMin) || 0) : 0,
+      precio_minorista_usd: monedaPrecioMin === 'USD' ? (Number(precioMin) || 0) : null,
+      precio_mayorista: monedaPrecioMay === 'UYU' ? (Number(precioMay) || 0) : 0,
+      precio_mayorista_usd: monedaPrecioMay === 'USD' ? (Number(precioMay) || 0) : null,
       iva_pct: Number(ivaPct) || 0,
       stock_minimo: Number(stockMin) || 0,
       costo_envasado: monedaCosto === 'UYU' ? costoIngresado : 0,
@@ -481,8 +500,26 @@ function PresentacionDialog({ abierto, productoId, editar, onCerrar, onOk }: {
               {UNIDADES.map((u) => <option key={u} value={u}>{u}</option>)}
             </select>
           </div>
-          <div><label className="label">Precio consumidor (UYU)</label><input className="input" type="number" min="0" step="1" value={precioMin} onChange={(e) => setPrecioMin(e.target.value)} /></div>
-          <div><label className="label">Precio mayorista (UYU)</label><input className="input" type="number" min="0" step="1" value={precioMay} onChange={(e) => setPrecioMay(e.target.value)} /></div>
+          <div>
+            <label className="label">Precio consumidor</label>
+            <div className="flex gap-2">
+              <div className="flex rounded-md border border-oliva-200 overflow-hidden text-xs font-semibold shrink-0">
+                <button type="button" onClick={() => setMonedaPrecioMin('UYU')} className={`px-2 ${monedaPrecioMin === 'UYU' ? 'bg-oliva-800 text-oliva-50' : 'bg-white text-oliva-700'}`}>$</button>
+                <button type="button" onClick={() => setMonedaPrecioMin('USD')} className={`px-2 ${monedaPrecioMin === 'USD' ? 'bg-oliva-800 text-oliva-50' : 'bg-white text-oliva-700'}`}>U$S</button>
+              </div>
+              <input className="input tabular-nums flex-1" type="number" min="0" step="0.1" value={precioMin} onChange={(e) => setPrecioMin(e.target.value)} />
+            </div>
+          </div>
+          <div>
+            <label className="label">Precio mayorista</label>
+            <div className="flex gap-2">
+              <div className="flex rounded-md border border-oliva-200 overflow-hidden text-xs font-semibold shrink-0">
+                <button type="button" onClick={() => setMonedaPrecioMay('UYU')} className={`px-2 ${monedaPrecioMay === 'UYU' ? 'bg-oliva-800 text-oliva-50' : 'bg-white text-oliva-700'}`}>$</button>
+                <button type="button" onClick={() => setMonedaPrecioMay('USD')} className={`px-2 ${monedaPrecioMay === 'USD' ? 'bg-oliva-800 text-oliva-50' : 'bg-white text-oliva-700'}`}>U$S</button>
+              </div>
+              <input className="input tabular-nums flex-1" type="number" min="0" step="0.1" value={precioMay} onChange={(e) => setPrecioMay(e.target.value)} />
+            </div>
+          </div>
           <div className="sm:col-span-2">
             <label className="label">Costo envasado</label>
             <div className="flex gap-2 items-stretch">
