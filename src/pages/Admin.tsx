@@ -53,6 +53,7 @@ export function Admin() {
   const [editandoPres, setEditandoPres] = useState<Presentacion | null>(null)
   const [editorListas, setEditorListas] = useState(false)
   const [descargando, setDescargando] = useState(false)
+  const [configAceiteAbierto, setConfigAceiteAbierto] = useState(false)
 
   useEffect(() => {
     if (!descargando) return
@@ -159,39 +160,56 @@ export function Admin() {
             Catálogo, costos, listas de precios y márgenes.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-1.5 flex-wrap">
           {puedeEditarMargenes && (
             <>
-              <button className="btn-secondary" onClick={() => setDescargando(true)} disabled={descargando}>
-                {descargando ? '⏳ Generando…' : '📥 Descargar backup'}
-              </button>
-              <button className="btn-secondary" onClick={() => setEditorListas(true)}>💰 Listas de precios</button>
+              <button
+                type="button"
+                className="text-xs font-semibold text-oliva-700 hover:text-oliva-900 hover:bg-oliva-100 rounded-md px-2.5 py-1.5 transition"
+                onClick={() => setDescargando(true)}
+                disabled={descargando}
+                title="Descargar backup en Excel"
+              >{descargando ? '⏳' : '📥'} Backup</button>
+              <button
+                type="button"
+                className="text-xs font-semibold text-oliva-700 hover:text-oliva-900 hover:bg-oliva-100 rounded-md px-2.5 py-1.5 transition"
+                onClick={() => setEditorListas(true)}
+              >💰 Listas de precios</button>
+              <button
+                type="button"
+                className="text-xs font-semibold text-oliva-700 hover:text-oliva-900 hover:bg-oliva-100 rounded-md px-2.5 py-1.5 transition"
+                onClick={() => setConfigAceiteAbierto(true)}
+                title="Costo del aceite USD/L (para calcular margen)"
+              >⚙️ Costo aceite</button>
             </>
           )}
-          <button className="btn-primary" onClick={() => setNuevoProd(true)}>+ Nuevo producto</button>
+          <button className="btn-primary text-xs px-3 py-1.5" onClick={() => setNuevoProd(true)}>+ Nuevo producto</button>
         </div>
       </div>
 
-      {/* Config global (solo Rodrigo/Santi) */}
+      {/* Dialog config costo del aceite */}
       {puedeEditarMargenes && (
-        <div className="card p-4 flex items-center gap-4 flex-wrap">
-          <div>
-            <label className="label">Costo aceite USD/L</label>
-            <div className="flex items-center gap-2">
+        <Dialog abierto={configAceiteAbierto} onCerrar={() => setConfigAceiteAbierto(false)} titulo="Costo del aceite" ancho="sm">
+          <div className="space-y-3">
+            <div>
+              <label className="label">Costo aceite USD/L</label>
               <input
-                className="input tabular-nums w-28"
+                className="input tabular-nums"
                 type="number" min="0" step="0.1"
                 value={costoAceiteUsd}
                 onChange={(e) => setCostoAceiteUsd(e.target.value)}
               />
-              <button className="btn-secondary text-xs" onClick={guardarConfigAceite}>Guardar</button>
+              <div className="text-xs text-oliva-600 mt-2">
+                Se usa para estimar el <b>margen real</b> del aceite envasado (costo total = envasado + aceite proporcional al volumen).
+                Actualizalo cuando cambie el costo de producción del año.
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2 border-t border-oliva-100">
+              <button className="btn-secondary" onClick={() => setConfigAceiteAbierto(false)}>Cerrar</button>
+              <button className="btn-primary" onClick={() => { guardarConfigAceite(); setConfigAceiteAbierto(false) }}>Guardar</button>
             </div>
           </div>
-          <div className="text-xs text-oliva-600 flex-1 min-w-[280px]">
-            Se usa para estimar el <b>margen real</b> del aceite envasado (costo total = envasado + aceite proporcional al volumen).
-            Actualizalo cuando cambie el costo de producción del año.
-          </div>
-        </div>
+        </Dialog>
       )}
 
       {cargando ? (
