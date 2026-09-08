@@ -269,8 +269,6 @@ export function Ventas() {
       />
       <ResumenMensualCadeteDialog
         abierto={resumenCadeteAbierto}
-        ventas={ventas}
-        clientes={clientes}
         onCerrar={() => setResumenCadeteAbierto(false)}
       />
     </div>
@@ -1975,12 +1973,21 @@ function VentaDetalleDialog({
 
 // ---------- Diálogo Resumen mensual del cadete (para pago) ----------
 
+interface EnvioCadete {
+  id: number; fecha: string; socio_id: string; socio_nombre: string
+  cliente_id: number | null; cliente_nombre: string | null
+  cliente_telefono: string | null; cliente_whatsapp: string | null
+  cliente_direccion: string | null; cliente_localidad: string | null
+  envio: boolean; entregado: boolean; cobrado: boolean
+  costo_envio: number; estado: string; promocion_comercial: boolean
+  horario_entrega: string | null; ubicacion_id: number
+  items_resumen: string | null
+}
+
 function ResumenMensualCadeteDialog({
-  abierto, ventas, clientes, onCerrar,
+  abierto, onCerrar,
 }: {
   abierto: boolean
-  ventas: Venta[]
-  clientes: Cliente[]
   onCerrar: () => void
 }) {
   const hoyD = new Date()
@@ -1988,24 +1995,23 @@ function ResumenMensualCadeteDialog({
   const [mes, setMes] = useState<string>(String(hoyD.getMonth() + 1).padStart(2, '0'))
   const [copiado, setCopiado] = useState(false)
   const [precioUnitario, setPrecioUnitario] = useState<string>('')
-
-  useEffect(() => {
-    if (!abierto) return
-    setCopiado(false)
-  }, [abierto, mes, anio])
+  const [enviosRPC, setEnviosRPC] = useState<EnvioCadete[]>([])
 
   const desde = `${anio}-${mes}-01`
   const ult = new Date(Number(anio), Number(mes), 0).getDate()
   const hasta = `${anio}-${mes}-${String(ult).padStart(2, '0')}`
   const nombreMes = new Date(Number(anio), Number(mes) - 1, 1).toLocaleString('es-UY', { month: 'long' })
 
-  const clientePorId = useMemo(() => new Map(clientes.map((c) => [c.id, c])), [clientes])
+  useEffect(() => {
+    if (!abierto) return
+    setCopiado(false)
+    supabase.rpc('envios_cadete_todos', { p_desde: desde, p_hasta: hasta })
+      .then(({ data }) => setEnviosRPC((data as EnvioCadete[]) ?? []))
+  }, [abierto, mes, anio, desde, hasta])
 
   const enviosMes = useMemo(() => {
-    return ventas
-      .filter((v) => v.envio && v.estado !== 'cancelado' && v.fecha >= desde && v.fecha <= hasta)
-      .sort((a, b) => a.fecha === b.fecha ? a.id - b.id : a.fecha.localeCompare(b.fecha))
-  }, [ventas, desde, hasta])
+    return [...enviosRPC].sort((a, b) => a.fecha === b.fecha ? a.id - b.id : a.fecha.localeCompare(b.fecha))
+  }, [enviosRPC])
 
   // Precio efectivo por envío: si el usuario ingresó un precio unitario, se usa ése;
   // si no, usa el costo_envio guardado en cada venta.
@@ -2024,10 +2030,10 @@ function ResumenMensualCadeteDialog({
       return partes.join('\n')
     }
     enviosMes.forEach((v, i) => {
-      const cli = v.cliente_id ? clientePorId.get(v.cliente_id) : null
       const fecha = new Date(v.fecha + 'T00:00:00').toLocaleDateString('es-UY', { day: '2-digit', month: '2-digit' })
       const p = precioUnit > 0 ? precioUnit : Number(v.costo_envio) || 0
-      partes.push(`${i + 1}. ${fecha} · ${cli?.nombre ?? 'sin cliente'} — ${money(p)}`)
+      const socio = (v.socio_nombre || '').split(' ')[0]
+      partes.push(`${i + 1}. ${fecha} · ${v.cliente_nombre ?? 'sin cliente'} (${socio}) — ${money(p)}`)
     })
     partes.push('')
     partes.push(`*Total (${enviosMes.length} envío${enviosMes.length === 1 ? '' : 's'}): ${money(totalPago)}*`)
@@ -2108,24 +2114,25 @@ function ResumenMensualCadeteDialog({
                   <th className="py-2 px-3 text-left">#</th>
                   <th className="py-2 px-3 text-left">Fecha</th>
                   <th className="py-2 px-3 text-left">Cliente</th>
+                  <th className="py-2 px-3 text-left">Socio</th>
                   <th className="py-2 px-3 text-right">Costo</th>
                 </tr>
               </thead>
               <tbody>
                 {enviosMes.map((v, i) => {
-                  const cli = v.cliente_id ? clientePorId.get(v.cliente_id) : null
                   const p = precioUnit > 0 ? precioUnit : Number(v.costo_envio) || 0
                   return (
                     <tr key={v.id} className="border-t border-oliva-100">
                       <td className="py-2 px-3 tabular-nums font-semibold text-oliva-900">{i + 1}</td>
                       <td className="py-2 px-3 text-oliva-700">{v.fecha}</td>
-                      <td className="py-2 px-3 text-oliva-800">{cli?.nombre ?? '—'}</td>
+                      <td className="py-2 px-3 text-oliva-800">{v.cliente_nombre ?? '—'}</td>
+                      <td className="py-2 px-3 text-oliva-600 text-xs">{v.socio_nombre?.split(' ')[0] ?? '—'}</td>
                       <td className="py-2 px-3 text-right tabular-nums font-medium">{money(p)}</td>
                     </tr>
                   )
                 })}
                 <tr className="border-t-2 border-oliva-300 bg-oliva-50/60">
-                  <td colSpan={3} className="py-2 px-3 text-right font-bold text-oliva-900 uppercase tracking-wide text-xs">Total</td>
+                  <td colSpan={4} className="py-2 px-3 text-right font-bold text-oliva-900 uppercase tracking-wide text-xs">Total</td>
                   <td className="py-2 px-3 text-right font-bold text-oliva-900 tabular-nums">{money(totalPago)}</td>
                 </tr>
               </tbody>
@@ -2158,38 +2165,32 @@ function ResumenMensualCadeteDialog({
 // ---------- Diálogo Lista para cadete ----------
 
 function ListaCadeteDialog({
-  abierto, ventas, clientes, desde, hasta, onCerrar,
+  abierto, desde, hasta, onCerrar,
 }: {
   abierto: boolean
-  ventas: Venta[]
-  clientes: Cliente[]
+  ventas?: Venta[]      // legacy — no se usa mas
+  clientes?: Cliente[]  // legacy — no se usa mas
   desde: string
   hasta: string
   onCerrar: () => void
 }) {
-  const [items, setItems] = useState<ItemVenta[]>([])
-  const [presMap, setPresMap] = useState<Map<number, PresentacionInfo>>(new Map())
-  const [prodMap, setProdMap] = useState<Map<number, ProdInfo>>(new Map())
+  const [enviosRPC, setEnviosRPC] = useState<EnvioCadete[]>([])
   const [seleccion, setSeleccion] = useState<Set<number>>(new Set())
   const [cargando, setCargando] = useState(false)
   const [copiado, setCopiado] = useState(false)
 
-  // Filtro de las ventas: en el rango del listado, con envío, no canceladas y no entregadas
-  // (Al marcar "🚚 Entregado" en el detalle, el pedido desaparece de la lista del cadete.)
+  // Solo pendientes de entrega en el rango — de TODOS los socios (via RPC SECURITY DEFINER)
   const enviosDelRango = useMemo(() => {
-    return ventas
-      .filter((v) => v.envio && v.estado !== 'cancelado' && !v.entregado)
-      .filter((v) => !desde || v.fecha >= desde)
-      .filter((v) => !hasta || v.fecha <= hasta)
+    return enviosRPC
+      .filter((v) => !v.entregado)
       .sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : a.id - b.id))
-  }, [ventas, desde, hasta])
+  }, [enviosRPC])
 
-  // Numeración estable por mes: cada envío tiene el índice + 1 dentro de las ventas con envío del mismo mes
+  // Numeración estable por mes: índice+1 dentro de los envíos del mismo mes (todos los socios)
   const numeroPedido = useMemo(() => {
-    const porMes = new Map<string, Venta[]>()
-    for (const v of ventas) {
-      if (!v.envio) continue
-      const mes = v.fecha.slice(0, 7) // yyyy-mm
+    const porMes = new Map<string, EnvioCadete[]>()
+    for (const v of enviosRPC) {
+      const mes = v.fecha.slice(0, 7)
       if (!porMes.has(mes)) porMes.set(mes, [])
       porMes.get(mes)!.push(v)
     }
@@ -2199,45 +2200,23 @@ function ListaCadeteDialog({
       arr.forEach((v, idx) => map.set(v.id, idx + 1))
     }
     return map
-  }, [ventas])
+  }, [enviosRPC])
 
   useEffect(() => {
     if (!abierto) return
-    setSeleccion(new Set(enviosDelRango.map((v) => v.id)))
     setCopiado(false)
-    if (enviosDelRango.length === 0) { setItems([]); return }
     setCargando(true)
-    const ids = enviosDelRango.map((v) => v.id)
-    Promise.all([
-      supabase.from('items_venta').select('*').in('venta_id', ids),
-      supabase.from('presentaciones').select('id,nombre,producto_id,es_pack'),
-      supabase.from('productos').select('id,nombre,categoria'),
-    ]).then(([i, p, pr]) => {
-      setItems((i.data as ItemVenta[]) ?? [])
-      setPresMap(new Map(((p.data as PresentacionInfo[]) ?? []).map((x) => [x.id, x])))
-      setProdMap(new Map(((pr.data as ProdInfo[]) ?? []).map((x) => [x.id, x])))
-      setCargando(false)
-    })
-  }, [abierto, enviosDelRango])
+    supabase.rpc('envios_cadete_todos', { p_desde: desde || null, p_hasta: hasta || null })
+      .then(({ data }) => {
+        const rows = (data as EnvioCadete[]) ?? []
+        setEnviosRPC(rows)
+        setSeleccion(new Set(rows.filter((v) => !v.entregado).map((v) => v.id)))
+        setCargando(false)
+      })
+  }, [abierto, desde, hasta])
 
-  const clientePorId = useMemo(() => new Map(clientes.map((c) => [c.id, c])), [clientes])
-  const itemsPorVenta = useMemo(() => {
-    const m = new Map<number, ItemVenta[]>()
-    for (const it of items) {
-      const arr = m.get(it.venta_id) ?? []
-      arr.push(it)
-      m.set(it.venta_id, arr)
-    }
-    return m
-  }, [items])
-
-  function resumenItems(ventaId: number): string {
-    const arr = itemsPorVenta.get(ventaId) ?? []
-    return arr.map((it) => {
-      const p = presMap.get(it.presentacion_id)
-      const prod = p ? prodMap.get(p.producto_id) : null
-      return `${it.unidades}× ${prod?.nombre ?? ''} ${p?.nombre ?? ''}`.trim()
-    }).join(', ')
+  function resumenItems(v: EnvioCadete): string {
+    return v.items_resumen ?? ''
   }
 
   function toggleUno(id: number) {
@@ -2259,13 +2238,12 @@ function ListaCadeteDialog({
     const bloques = enviosDelRango
       .filter((v) => seleccion.has(v.id))
       .map((v) => {
-        const c = v.cliente_id ? clientePorId.get(v.cliente_id) : null
         const partes: string[] = []
         partes.push(`Pedido #${numeroPedido.get(v.id) ?? '?'}`)
-        partes.push(c?.nombre ?? 'Sin cliente')
-        partes.push(resumenItems(v.id) || '(sin ítems)')
-        if (c?.telefono || c?.whatsapp) partes.push(`📞 ${c.whatsapp ?? c.telefono}`)
-        if (c?.direccion) partes.push(`📍 ${c.direccion}${c.localidad ? ', ' + c.localidad : ''}`)
+        partes.push(v.cliente_nombre ?? 'Sin cliente')
+        partes.push(resumenItems(v) || '(sin ítems)')
+        if (v.cliente_telefono || v.cliente_whatsapp) partes.push(`📞 ${v.cliente_whatsapp ?? v.cliente_telefono}`)
+        if (v.cliente_direccion) partes.push(`📍 ${v.cliente_direccion}${v.cliente_localidad ? ', ' + v.cliente_localidad : ''}`)
         if (v.horario_entrega) partes.push(`🕐 ${v.horario_entrega}`)
         return partes.join('\n')
       })
@@ -2318,7 +2296,6 @@ function ListaCadeteDialog({
 
             <div className="space-y-2 max-h-[45vh] overflow-y-auto">
               {enviosDelRango.map((v) => {
-                const c = v.cliente_id ? clientePorId.get(v.cliente_id) : null
                 const num = numeroPedido.get(v.id)
                 const marcado = seleccion.has(v.id)
                 return (
@@ -2330,13 +2307,14 @@ function ListaCadeteDialog({
                       onChange={() => toggleUno(v.id)}
                     />
                     <div className="flex-1 text-sm">
-                      <div className="font-medium text-oliva-900">
-                        Pedido #{num} · {c?.nombre ?? <span className="italic text-oliva-500">sin cliente</span>}
+                      <div className="font-medium text-oliva-900 flex items-center gap-2 flex-wrap">
+                        <span>Pedido #{num} · {v.cliente_nombre ?? <span className="italic text-oliva-500">sin cliente</span>}</span>
+                        <span className="text-[10px] uppercase tracking-wide bg-oliva-100 text-oliva-700 px-1.5 py-[1px] rounded">{v.socio_nombre?.split(' ')[0]}</span>
                       </div>
-                      <div className="text-oliva-700 text-xs mt-0.5">{resumenItems(v.id) || <em>sin ítems</em>}</div>
+                      <div className="text-oliva-700 text-xs mt-0.5">{resumenItems(v) || <em>sin ítems</em>}</div>
                       <div className="text-oliva-600 text-xs mt-1 space-y-0.5">
-                        {(c?.whatsapp || c?.telefono) && <div>📞 {c?.whatsapp ?? c?.telefono}</div>}
-                        {c?.direccion && <div>📍 {c.direccion}{c.localidad ? `, ${c.localidad}` : ''}</div>}
+                        {(v.cliente_whatsapp || v.cliente_telefono) && <div>📞 {v.cliente_whatsapp ?? v.cliente_telefono}</div>}
+                        {v.cliente_direccion && <div>📍 {v.cliente_direccion}{v.cliente_localidad ? `, ${v.cliente_localidad}` : ''}</div>}
                         {v.horario_entrega && <div>🕐 {v.horario_entrega}</div>}
                       </div>
                     </div>
