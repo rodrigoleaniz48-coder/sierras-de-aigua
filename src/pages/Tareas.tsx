@@ -132,7 +132,8 @@ export function Tareas() {
         const r = mp.get(uid); if (!r) continue
         if (t.estado === 'hecha' && fc && fc >= mesIniStr) {
           r.hechas += 1
-          r.jornales += Number(t.jornales) || 0
+          // Los jornales solo suman para empleados (rol='campo'), no para socios
+          if (r.rol === 'campo') r.jornales += Number(t.jornales) || 0
         }
         if ((t.estado === 'pendiente' || t.estado === 'en_progreso')) r.pendientes += 1
       }
