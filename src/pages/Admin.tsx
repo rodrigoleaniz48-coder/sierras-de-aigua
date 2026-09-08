@@ -487,7 +487,7 @@ function PresentacionDialog({ abierto, productoId, editar, onCerrar, onOk }: {
       costo_envasado_usd: monedaCosto === 'USD' ? costoIngresado : null,
       // Si hay algún valor USD, congelamos la cotización usada al guardar
       cotizacion_usd: (monedaCosto === 'USD' || monedaPrecioMin === 'USD' || monedaPrecioMay === 'USD')
-        ? (Number(cotizacion) || cotBcu || null)
+        ? (Number(cotizacion) || null)
         : null,
       activo,
     }
