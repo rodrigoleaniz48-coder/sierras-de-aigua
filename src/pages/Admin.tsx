@@ -28,6 +28,7 @@ interface Presentacion {
   activo: boolean
   costo_envasado: number         // en UYU (compat) — usado si costo_envasado_usd es null
   costo_envasado_usd: number | null  // opcional: costo cargado en USD (prioritario)
+  cotizacion_usd: number | null      // cotización congelada usada cuando se guardaron valores USD
   es_pack: boolean
 }
 
@@ -119,11 +120,17 @@ export function Admin() {
     await supabase.from('config_global').upsert({ key: 'costo_aceite_por_litro_usd', value: String(val), actualizado_en: new Date().toISOString() })
   }
 
+  // Cotización congelada de la presentación (la que se usó al guardar valores USD).
+  // Si no tiene, cae a la BCU vigente. Así los USD ingresados no cambian de valor UYU
+  // solos si el BCU se mueve.
+  function cotizacionPres(pr: Presentacion): number {
+    return (pr.cotizacion_usd && Number(pr.cotizacion_usd) > 0) ? Number(pr.cotizacion_usd) : cotBcu
+  }
   // Costo de una presentación individual, siempre devuelto en UYU.
-  // Si tiene costo_envasado_usd, se convierte con la cotización BCU vigente.
+  // Si tiene costo_envasado_usd, se convierte con la cotización guardada de la presentación.
   function costoIndividualUyu(pr: Presentacion): number {
     if (pr.costo_envasado_usd !== null && pr.costo_envasado_usd !== undefined && Number(pr.costo_envasado_usd) > 0) {
-      return Number(pr.costo_envasado_usd) * cotBcu
+      return Number(pr.costo_envasado_usd) * cotizacionPres(pr)
     }
     return Number(pr.costo_envasado || 0)
   }
@@ -163,9 +170,9 @@ export function Admin() {
     const costoEnv = costoEnvasadoTotal(pr)
     const costoAceite = esAceite && litros > 0 ? litros * Number(costoAceiteUsd) * cotBcu : 0
     const costoTotal = costoEnv + costoAceite
-    // Precio minorista: si tiene USD, convertir con BCU. Sino usar UYU tal cual.
+    // Precio minorista: si tiene USD, convertir con la cotización congelada de la presentación.
     const precioMin = (pr.precio_minorista_usd !== null && pr.precio_minorista_usd !== undefined && Number(pr.precio_minorista_usd) > 0)
-      ? Number(pr.precio_minorista_usd) * cotBcu
+      ? Number(pr.precio_minorista_usd) * cotizacionPres(pr)
       : Number(pr.precio_minorista || 0)
     const precioDistUyu = precioDist.get(pr.id) ?? 0
     const margenMinPct = precioMin > 0 ? ((precioMin - costoTotal) / precioMin) * 100 : 0
@@ -478,6 +485,10 @@ function PresentacionDialog({ abierto, productoId, editar, onCerrar, onOk }: {
       stock_minimo: Number(stockMin) || 0,
       costo_envasado: monedaCosto === 'UYU' ? costoIngresado : 0,
       costo_envasado_usd: monedaCosto === 'USD' ? costoIngresado : null,
+      // Si hay algún valor USD, congelamos la cotización usada al guardar
+      cotizacion_usd: (monedaCosto === 'USD' || monedaPrecioMin === 'USD' || monedaPrecioMay === 'USD')
+        ? (Number(cotizacion) || cotBcu || null)
+        : null,
       activo,
     }
     const q = editar ? supabase.from('presentaciones').update(payload).eq('id', editar.id) : supabase.from('presentaciones').insert(payload)
