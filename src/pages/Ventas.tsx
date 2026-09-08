@@ -1367,7 +1367,27 @@ async function guardar(e: React.FormEvent) {
                         }
                         if (f.p?.es_pack || esServicio) return null
                         if (f.it.stock_id) return null
-                        return <p className="text-xs text-red-700 mt-1">Sin stock envasado en esta ubicación. Ir a Stock → Envasar o Ajuste envasado.</p>
+                        // No hay stock en la ubicación seleccionada — chequear si hay en otras
+                        const otrasUbics = stock
+                          .filter((s) => s.presentacion_id === f.it.presentacion_id && s.ubicacion_id !== Number(ubicacionId) && s.unidades > 0)
+                          .reduce((acc, s) => {
+                            const nom = ubicaciones.find((u) => u.id === s.ubicacion_id)?.nombre ?? '—'
+                            acc.set(nom, (acc.get(nom) ?? 0) + Number(s.unidades))
+                            return acc
+                          }, new Map<string, number>())
+                        const nomUbicActual = ubicaciones.find((u) => u.id === Number(ubicacionId))?.nombre ?? '—'
+                        return (
+                          <div className="text-xs text-red-700 mt-1 space-y-1">
+                            <p>Sin stock envasado en <b>{nomUbicActual}</b>.</p>
+                            {otrasUbics.size > 0 ? (
+                              <p className="text-oliva-700">
+                                Sí hay stock en: {[...otrasUbics.entries()].map(([nom, u]) => `${nom} (${u}u)`).join(' · ')}. Cambiá la ubicación arriba, o trasladá desde Stock → Traslado.
+                              </p>
+                            ) : (
+                              <p className="text-oliva-700">Ir a Stock → Envasar o Ajuste envasado.</p>
+                            )}
+                          </div>
+                        )
                       })()}
                     </div>
 
