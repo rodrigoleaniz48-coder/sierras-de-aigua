@@ -697,12 +697,16 @@ function NuevaVentaDialog({
   const cliente = clientes.find((c) => c.id === Number(clienteId))
   const esMayorista = cliente?.tipo === 'mayorista'
 
-  // Al cambiar el cliente, precarga la dirección y teléfono en los campos de envío
+  // Al cambiar el cliente (o cuando llegan los clientes async), precarga dirección y teléfono
+  // desde la ficha del cliente. Depende también de `clientes` para el caso en que el cliente
+  // se resuelva después del reset del form (edición de venta / carga async).
   useEffect(() => {
-    if (!cliente) { setDireccionEnvio(''); setTelefonoEnvio(''); return }
+    if (!clienteId) { setDireccionEnvio(''); setTelefonoEnvio(''); return }
+    if (!cliente) return // todavía no llegó la lista de clientes; esperamos
     setDireccionEnvio(cliente.direccion ?? '')
     setTelefonoEnvio(cliente.whatsapp ?? cliente.telefono ?? '')
-  }, [clienteId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clienteId, clientes])
   const presPorId = useMemo(() => new Map(presentaciones.map((p) => [p.id, p])), [presentaciones])
   const stockPorId = useMemo(() => new Map(stock.map((s) => [s.id, s])), [stock])
   const prodPorId = useMemo(() => new Map(productos.map((p) => [p.id, p])), [productos])
