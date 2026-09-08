@@ -20,7 +20,8 @@ interface Tarea {
   prioridad: 'baja' | 'media' | 'alta'
   estado: 'pendiente' | 'en_progreso' | 'hecha' | 'cancelada'
   tipo: 'agenda' | 'campo'
-  asignado_a: string | null
+  asignado_a: string | null      // legacy: primer asignado (para vistas viejas)
+  asignados_a: string[]           // nueva lista completa de asignados
   creado_por: string | null
   fecha_creada: string
   fecha_vence: string | null
@@ -94,7 +95,10 @@ export function Tareas() {
   const hoyStr = new Date().toISOString().slice(0, 10)
   const en7Str = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10)
   const misActivasTodas = useMemo(
-    () => tareas.filter((t) => t.asignado_a === soyYo && (t.estado === 'pendiente' || t.estado === 'en_progreso')),
+    () => tareas.filter((t) => {
+      const meAsignaron = t.asignado_a === soyYo || (t.asignados_a ?? []).includes(soyYo)
+      return meAsignaron && (t.estado === 'pendiente' || t.estado === 'en_progreso')
+    }),
     [tareas, soyYo],
   )
   const misActivas = useMemo(() => {
@@ -122,14 +126,16 @@ export function Tareas() {
       mp.set(p.id, { nombre: p.nombre, rol: p.rol, hechas: 0, pendientes: 0, jornales: 0 })
     }
     for (const t of tareas) {
-      if (!t.asignado_a) continue
-      const r = mp.get(t.asignado_a); if (!r) continue
+      const ids = (t.asignados_a && t.asignados_a.length > 0) ? t.asignados_a : (t.asignado_a ? [t.asignado_a] : [])
       const fc = t.fecha_completada ? t.fecha_completada.slice(0, 10) : null
-      if (t.estado === 'hecha' && fc && fc >= mesIniStr) {
-        r.hechas += 1
-        r.jornales += Number(t.jornales) || 0
+      for (const uid of ids) {
+        const r = mp.get(uid); if (!r) continue
+        if (t.estado === 'hecha' && fc && fc >= mesIniStr) {
+          r.hechas += 1
+          r.jornales += Number(t.jornales) || 0
+        }
+        if ((t.estado === 'pendiente' || t.estado === 'en_progreso')) r.pendientes += 1
       }
-      if ((t.estado === 'pendiente' || t.estado === 'en_progreso')) r.pendientes += 1
     }
     return [...mp.values()].filter((r) => r.hechas > 0 || r.pendientes > 0)
   }, [tareas, perfiles])
@@ -310,10 +316,12 @@ function EquipoView({ tareas, perfiles, perfilPorId, soyYo, resumenMes, cargando
       mp.set(p.id, { persona: p, activas: [], hechas: [] })
     }
     for (const t of tareas) {
-      if (!t.asignado_a) continue
-      const g = mp.get(t.asignado_a); if (!g) continue
-      if (t.estado === 'pendiente' || t.estado === 'en_progreso') g.activas.push(t)
-      else if (t.estado === 'hecha') g.hechas.push(t)
+      const ids = (t.asignados_a && t.asignados_a.length > 0) ? t.asignados_a : (t.asignado_a ? [t.asignado_a] : [])
+      for (const uid of ids) {
+        const g = mp.get(uid); if (!g) continue
+        if (t.estado === 'pendiente' || t.estado === 'en_progreso') g.activas.push(t)
+        else if (t.estado === 'hecha') g.hechas.push(t)
+      }
     }
     // Filtrar personas sin nada y ordenar: yo primero, después alfabético
     return [...mp.values()]
@@ -425,6 +433,7 @@ function EquipoView({ tareas, perfiles, perfilPorId, soyYo, resumenMes, cargando
                             key={t.id}
                             tarea={t}
                             asignado={g.persona}
+                            asignadosPerfiles={((t.asignados_a && t.asignados_a.length > 0) ? t.asignados_a : (t.asignado_a ? [t.asignado_a] : [])).map((id) => perfilPorId.get(id)).filter(Boolean) as Perfil[]}
                             creador={t.creado_por ? perfilPorId.get(t.creado_por) : undefined}
                             soyYo={soyYo}
                             onCambiarEstado={onCambiarEstado}
@@ -442,6 +451,7 @@ function EquipoView({ tareas, perfiles, perfilPorId, soyYo, resumenMes, cargando
                               key={t.id}
                               tarea={t}
                               asignado={g.persona}
+                              asignadosPerfiles={((t.asignados_a && t.asignados_a.length > 0) ? t.asignados_a : (t.asignado_a ? [t.asignado_a] : [])).map((id) => perfilPorId.get(id)).filter(Boolean) as Perfil[]}
                               creador={t.creado_por ? perfilPorId.get(t.creado_por) : undefined}
                               soyYo={soyYo}
                               onCambiarEstado={onCambiarEstado}
@@ -649,15 +659,25 @@ function RegistrarHechaDialog({ abierto, soyYo, onCerrar, onOk }: {
   )
 }
 
-function TareaCard({ tarea, asignado, creador, soyYo, onCambiarEstado, onEditar }: {
+function TareaCard({ tarea, asignado, asignadosPerfiles, creador, soyYo, onCambiarEstado, onEditar }: {
   tarea: Tarea
   asignado?: Perfil
+  asignadosPerfiles?: Perfil[]
   creador?: Perfil
   soyYo: string
   onCambiarEstado: (t: Tarea, nuevo: Tarea['estado']) => void
   onEditar: () => void
 }) {
-  const esMia = tarea.asignado_a === soyYo
+  const idsAsig = (tarea.asignados_a && tarea.asignados_a.length > 0) ? tarea.asignados_a : (tarea.asignado_a ? [tarea.asignado_a] : [])
+  const esMia = idsAsig.includes(soyYo)
+  const asignadosLbl = (() => {
+    if (asignadosPerfiles && asignadosPerfiles.length > 0) {
+      const nombres = asignadosPerfiles.map((p) => p.id === soyYo ? 'Yo' : (p.nombre.split(' ')[0]))
+      if (nombres.length <= 2) return nombres.join(' + ')
+      return `${nombres[0]} +${nombres.length - 1}`
+    }
+    return asignado ? (esMia ? 'Yo' : asignado.nombre) : null
+  })()
   const vencida = tarea.fecha_vence && tarea.fecha_vence < new Date().toISOString().slice(0, 10) && tarea.estado !== 'hecha' && tarea.estado !== 'cancelada'
 
   return (
@@ -677,10 +697,12 @@ function TareaCard({ tarea, asignado, creador, soyYo, onCambiarEstado, onEditar 
             🌱 campo{tarea.jornales > 0 ? ` · ${tarea.jornales} jornal${tarea.jornales === 1 ? '' : 'es'}` : ''}
           </span>
         )}
-        {asignado && (
-          <span className="text-oliva-600">👤 {esMia ? 'Yo' : asignado.nombre}</span>
+        {asignadosLbl && (
+          <span className="text-oliva-600" title={asignadosPerfiles?.map((p) => p.nombre).join(', ')}>
+            👤 {asignadosLbl}
+          </span>
         )}
-        {creador && creador.id !== tarea.asignado_a && (
+        {creador && !idsAsig.includes(creador.id) && (
           <span className="text-oliva-500">· pidió {creador.nombre.split(' ')[0]}</span>
         )}
         {tarea.fecha_vence && (
@@ -727,7 +749,7 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, soySocioEdito
   // Rodrigo puede borrar cualquiera; los demas socios editores borran solo las suyas.
   // Gonzalo/Emiliano no editan cabecera: si son asignados cambian estado y comentan.
   const esMiCreacion = !!editar && editar.creado_por === soyYo
-  const esMiAsignacion = !!editar && editar.asignado_a === soyYo
+  const esMiAsignacion = !!editar && (editar.asignado_a === soyYo || (editar.asignados_a ?? []).includes(soyYo))
   const puedeEditar = !editar || soySocioEditor
   const puedeBorrar = !!editar && (esMiCreacion || soyAdmin)
   const puedeCambiarEstado = !!editar && (soySocioEditor || esMiAsignacion)
@@ -739,7 +761,7 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, soySocioEdito
   const [estado, setEstado] = useState<Tarea['estado']>('pendiente')
   const [tipo, setTipo] = useState<Tarea['tipo']>('agenda')
   const [jornales, setJornales] = useState<number>(0)
-  const [asignadoA, setAsignadoA] = useState<string>('')
+  const [asignadosA, setAsignadosA] = useState<string[]>([])
   const [fechaVence, setFechaVence] = useState<string>('')
   const [notas, setNotas] = useState('')
   const [guardando, setGuardando] = useState(false)
@@ -758,12 +780,16 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, soySocioEdito
       setEstado(editar.estado)
       setTipo(editar.tipo ?? 'agenda')
       setJornales(Number(editar.jornales ?? 0))
-      setAsignadoA(editar.asignado_a ?? '')
+      setAsignadosA(
+        (editar.asignados_a && editar.asignados_a.length > 0)
+          ? editar.asignados_a
+          : (editar.asignado_a ? [editar.asignado_a] : [])
+      )
       setFechaVence(editar.fecha_vence ?? '')
       setNotas(editar.notas ?? '')
     } else {
       setTitulo(''); setDescripcion(''); setPrioridad('media')
-      setEstado('pendiente'); setTipo('agenda'); setJornales(0); setAsignadoA(''); setFechaVence(''); setNotas('')
+      setEstado('pendiente'); setTipo('agenda'); setJornales(0); setAsignadosA([]); setFechaVence(''); setNotas('')
     }
     setError(null); setConfirmDel(false); setNuevoComentario('')
   }, [abierto, editar])
@@ -819,7 +845,7 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, soySocioEdito
   const soloLectura = !puedeEditar
 
   // El asignado empleado suma jornales (por rol). El "tipo" ahora es el ÁREA de la tarea (campo/agenda).
-  const asignadoEsEmpleado = (perfilPorId.get(asignadoA)?.rol === 'campo')
+  const asignadoEsEmpleado = asignadosA.some((id) => perfilPorId.get(id)?.rol === 'campo')
 
   // Autopropuesta de tipo al elegir asignado (solo en tareas nuevas):
   // si el asignado es empleado, casi seguro es tarea de campo.
@@ -864,7 +890,7 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, soySocioEdito
     }
 
     if (!titulo.trim()) { setError('Poné un título.'); return }
-    if (!asignadoA) { setError('Asigná la tarea a alguien.'); return }
+    if (asignadosA.length === 0) { setError('Asigná la tarea a al menos una persona.'); return }
     setGuardando(true)
     const base = {
       titulo: titulo.trim(),
@@ -872,7 +898,8 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, soySocioEdito
       prioridad,
       tipo,
       jornales: asignadoEsEmpleado ? Number(jornales) || 0 : 0,
-      asignado_a: asignadoA || null,
+      asignado_a: asignadosA[0] || null,
+      asignados_a: asignadosA,
       fecha_vence: fechaVence || null,
       notas: notas.trim() || null,
       actualizado_en: new Date().toISOString(),
@@ -911,11 +938,31 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, soySocioEdito
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="label">Asignada a <span className="text-red-600">*</span></label>
-            <select className="input" value={asignadoA} onChange={(e) => setAsignadoA(e.target.value)} disabled={soloLectura} required>
-              <option value="">— elegí a alguien —</option>
-              {perfiles.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-            </select>
+            <label className="label">
+              Asignada a <span className="text-red-600">*</span>
+              {asignadosA.length > 1 && <span className="text-oliva-500 text-[10px] font-normal ml-2">· {asignadosA.length} personas</span>}
+            </label>
+            <div className={`rounded-md border border-oliva-200 bg-white p-2 max-h-40 overflow-y-auto space-y-0.5 ${soloLectura ? 'opacity-60 pointer-events-none' : ''}`}>
+              {perfiles.map((p) => {
+                const checked = asignadosA.includes(p.id)
+                return (
+                  <label key={p.id} className="flex items-center gap-2 py-1 px-1 rounded hover:bg-oliva-50 cursor-pointer text-sm">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 accent-oliva-700"
+                      checked={checked}
+                      onChange={(e) => {
+                        setAsignadosA((prev) => e.target.checked ? [...prev, p.id] : prev.filter((id) => id !== p.id))
+                      }}
+                      disabled={soloLectura}
+                    />
+                    <span className="text-oliva-900">{p.nombre}</span>
+                    <span className="text-[10px] text-oliva-500 uppercase tracking-wide">· {p.rol}</span>
+                  </label>
+                )
+              })}
+              {perfiles.length === 0 && <div className="text-xs text-oliva-500 italic">Sin personas activas.</div>}
+            </div>
           </div>
           <div>
             <label className="label">Prioridad</label>
