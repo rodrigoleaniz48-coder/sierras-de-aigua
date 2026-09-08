@@ -374,9 +374,23 @@ function PresentacionDialog({ abierto, productoId, editar, onCerrar, onOk }: {
   const [ivaPct, setIvaPct] = useState<string>('10')
   const [stockMin, setStockMin] = useState<string>('0')
   const [costoEnv, setCostoEnv] = useState<string>('0')
+  const [monedaCosto, setMonedaCosto] = useState<'UYU' | 'USD'>('USD')
+  const [cotizacion, setCotizacion] = useState<string>('')
+  const [cotizacionFuente, setCotizacionFuente] = useState<string>('')
+  const [cargandoBcu, setCargandoBcu] = useState(false)
   const [activo, setActivo] = useState(true)
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  async function traerCotizacion() {
+    setCargandoBcu(true)
+    const { fetchCotizacionBCU } = await import('../lib/bcu')
+    const c = await fetchCotizacionBCU()
+    setCargandoBcu(false)
+    if (!c) { setError('No pude traer la cotización del BCU.'); return }
+    setCotizacion(String(c.cotizacion))
+    setCotizacionFuente(`BCU ${c.fecha}`)
+  }
 
   useEffect(() => {
     if (!abierto) return
@@ -385,9 +399,11 @@ function PresentacionDialog({ abierto, productoId, editar, onCerrar, onOk }: {
       setPrecioMin(String(editar.precio_minorista)); setPrecioMay(String(editar.precio_mayorista))
       setIvaPct(String(editar.iva_pct)); setStockMin(String(editar.stock_minimo))
       setCostoEnv(String(editar.costo_envasado ?? 0)); setActivo(editar.activo)
+      setMonedaCosto('UYU'); setCotizacion(''); setCotizacionFuente('') // al editar arranca en UYU (el valor guardado)
     } else {
       setNombre(''); setVolumenMl(''); setUnidad('botella')
       setPrecioMin('0'); setPrecioMay('0'); setIvaPct('10'); setStockMin('0'); setCostoEnv('0'); setActivo(true)
+      setMonedaCosto('USD'); setCotizacion(''); setCotizacionFuente('')
     }
     setError(null)
   }, [abierto, editar])
@@ -395,6 +411,14 @@ function PresentacionDialog({ abierto, productoId, editar, onCerrar, onOk }: {
   async function guardar(e: React.FormEvent) {
     e.preventDefault()
     if (!productoId) return
+    // Convertir costo a UYU si se ingresó en USD
+    const costoIngresado = Number(costoEnv) || 0
+    const cot = Number(cotizacion) || 0
+    if (monedaCosto === 'USD' && cot <= 0) {
+      setError('Ingresá una cotización válida (o traela del BCU) para convertir el costo a pesos.')
+      return
+    }
+    const costoUyu = monedaCosto === 'USD' ? costoIngresado * cot : costoIngresado
     setGuardando(true); setError(null)
     const payload = {
       producto_id: productoId,
@@ -405,7 +429,7 @@ function PresentacionDialog({ abierto, productoId, editar, onCerrar, onOk }: {
       precio_mayorista: Number(precioMay) || 0,
       iva_pct: Number(ivaPct) || 0,
       stock_minimo: Number(stockMin) || 0,
-      costo_envasado: Number(costoEnv) || 0,
+      costo_envasado: costoUyu,
       activo,
     }
     const q = editar ? supabase.from('presentaciones').update(payload).eq('id', editar.id) : supabase.from('presentaciones').insert(payload)
@@ -430,10 +454,34 @@ function PresentacionDialog({ abierto, productoId, editar, onCerrar, onOk }: {
           </div>
           <div><label className="label">Precio consumidor (UYU)</label><input className="input" type="number" min="0" step="1" value={precioMin} onChange={(e) => setPrecioMin(e.target.value)} /></div>
           <div><label className="label">Precio mayorista (UYU)</label><input className="input" type="number" min="0" step="1" value={precioMay} onChange={(e) => setPrecioMay(e.target.value)} /></div>
-          <div>
-            <label className="label">Costo envasado (UYU)</label>
-            <input className="input tabular-nums" type="number" min="0" step="0.1" value={costoEnv} onChange={(e) => setCostoEnv(e.target.value)} />
-            <p className="text-[10px] text-oliva-500 mt-1">Envase + tapa + etiqueta + caja + servicio. Sin el costo del aceite (ese se toma de la config global).</p>
+          <div className="sm:col-span-2">
+            <label className="label">Costo envasado</label>
+            <div className="flex gap-2 items-stretch">
+              <div className="flex rounded-md border border-oliva-200 overflow-hidden text-xs font-semibold shrink-0">
+                <button type="button" onClick={() => setMonedaCosto('USD')} className={`px-3 ${monedaCosto === 'USD' ? 'bg-oliva-800 text-oliva-50' : 'bg-white text-oliva-700'}`}>U$S</button>
+                <button type="button" onClick={() => setMonedaCosto('UYU')} className={`px-3 ${monedaCosto === 'UYU' ? 'bg-oliva-800 text-oliva-50' : 'bg-white text-oliva-700'}`}>$ UYU</button>
+              </div>
+              <input className="input tabular-nums flex-1" type="number" min="0" step="0.1" value={costoEnv} onChange={(e) => setCostoEnv(e.target.value)} placeholder={monedaCosto === 'USD' ? 'ej. 4.5' : 'ej. 180'} />
+            </div>
+            {monedaCosto === 'USD' && (
+              <div className="flex gap-2 items-center mt-2">
+                <input
+                  className="input tabular-nums w-24 text-xs"
+                  type="number" min="0" step="0.01"
+                  placeholder="cotiz."
+                  value={cotizacion}
+                  onChange={(e) => { setCotizacion(e.target.value); setCotizacionFuente('manual') }}
+                />
+                <button type="button" className="text-xs text-oliva-700 hover:text-oliva-900 underline" onClick={traerCotizacion} disabled={cargandoBcu}>
+                  {cargandoBcu ? '⏳ trayendo…' : '↻ traer del BCU'}
+                </button>
+                {cotizacionFuente && <span className="text-[10px] text-oliva-500">{cotizacionFuente}</span>}
+                {Number(cotizacion) > 0 && Number(costoEnv) > 0 && (
+                  <span className="text-[11px] text-oliva-600 ml-auto">≈ ${(Number(costoEnv) * Number(cotizacion)).toLocaleString('es-UY', { maximumFractionDigits: 0 })} UYU al guardar</span>
+                )}
+              </div>
+            )}
+            <p className="text-[10px] text-oliva-500 mt-1">Envase + tapa + etiqueta + caja + servicio. Sin el costo del aceite (ese se toma de la config global "Costo aceite USD/L").</p>
           </div>
           <div><label className="label">IVA %</label>
             <select className="input" value={ivaPct} onChange={(e) => setIvaPct(e.target.value)}>
