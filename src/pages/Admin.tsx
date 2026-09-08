@@ -24,7 +24,8 @@ interface Presentacion {
   iva_pct: number
   stock_minimo: number
   activo: boolean
-  costo_envasado: number
+  costo_envasado: number         // en UYU (compat) — usado si costo_envasado_usd es null
+  costo_envasado_usd: number | null  // opcional: costo cargado en USD (prioritario)
   es_pack: boolean
 }
 
@@ -54,6 +55,17 @@ export function Admin() {
   const [editorListas, setEditorListas] = useState(false)
   const [descargando, setDescargando] = useState(false)
   const [configAceiteAbierto, setConfigAceiteAbierto] = useState(false)
+  // Cotización BCU cargada una sola vez, usada para convertir costos USD → UYU al calcular márgenes
+  const [cotBcu, setCotBcu] = useState<number>(40)
+  const [cotBcuFecha, setCotBcuFecha] = useState<string>('')
+
+  useEffect(() => {
+    ;(async () => {
+      const { fetchCotizacionBCU } = await import('../lib/bcu')
+      const c = await fetchCotizacionBCU()
+      if (c) { setCotBcu(c.cotizacion); setCotBcuFecha(c.fecha) }
+    })()
+  }, [])
 
   useEffect(() => {
     if (!descargando) return
@@ -105,14 +117,22 @@ export function Admin() {
     await supabase.from('config_global').upsert({ key: 'costo_aceite_por_litro_usd', value: String(val), actualizado_en: new Date().toISOString() })
   }
 
+  // Costo de una presentación individual, siempre devuelto en UYU.
+  // Si tiene costo_envasado_usd, se convierte con la cotización BCU vigente.
+  function costoIndividualUyu(pr: Presentacion): number {
+    if (pr.costo_envasado_usd !== null && pr.costo_envasado_usd !== undefined && Number(pr.costo_envasado_usd) > 0) {
+      return Number(pr.costo_envasado_usd) * cotBcu
+    }
+    return Number(pr.costo_envasado || 0)
+  }
   // Costo envasado de packs = costo propio + suma costos de sus componentes (×unidades)
   function costoEnvasadoTotal(pr: Presentacion): number {
-    let total = Number(pr.costo_envasado || 0)
+    let total = costoIndividualUyu(pr)
     if (pr.es_pack) {
       const comps = componentes.filter((c) => c.presentacion_pack_id === pr.id)
       for (const c of comps) {
         const comp = presentaciones.find((x) => x.id === c.presentacion_componente_id)
-        if (comp) total += Number(comp.costo_envasado || 0) * Number(c.unidades)
+        if (comp) total += costoIndividualUyu(comp) * Number(c.unidades)
       }
     }
     return total
@@ -139,15 +159,14 @@ export function Admin() {
     }))
     const litros = pr.es_pack ? litrosPack(pr) : Number(pr.volumen_ml ?? 0) / 1000
     const costoEnv = costoEnvasadoTotal(pr)
-    const costoAceite = esAceite && litros > 0 ? litros * Number(costoAceiteUsd) * 40 : 0
+    const costoAceite = esAceite && litros > 0 ? litros * Number(costoAceiteUsd) * cotBcu : 0
     const costoTotal = costoEnv + costoAceite
     const precioMin = Number(pr.precio_minorista || 0)
     const precioDistUyu = precioDist.get(pr.id) ?? 0
     const margenMinPct = precioMin > 0 ? ((precioMin - costoTotal) / precioMin) * 100 : 0
     const margenDistPct = precioDistUyu > 0 ? ((precioDistUyu - costoTotal) / precioDistUyu) * 100 : 0
-    const cotEst = 40
-    const margenAceiteMinUsdL = esAceite && litros > 0 ? (precioMin - costoEnv) / litros / cotEst : 0
-    const margenAceiteDistUsdL = esAceite && litros > 0 && precioDistUyu > 0 ? (precioDistUyu - costoEnv) / litros / cotEst : 0
+    const margenAceiteMinUsdL = esAceite && litros > 0 ? (precioMin - costoEnv) / litros / cotBcu : 0
+    const margenAceiteDistUsdL = esAceite && litros > 0 && precioDistUyu > 0 ? (precioDistUyu - costoEnv) / litros / cotBcu : 0
     return { costoEnvasado: costoEnv, precioMin, precioDistUyu, margenMinPct, margenDistPct, margenAceiteMinUsdL, margenAceiteDistUsdL, esAceite }
   }
 
@@ -297,7 +316,7 @@ export function Admin() {
                           </tbody>
                         </table>
                         {puedeEditarMargenes && (
-                          <p className="text-[10px] text-oliva-500 mt-2">Márgenes calculados con costo aceite USD/L de arriba × cot. estimada $40. Los USD/L usan la fórmula: (precio − costo envasado) ÷ litros ÷ 40.</p>
+                          <p className="text-[10px] text-oliva-500 mt-2">Márgenes calculados con cotización BCU $ {cotBcu.toLocaleString('es-UY', { maximumFractionDigits: 2 })} {cotBcuFecha && `(${cotBcuFecha})`}. Los costos cargados en USD se convierten automático a UYU con esa cotización.</p>
                         )}
                       </div>
                     )}
@@ -405,8 +424,16 @@ function PresentacionDialog({ abierto, productoId, editar, onCerrar, onOk }: {
       setNombre(editar.nombre); setVolumenMl(editar.volumen_ml?.toString() ?? ''); setUnidad(editar.unidad)
       setPrecioMin(String(editar.precio_minorista)); setPrecioMay(String(editar.precio_mayorista))
       setIvaPct(String(editar.iva_pct)); setStockMin(String(editar.stock_minimo))
-      setCostoEnv(String(editar.costo_envasado ?? 0)); setActivo(editar.activo)
-      setMonedaCosto('UYU'); setCotizacion(''); setCotizacionFuente('') // al editar arranca en UYU (el valor guardado)
+      // Cargar según cuál moneda tenga guardada la presentación
+      if (editar.costo_envasado_usd !== null && editar.costo_envasado_usd !== undefined) {
+        setCostoEnv(String(editar.costo_envasado_usd))
+        setMonedaCosto('USD')
+      } else {
+        setCostoEnv(String(editar.costo_envasado ?? 0))
+        setMonedaCosto('UYU')
+      }
+      setActivo(editar.activo)
+      setCotizacion(''); setCotizacionFuente('')
     } else {
       setNombre(''); setVolumenMl(''); setUnidad('botella')
       setPrecioMin('0'); setPrecioMay('0'); setIvaPct('10'); setStockMin('0'); setCostoEnv('0'); setActivo(true)
@@ -418,15 +445,9 @@ function PresentacionDialog({ abierto, productoId, editar, onCerrar, onOk }: {
   async function guardar(e: React.FormEvent) {
     e.preventDefault()
     if (!productoId) return
-    // Convertir costo a UYU si se ingresó en USD
     const costoIngresado = Number(costoEnv) || 0
-    const cot = Number(cotizacion) || 0
-    if (monedaCosto === 'USD' && cot <= 0) {
-      setError('Ingresá una cotización válida (o traela del BCU) para convertir el costo a pesos.')
-      return
-    }
-    const costoUyu = monedaCosto === 'USD' ? costoIngresado * cot : costoIngresado
     setGuardando(true); setError(null)
+    // Cada moneda va a su columna. La app calcula la conversión automática cuando la necesita.
     const payload = {
       producto_id: productoId,
       nombre: nombre.trim(),
@@ -436,7 +457,8 @@ function PresentacionDialog({ abierto, productoId, editar, onCerrar, onOk }: {
       precio_mayorista: Number(precioMay) || 0,
       iva_pct: Number(ivaPct) || 0,
       stock_minimo: Number(stockMin) || 0,
-      costo_envasado: costoUyu,
+      costo_envasado: monedaCosto === 'UYU' ? costoIngresado : 0,
+      costo_envasado_usd: monedaCosto === 'USD' ? costoIngresado : null,
       activo,
     }
     const q = editar ? supabase.from('presentaciones').update(payload).eq('id', editar.id) : supabase.from('presentaciones').insert(payload)
