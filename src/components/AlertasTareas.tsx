@@ -10,7 +10,18 @@ interface Tarea {
   prioridad: 'baja' | 'media' | 'alta'
   fecha_vence: string | null
   asignado_a: string | null
+  asignados_a: string[] | null
   creado_por: string | null
+}
+
+// Fecha local (Uruguay) — evita el salto UTC despues de las 21hs que hacia
+// que las tareas del dia aparecieran como vencidas.
+function hoyLocalStr(): string {
+  const d = new Date()
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
 }
 
 const LABEL_ESTADO: Record<Tarea['estado'], string> = {
@@ -34,17 +45,20 @@ export function AlertasTareas() {
     ;(async () => {
       const { data } = await supabase
         .from('tareas')
-        .select('id,titulo,estado,prioridad,fecha_vence,asignado_a,creado_por')
+        .select('id,titulo,estado,prioridad,fecha_vence,asignado_a,asignados_a,creado_por')
         .in('estado', ['pendiente', 'en_progreso'])
       if (cancel) return
-      const mias = ((data as Tarea[]) ?? []).filter((t) => t.asignado_a === soyYo)
+      // "Mias" = asignada a mi por el campo legacy O por el array multi-asignado
+      const mias = ((data as Tarea[]) ?? []).filter(
+        (t) => t.asignado_a === soyYo || (t.asignados_a ?? []).includes(soyYo),
+      )
       setTareas(mias)
       setCargando(false)
     })()
     return () => { cancel = true }
   }, [soyYo])
 
-  const hoy = new Date().toISOString().slice(0, 10)
+  const hoy = hoyLocalStr()
 
   const ordenadas = useMemo(() => {
     const prioNum = { alta: 0, media: 1, baja: 2 }
