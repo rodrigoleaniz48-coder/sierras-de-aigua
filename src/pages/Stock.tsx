@@ -19,12 +19,14 @@ interface Tanque {
   actualizado_en?: string
 }
 interface StockRow { id: number; tanque_id: number | null; presentacion_id: number; unidades: number; ubicacion_id: number }
-interface MovStock { id: number; stock_id: number; tipo: string; unidades: number; venta_id: number | null; nota: string | null; fecha: string }
+interface MovStock { id: number; stock_id: number; tipo: string; unidades: number; venta_id: number | null; nota: string | null; fecha: string; usuario_id: string | null }
 interface MovGranel {
   id: number; fecha: string; tipo: string
   tanque_origen_id: number | null; tanque_destino_id: number | null
   litros: number; nota: string | null; stock_id: number | null
+  usuario_id: string | null
 }
+interface Perfil { id: string; nombre: string }
 interface Ubicacion { id: number; nombre: string; descripcion: string | null; activo: boolean }
 interface Traslado {
   id: number; fecha: string
@@ -47,6 +49,7 @@ export function Stock() {
   const [tanques, setTanques] = useState<Tanque[]>([])
   const [stock, setStock] = useState<StockRow[]>([])
   const [movsStock, setMovsStock] = useState<MovStock[]>([])
+  const [perfiles, setPerfiles] = useState<Perfil[]>([])
   const [movsGranel, setMovsGranel] = useState<MovGranel[]>([])
   const [ubicaciones, setUbicaciones] = useState<Ubicacion[]>([])
   const [traslados, setTraslados] = useState<Traslado[]>([])
@@ -64,7 +67,7 @@ export function Stock() {
 
   async function cargar() {
     setCargando(true)
-    const [p, pr, t, s, mS, mG, u, tr, it] = await Promise.all([
+    const [p, pr, t, s, mS, mG, u, tr, it, pf] = await Promise.all([
       supabase.from('productos').select('id,nombre,categoria,granel').order('nombre'),
       supabase.from('presentaciones').select('id,producto_id,nombre,volumen_ml,stock_minimo,activo,es_pack'),
       supabase.from('tanques').select('*').order('id'),
@@ -74,6 +77,7 @@ export function Stock() {
       supabase.from('ubicaciones').select('*').eq('activo', true).order('id'),
       supabase.from('traslados').select('*').order('fecha', { ascending: false }).limit(100),
       supabase.from('items_traslado').select('*'),
+      supabase.from('perfiles').select('id,nombre'),
     ])
     setProductos((p.data as Producto[]) ?? [])
     setPresentaciones((pr.data as Presentacion[]) ?? [])
@@ -86,6 +90,7 @@ export function Stock() {
     setUbicaciones(allUbic.filter((x) => ubicIdsVisibles.includes(x.id)))
     setTraslados((tr.data as Traslado[]) ?? [])
     setItemsTraslado((it.data as ItemTraslado[]) ?? [])
+    setPerfiles((pf.data as Perfil[]) ?? [])
     setCargando(false)
   }
   useEffect(() => { cargar() }, [])
@@ -203,6 +208,7 @@ export function Stock() {
           prodPorId={prodPorId}
           tanquePorId={tanquePorId}
           ubicPorId={ubicPorId}
+          perfiles={perfiles}
         />
       )}
 
@@ -514,7 +520,7 @@ function EnvasadoView({
 }
 
 function MovimientosView({
-  movsStock, movsGranel, traslados, itemsTraslado, stock, presPorId, prodPorId, tanquePorId, ubicPorId,
+  movsStock, movsGranel, traslados, itemsTraslado, stock, presPorId, prodPorId, tanquePorId, ubicPorId, perfiles,
 }: {
   movsStock: MovStock[]
   movsGranel: MovGranel[]
@@ -525,12 +531,16 @@ function MovimientosView({
   prodPorId: Map<number, Producto>
   tanquePorId: Map<number, Tanque>
   ubicPorId: Map<number, Ubicacion>
+  perfiles: Perfil[]
 }) {
   const stockPorId = useMemo(() => new Map(stock.map((s) => [s.id, s])), [stock])
+  const nombrePorUsr = useMemo(() => new Map(perfiles.map((p) => [p.id, p.nombre])), [perfiles])
+  const usrLabel = (id: string | null | undefined): string => id ? (nombrePorUsr.get(id) ?? '?') : '—'
 
   type Row = {
     key: string; fecha: string; tipo: string; que: string
     detalle: string; cantidad: string; nota: string | null; scope: 'granel' | 'envasado' | 'traslado'
+    usuario: string
   }
 
   function tanqueLabel(id: number | null): string | null {
@@ -555,6 +565,7 @@ function MovimientosView({
       return {
         key: `g${m.id}`, fecha: m.fecha, tipo: m.tipo, que: 'granel',
         detalle, cantidad: `${Number(m.litros).toString()} L`, nota: m.nota, scope: 'granel',
+        usuario: usrLabel(m.usuario_id),
       }
     })
     const st: Row[] = movsStock.map((m) => {
@@ -567,6 +578,7 @@ function MovimientosView({
         detalle: `${prod?.nombre ?? '—'} · ${pres?.nombre ?? '—'}${ubic ? ` @ ${ubic}` : ''}`,
         cantidad: `${m.unidades > 0 ? '+' : ''}${m.unidades} u`,
         nota: m.nota, scope: 'envasado',
+        usuario: usrLabel(m.usuario_id),
       }
     })
     const tr: Row[] = traslados.map((t) => {
@@ -584,16 +596,17 @@ function MovimientosView({
         detalle: `${org} → ${dest} · ${resumen || '(sin items)'}`,
         cantidad: `${totalU} u`,
         nota: t.nota, scope: 'traslado',
+        usuario: usrLabel(t.usuario_id),
       }
     })
     return [...gr, ...st, ...tr].sort((a, b) => (a.fecha < b.fecha ? 1 : -1))
-  }, [movsStock, movsGranel, traslados, itemsTraslado, stock, presPorId, prodPorId, tanquePorId, ubicPorId, stockPorId])
+  }, [movsStock, movsGranel, traslados, itemsTraslado, stock, presPorId, prodPorId, tanquePorId, ubicPorId, stockPorId, nombrePorUsr])
 
   if (filas.length === 0) return <div className="card p-6 text-sm text-oliva-700">Sin movimientos todavía.</div>
 
   return (
     <div className="card p-0 overflow-x-auto">
-      <table className="w-full text-sm min-w-[720px]">
+      <table className="w-full text-sm min-w-[820px]">
         <thead>
           <tr className="text-left text-xs uppercase tracking-wide text-oliva-600 border-b border-oliva-100 bg-oliva-50">
             <th className="py-2 px-4">Fecha</th>
@@ -601,6 +614,7 @@ function MovimientosView({
             <th className="py-2 px-4">Tipo</th>
             <th className="py-2 px-4">Detalle</th>
             <th className="py-2 px-4 text-right">Cantidad</th>
+            <th className="py-2 px-4">Usuario</th>
             <th className="py-2 px-4">Nota</th>
           </tr>
         </thead>
@@ -614,6 +628,7 @@ function MovimientosView({
               </td>
               <td className="py-2 px-4 text-oliva-800">{r.detalle}</td>
               <td className={`py-2 px-4 text-right tabular-nums font-medium ${r.cantidad.startsWith('-') ? 'text-red-700' : 'text-oliva-900'}`}>{r.cantidad}</td>
+              <td className="py-2 px-4 text-xs text-oliva-700 whitespace-nowrap">{r.usuario}</td>
               <td className="py-2 px-4 text-oliva-600 truncate max-w-[240px]">{r.nota ?? ''}</td>
             </tr>
           ))}
