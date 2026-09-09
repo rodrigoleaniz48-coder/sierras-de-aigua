@@ -43,8 +43,10 @@ const FORMAS_PAGO = ['efectivo', 'transferencia'] as const
 // ---------- Página ----------
 
 export function Ventas() {
-  const { session, puede } = useAuth()
+  const { session, puede, perfil } = useAuth()
   const puedeEscribir = puede(['admin', 'ventas'])
+  // Gonzalo (Maldonado) no usa cadete: se ocultan los botones y el resumen mensual.
+  const usaCadete = !(perfil?.nombre ?? '').toLowerCase().includes('gonzalo')
   const [ventas, setVentas] = useState<Venta[]>([])
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [socios, setSocios] = useState<Socio[]>([])
@@ -161,8 +163,12 @@ export function Ventas() {
           </p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <button className="btn-secondary" onClick={() => setCadeteAbierto(true)}>🛵 Lista para cadete</button>
-          <button className="btn-secondary" onClick={() => setResumenCadeteAbierto(true)}>💵 Pago mensual cadete</button>
+          {usaCadete && (
+            <>
+              <button className="btn-secondary" onClick={() => setCadeteAbierto(true)}>🛵 Lista para cadete</button>
+              <button className="btn-secondary" onClick={() => setResumenCadeteAbierto(true)}>💵 Pago mensual cadete</button>
+            </>
+          )}
           {puedeEscribir && (
             <button className="btn-primary" onClick={() => setNueva(true)}>+ Nueva venta</button>
           )}
