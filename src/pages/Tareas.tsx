@@ -31,6 +31,17 @@ interface Tarea {
   jornales: number
 }
 
+// Fecha de hoy en zona local (Uruguay UTC-3), no en UTC.
+// Necesario para que las tareas "vencidas" se calculen igual sin importar
+// la hora en que cada usuario abre la app (evita el salto UTC a partir de las 21:00 local).
+function hoyLocalStr(): string {
+  const d = new Date()
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
 function esCreador(nombre: string | null | undefined): boolean {
   const n = (nombre ?? '').toLowerCase()
   return n.includes('rodrigo') || n.includes('santi') || n.includes('ayelen') || n.includes('ayelén')
@@ -92,8 +103,11 @@ export function Tareas() {
   const curso = tareas.filter((t) => t.estado === 'en_progreso').length
 
   // === Mi agenda: mis tareas activas agrupadas por vencimiento ===
-  const hoyStr = new Date().toISOString().slice(0, 10)
-  const en7Str = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10)
+  const hoyStr = hoyLocalStr()
+  const en7Str = (() => {
+    const d = new Date(); d.setDate(d.getDate() + 7)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  })()
   const misActivasTodas = useMemo(
     () => tareas.filter((t) => {
       const meAsignaron = t.asignado_a === soyYo || (t.asignados_a ?? []).includes(soyYo)
@@ -562,7 +576,7 @@ function RegistrarHechaDialog({ abierto, soyYo, onCerrar, onOk }: {
   const [titulo, setTitulo] = useState('')
   const [descripcion, setDescripcion] = useState('')
   const [jornales, setJornales] = useState<number>(1)
-  const [fecha, setFecha] = useState<string>(new Date().toISOString().slice(0, 10))
+  const [fecha, setFecha] = useState<string>(hoyLocalStr())
   const [notas, setNotas] = useState('')
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -570,7 +584,7 @@ function RegistrarHechaDialog({ abierto, soyYo, onCerrar, onOk }: {
   useEffect(() => {
     if (!abierto) return
     setTitulo(''); setDescripcion(''); setJornales(1)
-    setFecha(new Date().toISOString().slice(0, 10)); setNotas(''); setError(null)
+    setFecha(hoyLocalStr()); setNotas(''); setError(null)
   }, [abierto])
 
   async function guardar(e: React.FormEvent) {
@@ -679,7 +693,7 @@ function TareaCard({ tarea, asignado, asignadosPerfiles, creador, soyYo, onCambi
     }
     return asignado ? (esMia ? 'Yo' : asignado.nombre) : null
   })()
-  const vencida = tarea.fecha_vence && tarea.fecha_vence < new Date().toISOString().slice(0, 10) && tarea.estado !== 'hecha' && tarea.estado !== 'cancelada'
+  const vencida = tarea.fecha_vence && tarea.fecha_vence < hoyLocalStr() && tarea.estado !== 'hecha' && tarea.estado !== 'cancelada'
 
   return (
     <div className={`panel ${vencida ? 'border-red-300' : ''}`}>
