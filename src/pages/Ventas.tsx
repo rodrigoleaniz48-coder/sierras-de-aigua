@@ -85,7 +85,10 @@ export function Ventas() {
       supabase.from('ubicaciones').select('id,nombre,activo').eq('activo', true).order('id'),
     ])
     setVentas((v.data as Venta[]) ?? [])
-    setClientes((c.data as Cliente[]) ?? [])
+    // Gonzalo solo ve sus contactos (asignados a el o sin asignar). Los demas ven todos.
+    const esGonzalo = (perfil?.nombre ?? '').toLowerCase().includes('gonzalo')
+    const cAll = (c.data as Cliente[]) ?? []
+    setClientes(esGonzalo ? cAll.filter((x) => !x.socio_asignado || x.socio_asignado === perfil?.id) : cAll)
     setSocios((s.data as Socio[]) ?? [])
     setUbicaciones((u.data as Ubicacion[]) ?? [])
     setCargando(false)

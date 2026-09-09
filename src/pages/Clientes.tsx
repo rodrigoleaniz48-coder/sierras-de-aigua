@@ -14,8 +14,11 @@ interface VentaMin {
 }
 
 export function Clientes() {
-  const { puede } = useAuth()
+  const { puede, perfil } = useAuth()
   const puedeEscribir = puede(['admin', 'ventas'])
+  // Gonzalo ve solo sus contactos (los asignados a el) + los aun no asignados.
+  // Rodrigo, Santiago y Ayelen (y admin) ven todos.
+  const esGonzalo = (perfil?.nombre ?? '').toLowerCase().includes('gonzalo')
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [socios, setSocios] = useState<Socio[]>([])
   const [ventas, setVentas] = useState<VentaMin[]>([])
@@ -76,6 +79,8 @@ export function Clientes() {
   const filtrados = useMemo(() => {
     const t = q.trim().toLowerCase()
     const arr = clientes.filter((c) => {
+      // Gonzalo solo ve sus contactos (o los que aun no tienen socio asignado)
+      if (esGonzalo && c.socio_asignado && c.socio_asignado !== perfil?.id) return false
       if (tipo !== 'todos' && c.tipo !== tipo) return false
       if (segmento !== 'todos') {
         const st = statsPorCliente.get(c.id)
@@ -100,7 +105,7 @@ export function Clientes() {
     else if (orden === 'total') arr.sort((a, b) => (statsPorCliente.get(b.id)?.total ?? 0) - (statsPorCliente.get(a.id)?.total ?? 0))
     else arr.sort((a, b) => a.nombre.localeCompare(b.nombre))
     return arr
-  }, [clientes, q, tipo, segmento, statsPorCliente, orden])
+  }, [clientes, q, tipo, segmento, statsPorCliente, orden, esGonzalo, perfil?.id])
 
   async function eliminarCliente(c: Cliente) {
     const { error } = await supabase.from('clientes').delete().eq('id', c.id)
