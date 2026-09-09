@@ -33,7 +33,7 @@ export function Clientes() {
     const [c, s, v] = await Promise.all([
       supabase.from('clientes').select('*').order('nombre'),
       supabase.from('perfiles').select('id,nombre').eq('activo', true).order('nombre'),
-      supabase.from('ventas').select('id,fecha,cliente_id,total,estado').neq('estado', 'cancelado'),
+      supabase.from('ventas').select('id,fecha,cliente_id,total,estado').neq('estado', 'cancelado').eq('a_confirmar', false),
     ])
     setClientes((c.data as Cliente[]) ?? [])
     setSocios((s.data as Socio[]) ?? [])

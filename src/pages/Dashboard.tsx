@@ -43,7 +43,7 @@ export function Dashboard() {
     let cancel = false
     ;(async () => {
       const [v, s, u] = await Promise.all([
-        supabase.from('ventas').select('id,socio_id,ubicacion_id').eq('envio', true).eq('entregado', false).neq('estado', 'cancelado').neq('socio_id', soyYo),
+        supabase.from('ventas').select('id,socio_id,ubicacion_id').eq('envio', true).eq('entregado', false).neq('estado', 'cancelado').eq('a_confirmar', false).neq('socio_id', soyYo),
         supabase.from('perfiles').select('id,nombre'),
         supabase.from('ubicaciones').select('id,nombre'),
       ])
@@ -69,16 +69,16 @@ export function Dashboard() {
     const mesAntFin = new Date(hoy.getFullYear(), hoy.getMonth(), 0).toISOString().slice(0, 10)
 
     Promise.all([
-      // Ventas del mes (para KPI de facturado)
-      supabase.from('ventas').select('id, total, entregado, cobrado').gte('fecha', mesInicio).neq('estado', 'cancelado').eq('promocion_comercial', false),
+      // Ventas del mes (para KPI de facturado) — excluye potenciales
+      supabase.from('ventas').select('id, total, entregado, cobrado').gte('fecha', mesInicio).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
       // Total del mes anterior
-      supabase.from('ventas').select('total').gte('fecha', mesAntInicio).lte('fecha', mesAntFin).neq('estado', 'cancelado').eq('promocion_comercial', false),
+      supabase.from('ventas').select('total').gte('fecha', mesAntInicio).lte('fecha', mesAntFin).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
       // Items del mes con producto y presentación, para calcular litros de aceite (envasado + granel)
-      supabase.from('items_venta').select('unidades, presentacion:presentaciones(volumen_ml, producto:productos(nombre, categoria)), venta:ventas!inner(fecha, estado)').gte('venta.fecha', mesInicio).neq('venta.estado', 'cancelado'),
+      supabase.from('items_venta').select('unidades, presentacion:presentaciones(volumen_ml, producto:productos(nombre, categoria)), venta:ventas!inner(fecha, estado, a_confirmar)').gte('venta.fecha', mesInicio).neq('venta.estado', 'cancelado').eq('venta.a_confirmar', false),
       // Ventas con última compra vieja (para "en riesgo") — traemos fechas de última venta por cliente
-      supabase.from('ventas').select('cliente_id, fecha').neq('estado', 'cancelado').order('fecha', { ascending: false }),
+      supabase.from('ventas').select('cliente_id, fecha').neq('estado', 'cancelado').eq('a_confirmar', false).order('fecha', { ascending: false }),
       // Pendientes de entrega/cobro (todas las fechas, no filtrar por mes: siguen pendientes despues del cierre)
-      supabase.from('ventas').select('id, total, entregado, cobrado, promocion_comercial').neq('estado', 'cancelado').or('entregado.eq.false,cobrado.eq.false'),
+      supabase.from('ventas').select('id, total, entregado, cobrado, promocion_comercial').neq('estado', 'cancelado').eq('a_confirmar', false).or('entregado.eq.false,cobrado.eq.false'),
     ])
       .then(([vRes, vAntRes, iRes, ultVentasRes, pendRes]) => {
         const ventasMes = vRes.data ?? []

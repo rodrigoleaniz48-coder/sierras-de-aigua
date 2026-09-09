@@ -32,6 +32,8 @@ interface Venta {
   cotizacion?: number | null
   promocion_comercial?: boolean
   cuenta_id?: number | null
+  a_confirmar?: boolean
+  fecha_cobro?: string | null
 }
 interface CuentaBancaria { id: number; nombre: string; moneda: 'UYU' | 'USD'; activo: boolean }
 
@@ -102,16 +104,17 @@ export function Ventas() {
   }, [ventas, filtroSocio, filtroDesde, filtroHasta, soloEnvio])
 
   const totalPeriodo = useMemo(
-    () => filtradas.reduce((s, v) => (v.estado === 'cancelado' || v.promocion_comercial ? s : s + Number(v.total ?? 0)), 0),
+    () => filtradas.reduce((s, v) => (v.estado === 'cancelado' || v.promocion_comercial || v.a_confirmar ? s : s + Number(v.total ?? 0)), 0),
     [filtradas],
   )
 
   // Ventas pendientes de entrega o cobro (siempre visibles arriba, sin filtros)
-  // Pendientes: entrega o cobro. Las promos no tienen cobro (se ignoran por cobro; sí quedan si falta entregar).
+  // Pendientes: entrega, cobro o "a_confirmar" (potenciales). Las promos no tienen cobro.
   const pendientes = useMemo(
     () => ventas.filter((v) => {
       if (v.estado === 'cancelado') return false
-      if (v.promocion_comercial) return !v.entregado // promo: solo pendiente si falta entregar
+      if (v.a_confirmar) return true // potenciales siempre en pendientes
+      if (v.promocion_comercial) return !v.entregado
       return !v.entregado || !v.cobrado
     }),
     [ventas],
@@ -407,6 +410,9 @@ function TablaVentas({
                 {v.promocion_comercial && (
                   <span className="text-[10px] uppercase tracking-wide rounded-full bg-purple-100 text-purple-800 px-1.5 py-[1px] font-semibold">🎁 promo</span>
                 )}
+                {v.a_confirmar && (
+                  <span className="text-[10px] uppercase tracking-wide rounded-full bg-yellow-100 text-yellow-900 border border-yellow-400 px-1.5 py-[1px] font-semibold" title="Venta potencial · no descuenta stock ni cuenta en reportes">❓ a confirmar</span>
+                )}
               </div>
               {resumenPorId?.get(v.id) && (
                 <div className="text-[11px] text-oliva-600 font-normal mt-0.5 leading-snug">
@@ -550,6 +556,7 @@ function NuevaVentaDialog({
   const [ubicacionId, setUbicacionId] = useState<string>('1')
   const [entregado, setEntregado] = useState(true)
   const [cobrado, setCobrado] = useState(true)
+  const [aConfirmar, setAConfirmar] = useState(false)
   const [notas, setNotas] = useState('')
   const [items, setItems] = useState<Item[]>([nuevoItem()])
   const [monedaVenta, setMonedaVenta] = useState<'UYU' | 'USD'>('UYU')
@@ -631,6 +638,7 @@ function NuevaVentaDialog({
       setUbicacionId(String(ventaAEditar.ubicacion_id ?? 1))
       setEntregado(ventaAEditar.entregado)
       setCobrado(ventaAEditar.cobrado)
+      setAConfirmar(!!ventaAEditar.a_confirmar)
       setNotas(ventaAEditar.notas ?? '')
       setCuentaId(ventaAEditar.cuenta_id ? String(ventaAEditar.cuenta_id) : '')
     } else {
@@ -643,7 +651,7 @@ function NuevaVentaDialog({
         setConFactura(b.conFactura); setEnvio(b.envio); setCostoEnvio(b.costoEnvio); setHorarioEntrega(b.horarioEntrega)
         setPromocion(!!(b as { promocion?: boolean }).promocion)
         setDireccionEnvio(b.direccionEnvio); setTelefonoEnvio(b.telefonoEnvio)
-        setUbicacionId(b.ubicacionId); setEntregado(b.entregado); setCobrado(b.cobrado); setNotas(b.notas)
+        setUbicacionId(b.ubicacionId); setEntregado(b.entregado); setCobrado(b.cobrado); setAConfirmar(false); setNotas(b.notas)
         setItems(b.items && b.items.length > 0 ? b.items : [nuevoItem()])
         setMonedaVenta(b.monedaVenta ?? 'UYU')
         setCotizacionUsd(b.cotizacionUsd ?? '')
@@ -653,7 +661,7 @@ function NuevaVentaDialog({
         setEnvio(false); setCostoEnvio('190'); setHorarioEntrega('')
         setDireccionEnvio(''); setTelefonoEnvio('')
         setUbicacionId(String(ubicacionDefaultPorSocio(perfil?.nombre)))
-        setEntregado(false); setCobrado(false); setNotas(''); setItems([nuevoItem()])
+        setEntregado(false); setCobrado(false); setAConfirmar(false); setNotas(''); setItems([nuevoItem()])
         setMonedaVenta('UYU'); setCotizacionUsd('')
       }
       setCuentaId('') // se autocalcula abajo cuando cambia conFactura / moneda
@@ -853,6 +861,7 @@ async function guardar(e: React.FormEvent) {
     if (monedaVenta === 'USD' && cot <= 0) { setError('Ingresá la cotización del USD (pesos por 1 USD) para registrar la venta en dólares.'); setGuardando(false); guardandoRef.current = false; return }
 
     // Preacumular stock necesitado por presentación (para validar packs contra sus componentes)
+    // Si la venta es "a confirmar" (potencial), NO validamos ni descontamos stock.
     const necesidad = new Map<number, number>()
     const litrosPorTanque = new Map<number, number>()
     for (const f of filasValidas) {
@@ -863,13 +872,15 @@ async function guardar(e: React.FormEvent) {
       const esGranel = (prodF?.nombre ?? '').toLowerCase().includes('aceite a granel')
       if (esGranel) {
         if (!f.it.tanque_id) { setError(`Elegí un tanque para "${prodF?.nombre}".`); setGuardando(false); guardandoRef.current = false; return }
-        const acum = (litrosPorTanque.get(f.it.tanque_id) ?? 0) + Number(f.it.unidades)
-        litrosPorTanque.set(f.it.tanque_id, acum)
-        const tq = tanques.find((t) => t.id === f.it.tanque_id)
-        if (!tq) { setError('Tanque no encontrado.'); setGuardando(false); guardandoRef.current = false; return }
-        if (acum > Number(tq.litros_actuales)) {
-          setError(`Litros insuficientes en ${tq.nombre}: pedís ${acum} L y quedan ${Number(tq.litros_actuales).toFixed(0)} L.`)
-          setGuardando(false); guardandoRef.current = false; return
+        if (!aConfirmar) {
+          const acum = (litrosPorTanque.get(f.it.tanque_id) ?? 0) + Number(f.it.unidades)
+          litrosPorTanque.set(f.it.tanque_id, acum)
+          const tq = tanques.find((t) => t.id === f.it.tanque_id)
+          if (!tq) { setError('Tanque no encontrado.'); setGuardando(false); guardandoRef.current = false; return }
+          if (acum > Number(tq.litros_actuales)) {
+            setError(`Litros insuficientes en ${tq.nombre}: pedís ${acum} L y quedan ${Number(tq.litros_actuales).toFixed(0)} L.`)
+            setGuardando(false); guardandoRef.current = false; return
+          }
         }
         continue
       }
@@ -878,6 +889,7 @@ async function guardar(e: React.FormEvent) {
         continue
       }
       if (f.p?.es_pack) {
+        if (aConfirmar) continue
         const comps = componentes.filter((c) => c.presentacion_pack_id === f.it.presentacion_id)
         if (comps.length === 0) { setError(`El pack "${f.p?.nombre}" no tiene componentes definidos.`); setGuardando(false); guardandoRef.current = false; return }
         for (const c of comps) {
@@ -885,6 +897,7 @@ async function guardar(e: React.FormEvent) {
         }
       } else {
         if (!f.it.stock_id) { setError('Todos los ítems necesitan un stock disponible.'); setGuardando(false); guardandoRef.current = false; return }
+        if (aConfirmar) continue
         if (f.it.unidades > f.disponible) {
           setError(`No hay stock suficiente para "${f.p?.nombre ?? ''}": pedís ${f.it.unidades}, disponibles ${f.disponible}.`)
           setGuardando(false); guardandoRef.current = false; return
@@ -942,6 +955,12 @@ async function guardar(e: React.FormEvent) {
     const subtotalUyu = subtotal * factorAUyu
     const ivaUyu = iva * factorAUyu
     const totalUyu = total * factorAUyu
+    // fecha_cobro: si esta cobrada, respeta la fecha original si ya la tenia, sino hoy.
+    // Si se desmarca cobrado, queda null.
+    const hoy = new Date().toISOString().slice(0, 10)
+    const fechaCobroSync = cobrado
+      ? (ventaAEditar?.fecha_cobro ?? hoy)
+      : null
     const cabecera = {
       fecha,
       cliente_id: clienteId ? Number(clienteId) : null,
@@ -953,6 +972,8 @@ async function guardar(e: React.FormEvent) {
       horario_entrega: envio ? (horarioEntrega.trim() || null) : null,
       ubicacion_id: Number(ubicacionId),
       entregado, cobrado,
+      fecha_cobro: fechaCobroSync,
+      a_confirmar: aConfirmar,
       subtotal: subtotalUyu, descuento: 0, iva: ivaUyu, total: totalUyu,
       notas: notas.trim() || null,
       moneda: monedaVenta,
@@ -1032,7 +1053,8 @@ async function guardar(e: React.FormEvent) {
     }
 
     // 3) Aceite a granel: descontar litros de cada tanque + registrar movimiento
-    if (litrosPorTanque.size > 0) {
+    //    (skip cuando es "a confirmar": no se toca stock hasta confirmar)
+    if (!aConfirmar && litrosPorTanque.size > 0) {
       const { data: { user } } = await supabase.auth.getUser()
       for (const [tqId, litros] of litrosPorTanque) {
         const tq = tanques.find((t) => t.id === tqId)
@@ -1060,7 +1082,7 @@ async function guardar(e: React.FormEvent) {
       setEnvio(false); setCostoEnvio('190'); setHorarioEntrega('')
       setDireccionEnvio(''); setTelefonoEnvio('')
       setUbicacionId(String(ubicacionDefaultPorSocio(perfil?.nombre)))
-      setEntregado(false); setCobrado(false); setNotas(''); setItems([nuevoItem()])
+      setEntregado(false); setCobrado(false); setAConfirmar(false); setNotas(''); setItems([nuevoItem()])
       setMonedaVenta('UYU'); setCotizacionUsd('')
     }
     onOk()
@@ -1237,12 +1259,31 @@ async function guardar(e: React.FormEvent) {
                 onChange={(e) => {
                   const on = e.target.checked
                   setPromocion(on)
-                  if (on) { setCobrado(true); setConFactura(false) }
+                  if (on) { setCobrado(true); setConFactura(false); setAConfirmar(false) }
                 }}
                 className="h-4 w-4 accent-oliva-700"
               />
               <span className="text-sm text-oliva-800">🎁 Promoción comercial <span className="text-xs text-oliva-600">(regalo, no se cobra)</span></span>
             </label>
+            <label className="flex items-center gap-2 cursor-pointer sm:col-span-3">
+              <input
+                id="ac"
+                type="checkbox"
+                checked={aConfirmar}
+                onChange={(e) => {
+                  const on = e.target.checked
+                  setAConfirmar(on)
+                  if (on) { setEntregado(false); setCobrado(false); setPromocion(false) }
+                }}
+                className="h-4 w-4 accent-yellow-600"
+              />
+              <span className="text-sm text-oliva-800">❓ A confirmar <span className="text-xs text-oliva-600">(potencial · no descuenta stock ni cuenta en reportes hasta confirmar)</span></span>
+            </label>
+            {aConfirmar && (
+              <div className="sm:col-span-3 rounded-lg bg-yellow-50 border border-yellow-300 p-2 text-xs text-yellow-900">
+                Esta venta quedará registrada como <b>potencial</b>. No se descuenta stock, no aparece en reportes ni contabilidad. Aparece entre los pendientes con el chip <b>❓ a confirmar</b>. Se convierte en venta real con el botón <b>Confirmar venta</b> desde el detalle.
+              </div>
+            )}
           </div>
 
           {Number(ubicacionId) !== 2 && (
@@ -1730,10 +1771,52 @@ function VentaDetalleDialog({
     const nuevo = !cobrado
     setGuardando(true); setError(null)
     const estadoSync = nuevo ? 'cobrado' : (entregado ? 'entregado' : 'pendiente')
-    const { error } = await supabase.from('ventas').update({ cobrado: nuevo, estado: estadoSync }).eq('id', venta!.id)
+    // fecha_cobro: setear hoy al marcar cobrado (si aun no tenia); null al desmarcar.
+    const patch: Record<string, unknown> = { cobrado: nuevo, estado: estadoSync }
+    if (nuevo && !venta!.fecha_cobro) patch.fecha_cobro = new Date().toISOString().slice(0, 10)
+    if (!nuevo) patch.fecha_cobro = null
+    const { error } = await supabase.from('ventas').update(patch).eq('id', venta!.id)
     setGuardando(false)
     if (error) { setError(error.message); return }
     setCobrado(nuevo)
+    onCambio()
+  }
+
+  async function confirmarVenta() {
+    if (!venta!.a_confirmar) return
+    setGuardando(true); setError(null)
+    // 1) Descontar stock envasado (via RPC) - valida stock disponible por ubicacion
+    const { error: eRpc } = await supabase.rpc('fn_descontar_stock_venta_completa', { p_venta_id: venta!.id })
+    if (eRpc) { setError('No se pudo confirmar (stock insuficiente?): ' + eRpc.message); setGuardando(false); return }
+    // 2) Granel: descontar litros de cada tanque + registrar movimiento
+    const { data: itsGranel } = await supabase.from('items_venta')
+      .select('tanque_id,unidades').eq('venta_id', venta!.id).not('tanque_id', 'is', null)
+    const litrosPorTq = new Map<number, number>()
+    for (const it of (itsGranel ?? [])) {
+      if (!it.tanque_id) continue
+      litrosPorTq.set(it.tanque_id, (litrosPorTq.get(it.tanque_id) ?? 0) + Number(it.unidades))
+    }
+    if (litrosPorTq.size > 0) {
+      const { data: { user } } = await supabase.auth.getUser()
+      for (const [tqId, litros] of litrosPorTq) {
+        const { data: tqPrev } = await supabase.from('tanques').select('litros_actuales').eq('id', tqId).maybeSingle()
+        if (!tqPrev) continue
+        if (Number(tqPrev.litros_actuales) < litros) {
+          setError(`Litros insuficientes en tanque #${tqId}: pide ${litros} L y quedan ${Number(tqPrev.litros_actuales).toFixed(0)} L.`)
+          setGuardando(false); return
+        }
+        await supabase.from('tanques').update({ litros_actuales: Number(tqPrev.litros_actuales) - litros, actualizado_en: new Date().toISOString() }).eq('id', tqId)
+        await supabase.from('movimientos_granel').insert({
+          tipo: 'venta_granel', tanque_origen_id: tqId, litros: -litros,
+          venta_id: venta!.id, usuario_id: user?.id ?? null,
+          nota: `Venta a granel · venta #${venta!.id} (confirmada)`,
+        })
+      }
+    }
+    // 3) Marcar la venta como confirmada
+    const { error: eU } = await supabase.from('ventas').update({ a_confirmar: false }).eq('id', venta!.id)
+    setGuardando(false)
+    if (eU) { setError(eU.message); return }
     onCambio()
   }
 
@@ -1787,6 +1870,25 @@ function VentaDetalleDialog({
         {anulada && (
           <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-800">
             Esta venta está <b>anulada</b>. El stock ya fue devuelto.
+          </div>
+        )}
+
+        {venta.a_confirmar && !anulada && (
+          <div className="rounded-lg bg-yellow-50 border border-yellow-400 p-3 text-sm text-yellow-900 flex flex-col sm:flex-row sm:items-center gap-3 sm:justify-between">
+            <div>
+              ❓ Venta <b>a confirmar</b> (potencial). No descuenta stock ni cuenta en reportes.
+            </div>
+            {puedeEditar && (
+              <button
+                type="button"
+                onClick={confirmarVenta}
+                disabled={guardando}
+                className="text-sm px-3 py-2 rounded-lg bg-oliva-700 text-white hover:bg-oliva-800 disabled:opacity-50"
+                title="Convierte la venta potencial en venta real: descuenta stock y la incluye en reportes"
+              >
+                {guardando ? 'Confirmando…' : '✓ Confirmar venta'}
+              </button>
+            )}
           </div>
         )}
 
