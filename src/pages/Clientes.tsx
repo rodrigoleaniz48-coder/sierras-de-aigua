@@ -16,7 +16,7 @@ interface VentaMin {
 export function Clientes() {
   const { puede, perfil } = useAuth()
   const puedeEscribir = puede(['admin', 'ventas'])
-  // Gonzalo ve solo sus contactos (los asignados a el) + los aun no asignados.
+  // Gonzalo ve solo sus contactos (los asignados a el).
   // Rodrigo, Santiago y Ayelen (y admin) ven todos.
   const esGonzalo = (perfil?.nombre ?? '').toLowerCase().includes('gonzalo')
   const [clientes, setClientes] = useState<Cliente[]>([])
@@ -79,8 +79,8 @@ export function Clientes() {
   const filtrados = useMemo(() => {
     const t = q.trim().toLowerCase()
     const arr = clientes.filter((c) => {
-      // Gonzalo solo ve sus contactos (o los que aun no tienen socio asignado)
-      if (esGonzalo && c.socio_asignado && c.socio_asignado !== perfil?.id) return false
+      // Gonzalo solo ve sus contactos (asignados a el)
+      if (esGonzalo && c.socio_asignado !== perfil?.id) return false
       if (tipo !== 'todos' && c.tipo !== tipo) return false
       if (segmento !== 'todos') {
         const st = statsPorCliente.get(c.id)
@@ -231,6 +231,7 @@ export function Clientes() {
       <ClienteDialog
         abierto={nuevo}
         socios={socios}
+        defaultSocioAsignado={perfil?.id}
         onCerrar={() => setNuevo(false)}
         onOk={() => { setNuevo(false); cargar() }}
       />
