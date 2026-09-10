@@ -2,6 +2,7 @@ import { NavLink } from 'react-router-dom'
 import { type ReactNode } from 'react'
 import { useAuth } from '../lib/auth'
 import type { Rol } from '../lib/types'
+import { useOcultarAlBajar } from '../lib/useOcultarAlBajar'
 
 interface Tab {
   to?: string
@@ -11,7 +12,6 @@ interface Tab {
   onClick?: () => void
 }
 
-// Icons: simple stroke SVGs, matching the sidebar style
 const IconHome = <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M3 10l9-7 9 7v10a2 2 0 0 1-2 2h-4v-6h-6v6H5a2 2 0 0 1-2-2z" /></svg>
 const IconVentas = <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7h18M6 7v13h12V7M9 4h6v3H9z" /></svg>
 const IconTareas = <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>
@@ -20,6 +20,7 @@ const IconMas = <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stro
 
 export function BottomNav({ onAbrirMas }: { onAbrirMas: () => void }) {
   const { perfil } = useAuth()
+  const oculta = useOcultarAlBajar()
 
   const tabs: Tab[] = [
     { to: '/',       label: 'Inicio', icon: IconHome,   roles: ['admin', 'ventas', 'marketing'] },
@@ -33,7 +34,9 @@ export function BottomNav({ onAbrirMas }: { onAbrirMas: () => void }) {
 
   return (
     <nav
-      className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-oliva-100 shadow-[0_-2px_10px_rgba(0,0,0,0.04)]"
+      className={`lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-oliva-100 shadow-[0_-2px_10px_rgba(0,0,0,0.04)] transition-transform duration-200 ease-out ${
+        oculta ? 'translate-y-full' : 'translate-y-0'
+      }`}
       style={{ paddingBottom: 'env(safe-area-inset-bottom, 0)' }}
     >
       <div className="grid grid-cols-5">
