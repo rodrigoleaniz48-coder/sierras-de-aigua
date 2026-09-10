@@ -121,6 +121,24 @@ export function Gastos() {
   const netoUSD = reembYoUSD - adelYoUSD
   const hayCtaSocio = reembYoUYU + reembYoUSD + adelYoUYU + adelYoUSD > 0
 
+  // Ids de todos los gastos reembolsables pendientes de ese socio en el periodo mostrado
+  const reembPendIdsSocio = misGastos.filter((g) => g.reembolsable && !g.reembolsado).map((g) => g.id)
+  const reembPendCantSocio = reembPendIdsSocio.length
+  const [confirmMarcarReemb, setConfirmMarcarReemb] = useState(false)
+  const [marcandoReemb, setMarcandoReemb] = useState(false)
+
+  async function marcarTodosReembolsados() {
+    if (reembPendCantSocio === 0) return
+    setMarcandoReemb(true)
+    const { error } = await supabase.from('gastos')
+      .update({ reembolsado: true })
+      .in('id', reembPendIdsSocio)
+    setMarcandoReemb(false)
+    setConfirmMarcarReemb(false)
+    if (error) { alert('Error: ' + error.message); return }
+    cargar()
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -218,6 +236,36 @@ export function Gastos() {
               </div>
             </div>
           </div>
+
+          {/* Accion de saldar reembolsables: al pagar el sueldo se marcan todos los pendientes de un solo tiro */}
+          {reembPendCantSocio > 0 && (
+            <div className="mt-3 pt-3 border-t border-oliva-200">
+              {!confirmMarcarReemb ? (
+                <button
+                  type="button"
+                  className="btn-secondary text-sm"
+                  onClick={() => setConfirmMarcarReemb(true)}
+                >
+                  ✅ Marcar todos los reembolsables como pagados ({reembPendCantSocio})
+                </button>
+              ) : (
+                <div className="rounded-lg bg-aceite-500/10 border border-aceite-500/40 p-3 space-y-2">
+                  <div className="text-sm text-oliva-900">
+                    Se marcarán como <b>reembolsado</b> los <b>{reembPendCantSocio}</b> gasto{reembPendCantSocio === 1 ? '' : 's'} reembolsable{reembPendCantSocio === 1 ? '' : 's'} pendiente{reembPendCantSocio === 1 ? '' : 's'} de <b>{socioFocoNombre}</b> en este período
+                    {reembYoUYU > 0 && <> · <b>{money(reembYoUYU)}</b></>}
+                    {reembYoUSD > 0 && <> · <b>U$S {Number(reembYoUSD).toLocaleString('es-UY')}</b></>}
+                    . Se usa al liquidar el sueldo (sueldo + reembolsos - adelantos).
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <button type="button" className="btn-secondary text-xs" onClick={() => setConfirmMarcarReemb(false)} disabled={marcandoReemb}>Cancelar</button>
+                    <button type="button" className="text-xs px-3 py-2 rounded-lg bg-oliva-800 text-white hover:bg-oliva-900 disabled:opacity-50" onClick={marcarTodosReembolsados} disabled={marcandoReemb}>
+                      {marcandoReemb ? 'Marcando…' : 'Sí, marcar todos'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
