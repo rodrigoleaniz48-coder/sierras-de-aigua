@@ -759,10 +759,9 @@ function NuevaVentaDialog({
     }))
   }, [preciosLista, esMayorista, presPorId])
 
-  // Al cambiar de ubicación, resetear stock_id de todos los ítems (son de otra ubicación)
-  useEffect(() => {
-    setItems((prev) => prev.map((it) => ({ ...it, stock_id: null })))
-  }, [ubicacionId])
+  // Nota: el reset de stock_id al cambiar ubicacion NO va en un useEffect, porque
+  // se dispararia tambien al cargar borrador/edicion (cuando ubicacionId pasa de '1' inicial
+  // al valor guardado). Se hace inline en el onChange del select (mas abajo).
 
   // Al marcar envío por cadete: por default queda como pendiente de entrega y de cobro
   // (típicamente se entrega y cobra al día siguiente). Se puede corregir a mano igual.
@@ -1120,7 +1119,12 @@ async function guardar(e: React.FormEvent) {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div className="sm:col-span-3 rounded-lg bg-oliva-100/60 border border-oliva-200 p-3">
             <label className="label">📍 Ubicación desde donde se despacha</label>
-            <select className="input" value={ubicacionId} onChange={(e) => setUbicacionId(e.target.value)}>
+            <select className="input" value={ubicacionId} onChange={(e) => {
+              const nueva = e.target.value
+              setUbicacionId(nueva)
+              // Al cambiar manualmente de ubicacion, resetear stock_id (el previo era de otra ubicacion)
+              setItems((prev) => prev.map((it) => ({ ...it, stock_id: null })))
+            }}>
               {ubicaciones.map((u) => <option key={u.id} value={u.id}>{u.nombre}</option>)}
             </select>
             <p className="text-[11px] text-oliva-700 mt-1">
