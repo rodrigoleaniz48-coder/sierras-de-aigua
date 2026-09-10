@@ -3,6 +3,22 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { Dialog } from '../components/Dialog'
+import { borrarKey, guardarFlag, guardarObj, leerFlag, leerObj } from '../lib/persistencia'
+
+// Borrador de "Nueva tarea": persiste lo escrito por 24h para sobrevivir bloqueos
+// de pantalla, cambios de app o que el navegador mate la pestania.
+const BORRADOR_TAREA = 'borrador:nueva-tarea'
+const FLAG_TAREA_ABIERTA = 'dialog:nueva-tarea'
+interface BorradorTarea {
+  titulo: string
+  descripcion: string
+  prioridad: 'baja' | 'media' | 'alta'
+  tipo: 'agenda' | 'campo'
+  jornales: number
+  asignadosA: string[]
+  fechaVence: string
+  notas: string
+}
 
 interface Perfil { id: string; nombre: string; rol: string; activo: boolean }
 
@@ -84,7 +100,9 @@ export function Tareas() {
   const [tareas, setTareas] = useState<Tarea[]>([])
   const [perfiles, setPerfiles] = useState<Perfil[]>([])
   const [cargando, setCargando] = useState(true)
-  const [nueva, setNueva] = useState(abrirNueva)
+  // "nueva" persiste en localStorage: si el navegador mata la pestania, al recargar el dialog se reabre solo.
+  const [nueva, setNuevaRaw] = useState(() => abrirNueva || leerFlag(FLAG_TAREA_ABIERTA))
+  const setNueva = (v: boolean) => { setNuevaRaw(v); guardarFlag(FLAG_TAREA_ABIERTA, v) }
   const [registrarHecha, setRegistrarHecha] = useState(false) // dialog para empleado
   const [editando, setEditando] = useState<Tarea | null>(null)
   const [vista, setVista] = useState<'agenda' | 'equipo'>('agenda')
@@ -818,11 +836,31 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, soySocioEdito
       setFechaVence(editar.fecha_vence ?? '')
       setNotas(editar.notas ?? '')
     } else {
-      setTitulo(''); setDescripcion(''); setPrioridad('media')
-      setEstado('pendiente'); setTipo('agenda'); setJornales(0); setAsignadosA([]); setFechaVence(''); setNotas('')
+      // Nueva tarea: intentar retomar borrador de localStorage (dura 24h).
+      // Sobrevive bloqueos de pantalla, cambios de app y que el navegador mate la pestania.
+      const b = leerObj<BorradorTarea>(BORRADOR_TAREA)
+      if (b) {
+        setTitulo(b.titulo ?? ''); setDescripcion(b.descripcion ?? '')
+        setPrioridad(b.prioridad ?? 'media')
+        setEstado('pendiente')
+        setTipo(b.tipo ?? 'agenda'); setJornales(Number(b.jornales ?? 0))
+        setAsignadosA(Array.isArray(b.asignadosA) ? b.asignadosA : [])
+        setFechaVence(b.fechaVence ?? ''); setNotas(b.notas ?? '')
+      } else {
+        setTitulo(''); setDescripcion(''); setPrioridad('media')
+        setEstado('pendiente'); setTipo('agenda'); setJornales(0); setAsignadosA([]); setFechaVence(''); setNotas('')
+      }
     }
     setError(null); setConfirmDel(false); setNuevoComentario('')
   }, [abierto, editar])
+
+  // Guardar borrador con cada cambio (solo en modo "nueva tarea", no en edicion)
+  useEffect(() => {
+    if (!abierto || editar) return
+    guardarObj<BorradorTarea>(BORRADOR_TAREA, {
+      titulo, descripcion, prioridad, tipo, jornales, asignadosA, fechaVence, notas,
+    })
+  }, [abierto, editar, titulo, descripcion, prioridad, tipo, jornales, asignadosA, fechaVence, notas])
 
   // Cargar comentarios de la tarea al abrir
   useEffect(() => {
@@ -942,6 +980,7 @@ function TareaDialog({ abierto, editar, perfiles, soyYo, soyAdmin, soySocioEdito
     const { error } = await q
     setGuardando(false)
     if (error) { setError(error.message); return }
+    if (!editar) borrarKey(BORRADOR_TAREA)
     onOk()
   }
 
