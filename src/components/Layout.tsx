@@ -17,7 +17,7 @@ interface NavItem {
 
 const I = {
   home: <path d="M3 10l9-7 9 7v10a2 2 0 0 1-2 2h-4v-6h-6v6H5a2 2 0 0 1-2-2z" />,
-  ventas: <path d="M3 7h18M6 7v13h12V7M9 4h6v3H9z" />,
+  ventas: <><path d="M5 8h14l-1.2 12.2a2 2 0 0 1-2 1.8H8.2a2 2 0 0 1-2-1.8L5 8z" /><path d="M9 8V6a3 3 0 0 1 6 0v2" /></>,
   clientes: <><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 4-7 8-7s8 3 8 7" /></>,
   stock: <path d="M4 7h16M4 12h16M4 17h16" />,
   gastos: <path d="M4 20V10M12 20V4M20 20v-6" />,
@@ -38,7 +38,7 @@ const NAV: NavItem[] = [
 ]
 
 // Rutas que ya estan en la BottomNav (no repetirlas en el sheet "Mas")
-const RUTAS_EN_BOTTOM_NAV = new Set(['/', '/ventas', '/tareas', '/stock'])
+const RUTAS_EN_BOTTOM_NAV = new Set(['/', '/ventas', '/clientes', '/tareas', '/stock'])
 
 function Ico({ children }: { children: ReactNode }) {
   return (
