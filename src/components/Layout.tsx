@@ -4,6 +4,8 @@ import { useAuth } from '../lib/auth'
 import type { Rol } from '../lib/types'
 import { rangoSemanal, reporteVisto } from '../lib/reporte'
 import { CambiarPasswordDialog } from './CambiarPasswordDialog'
+import { BottomNav } from './BottomNav'
+import { Fab } from './Fab'
 
 interface NavItem {
   to: string
@@ -35,6 +37,9 @@ const NAV: NavItem[] = [
   { to: '/admin',       label: 'Administración',roles: ['admin'],                        icon: I.admin,        group: 'gestion' },
 ]
 
+// Rutas que ya estan en la BottomNav (no repetirlas en el sheet "Mas")
+const RUTAS_EN_BOTTOM_NAV = new Set(['/', '/ventas', '/tareas', '/stock'])
+
 function Ico({ children }: { children: ReactNode }) {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
@@ -45,13 +50,19 @@ function Ico({ children }: { children: ReactNode }) {
 
 export function Layout() {
   const { perfil, signOut } = useAuth()
-  const [open, setOpen] = useState(false)
+  const [openSidebar, setOpenSidebar] = useState(false) // sidebar desktop toggle (no se usa hoy en desktop, y en mobile ya no)
+  const [masOpen, setMasOpen] = useState(false)
   const [cambiarPass, setCambiarPass] = useState(false)
   const loc = useLocation()
 
   const items = NAV.filter((n) => !perfil || n.roles.includes(perfil.rol))
   const itemsOp = items.filter((i) => i.group === 'op')
   const itemsGestion = items.filter((i) => i.group === 'gestion')
+  // Para el sheet "Mas" en mobile: los items que NO estan en la BottomNav
+  const itemsMobileMas = items.filter((i) => !RUTAS_EN_BOTTOM_NAV.has(i.to))
+
+  // Cerrar sheet al cambiar de ruta
+  useEffect(() => { setMasOpen(false) }, [loc.pathname])
 
   const semanaISOPasada = useMemo(() => {
     const s = new Date(); s.setDate(s.getDate() - 7)
@@ -71,27 +82,22 @@ export function Layout() {
 
   return (
     <div className="min-h-screen flex flex-col lg:flex-row">
-      {/* Topbar mobile */}
-      <header className="lg:hidden flex items-center justify-between border-b border-oliva-100 bg-white px-4 py-3">
+      {/* Topbar mobile — logo centrado y avatar a la derecha */}
+      <header className="lg:hidden flex items-center justify-between border-b border-oliva-100 bg-white px-4 py-2.5 sticky top-0 z-30">
+        <div className="w-10" /> {/* placeholder izq para centrar el logo */}
+        <img src={import.meta.env.BASE_URL + 'logo-compact.png'} alt="Sierras de Aiguá" className="h-9 w-auto" />
         <button
-          className="rounded-md p-2 text-oliva-800 hover:bg-oliva-100"
-          onClick={() => setOpen((v) => !v)}
-          aria-label="Menú"
+          onClick={() => setMasOpen(true)}
+          aria-label="Mi cuenta"
+          className="h-9 w-9 rounded-full bg-oliva-800 text-white flex items-center justify-center font-bold text-sm"
         >
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M4 6h16M4 12h16M4 18h16" strokeLinecap="round"/>
-          </svg>
+          {iniciales}
         </button>
-        <img src={import.meta.env.BASE_URL + 'logo-compact.png'} alt="Sierras de Aiguá" className="h-10 w-auto" />
-        <div className="flex items-center gap-3">
-          <button className="text-xs font-semibold text-oliva-700 underline" onClick={() => setCambiarPass(true)}>Clave</button>
-          <button className="text-xs font-semibold text-oliva-700 underline" onClick={signOut}>Salir</button>
-        </div>
       </header>
 
-      {/* Sidebar */}
+      {/* Sidebar (SOLO desktop) */}
       <aside
-        className={`${open ? 'block' : 'hidden'} lg:flex lg:flex-col w-full lg:w-[232px] shrink-0 border-r border-oliva-100 bg-white`}
+        className={`${openSidebar ? 'block' : 'hidden'} lg:flex lg:flex-col w-full lg:w-[232px] shrink-0 border-r border-oliva-100 bg-white`}
       >
         <div className="hidden lg:flex items-center justify-center px-3 py-4 border-b border-oliva-100">
           <img
@@ -106,7 +112,7 @@ export function Layout() {
             <div className="text-[10px] font-bold uppercase tracking-widest text-oliva-500 px-2.5 pb-1.5">Operación</div>
             <div className="space-y-0.5">
               {itemsOp.map((n) => (
-                <NavLink key={n.to} to={n.to} end={n.to === '/'} onClick={() => setOpen(false)} className={linkCls}>
+                <NavLink key={n.to} to={n.to} end={n.to === '/'} onClick={() => setOpenSidebar(false)} className={linkCls}>
                   <Ico>{n.icon}</Ico>
                   <span className="flex-1">{n.label}</span>
                   {n.to === '/' && reporteNuevo && (
@@ -123,7 +129,7 @@ export function Layout() {
               <div className="text-[10px] font-bold uppercase tracking-widest text-oliva-500 px-2.5 pb-1.5">Gestión</div>
               <div className="space-y-0.5">
                 {itemsGestion.map((n) => (
-                  <NavLink key={n.to} to={n.to} onClick={() => setOpen(false)} className={linkCls}>
+                  <NavLink key={n.to} to={n.to} onClick={() => setOpenSidebar(false)} className={linkCls}>
                     <Ico>{n.icon}</Ico>
                     <span>{n.label}</span>
                   </NavLink>
@@ -160,10 +166,75 @@ export function Layout() {
 
       <CambiarPasswordDialog abierto={cambiarPass} onClose={() => setCambiarPass(false)} />
 
+      {/* Sheet "Más" (mobile only) — bottom sheet con Clientes, Finanzas, Contabilidad, Admin + Clave/Salir */}
+      {masOpen && (
+        <div
+          className="lg:hidden fixed inset-0 z-50 bg-black/40 flex items-end"
+          onClick={() => setMasOpen(false)}
+        >
+          <div
+            className="w-full bg-white rounded-t-2xl shadow-xl max-h-[85vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+            style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)' }}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-oliva-100 sticky top-0 bg-white">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-full bg-oliva-800 text-white flex items-center justify-center font-bold text-sm">
+                  {iniciales}
+                </div>
+                <div>
+                  <div className="text-sm font-semibold text-oliva-900">{perfil?.nombre}</div>
+                  <div className="text-[10px] text-oliva-500 uppercase tracking-wide">{perfil?.rol}</div>
+                </div>
+              </div>
+              <button className="text-oliva-500 hover:text-oliva-900 text-2xl leading-none" onClick={() => setMasOpen(false)} aria-label="Cerrar">×</button>
+            </div>
+
+            <nav className="p-3 space-y-4">
+              {itemsMobileMas.length > 0 && (
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-oliva-500 px-2.5 pb-1.5">Secciones</div>
+                  <div className="space-y-0.5">
+                    {itemsMobileMas.map((n) => (
+                      <NavLink key={n.to} to={n.to} onClick={() => setMasOpen(false)} className={linkCls}>
+                        <Ico>{n.icon}</Ico>
+                        <span>{n.label}</span>
+                      </NavLink>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-widest text-oliva-500 px-2.5 pb-1.5">Cuenta</div>
+                <button
+                  className="w-full flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium text-oliva-700 hover:bg-oliva-100/70"
+                  onClick={() => { setMasOpen(false); setCambiarPass(true) }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="text-oliva-500"><path d="M12 2l7 3v7c0 5-3.5 8-7 10-3.5-2-7-5-7-10V5l7-3z"/></svg>
+                  Cambiar contraseña
+                </button>
+                <button
+                  className="w-full flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium text-red-700 hover:bg-red-50"
+                  onClick={() => { setMasOpen(false); signOut() }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+                  Cerrar sesión
+                </button>
+              </div>
+            </nav>
+          </div>
+        </div>
+      )}
+
       {/* Contenido */}
-      <main className="flex-1 p-4 lg:p-6 bg-oliva-50">
+      <main className="flex-1 p-4 lg:p-6 bg-oliva-50 pb-24 lg:pb-6">
         <Outlet />
       </main>
+
+      {/* Barra fija abajo (mobile) + FAB contextual */}
+      <BottomNav onAbrirMas={() => setMasOpen(true)} />
+      <Fab />
     </div>
   )
 }

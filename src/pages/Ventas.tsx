@@ -64,6 +64,13 @@ export function Ventas() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+  // FAB: cuando ya estamos en /ventas, el boton flotante dispara este evento para abrir "Nueva venta"
+  useEffect(() => {
+    function h() { setNueva(true) }
+    window.addEventListener('app:fab-nuevo', h)
+    return () => window.removeEventListener('app:fab-nuevo', h)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [ventaDetalleId, setVentaDetalleId] = useState<number | null>(null)
   const [ventaEnEdicion, setVentaEnEdicion] = useState<Venta | null>(null)
   const [cadeteAbierto, setCadeteAbierto] = useState(false)

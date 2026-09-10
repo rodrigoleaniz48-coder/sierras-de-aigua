@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { ClienteDialog, type Cliente, type Socio, type EstadisticasCliente, TIPOS_CLIENTE } from '../components/ClienteDialog'
@@ -27,9 +28,24 @@ export function Clientes() {
   const [tipo, setTipo] = useState<string>('todos')
   const [segmento, setSegmento] = useState<Segmento>('todos')
   const [orden, setOrden] = useState<OrdenClientes>('nombre')
-  const [nuevo, setNuevoRaw] = useState(() => leerFlag('dialog:nuevo-cliente'))
+  const location = useLocation()
+  const navigate = useNavigate()
+  const abrirNueva = (location.state as { abrirNueva?: boolean } | null)?.abrirNueva === true
+  const [nuevo, setNuevoRaw] = useState(() => abrirNueva || leerFlag('dialog:nuevo-cliente'))
   const setNuevo = (v: boolean) => { setNuevoRaw(v); guardarFlag('dialog:nuevo-cliente', v) }
   const [editando, setEditando] = useState<Cliente | null>(null)
+
+  useEffect(() => {
+    if (abrirNueva) navigate(location.pathname, { replace: true, state: {} })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  // FAB: escuchar el evento global para abrir el dialogo estando en /clientes
+  useEffect(() => {
+    function h() { setNuevo(true) }
+    window.addEventListener('app:fab-nuevo', h)
+    return () => window.removeEventListener('app:fab-nuevo', h)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   async function cargar() {
     setCargando(true)

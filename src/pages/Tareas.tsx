@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { Dialog } from '../components/Dialog'
@@ -76,10 +77,14 @@ export function Tareas() {
   const soySocioEditor = puedeCrear // Rodrigo/Santi/Ayelen editan cabecera de cualquier tarea
   const soyCampo = perfil?.rol === 'campo' // Emiliano y futuros empleados
 
+  const location = useLocation()
+  const navigate = useNavigate()
+  const abrirNueva = (location.state as { abrirNueva?: boolean } | null)?.abrirNueva === true
+
   const [tareas, setTareas] = useState<Tarea[]>([])
   const [perfiles, setPerfiles] = useState<Perfil[]>([])
   const [cargando, setCargando] = useState(true)
-  const [nueva, setNueva] = useState(false)
+  const [nueva, setNueva] = useState(abrirNueva)
   const [registrarHecha, setRegistrarHecha] = useState(false) // dialog para empleado
   const [editando, setEditando] = useState<Tarea | null>(null)
   const [vista, setVista] = useState<'agenda' | 'equipo'>('agenda')
@@ -96,6 +101,16 @@ export function Tareas() {
     setCargando(false)
   }
   useEffect(() => { cargar() }, [])
+  useEffect(() => {
+    if (abrirNueva) navigate(location.pathname, { replace: true, state: {} })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  // FAB: escuchar el evento global para abrir el dialogo estando en /tareas
+  useEffect(() => {
+    function h() { setNueva(true) }
+    window.addEventListener('app:fab-nuevo', h)
+    return () => window.removeEventListener('app:fab-nuevo', h)
+  }, [])
 
   const perfilPorId = useMemo(() => new Map(perfiles.map((p) => [p.id, p])), [perfiles])
 

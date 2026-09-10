@@ -62,6 +62,12 @@ export function IngresosPanel() {
     setCargando(false)
   }
   useEffect(() => { cargar() }, [])
+  // FAB: abrir "Nuevo ingreso" al recibir el evento global (solo si esta montado, o sea si tab=ingresos)
+  useEffect(() => {
+    function h() { setNuevo(true) }
+    window.addEventListener('app:fab-nuevo', h)
+    return () => window.removeEventListener('app:fab-nuevo', h)
+  }, [])
 
   const catPorId = useMemo(() => new Map(categorias.map((c) => [c.id, c])), [categorias])
   const socioPorId = useMemo(() => new Map(socios.map((s) => [s.id, s])), [socios])

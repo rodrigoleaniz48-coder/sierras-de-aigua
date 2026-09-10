@@ -79,6 +79,13 @@ export function Gastos() {
     return (slug: string) => m.get(slug) ?? slug
   }, [categorias])
   useEffect(() => { cargar() }, [])
+  // FAB: abrir "Nuevo gasto" al recibir el evento global (solo si esta montado, o sea si tab=egresos)
+  useEffect(() => {
+    function h() { setNuevo(true) }
+    window.addEventListener('app:fab-nuevo', h)
+    return () => window.removeEventListener('app:fab-nuevo', h)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const socioPorId = useMemo(() => new Map(socios.map((s) => [s.id, s])), [socios])
 
