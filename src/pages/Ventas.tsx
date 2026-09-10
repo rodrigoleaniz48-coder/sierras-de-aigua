@@ -1113,7 +1113,7 @@ async function guardar(e: React.FormEvent) {
   }, [abierto, ventaAEditar, fecha, clienteId, canal, formaPago, conFactura, envio, costoEnvio, horarioEntrega, direccionEnvio, telefonoEnvio, ubicacionId, entregado, cobrado, notas, items, monedaVenta, cotizacionUsd, promocion])
 
   return (
-    <Dialog abierto={abierto} onCerrar={onCerrar} titulo={ventaAEditar ? `Editar venta #${ventaAEditar.id}` : 'Nueva venta'} ancho="lg">
+    <Dialog abierto={abierto} onCerrar={onCerrar} titulo={ventaAEditar ? `Editar venta #${ventaAEditar.id}` : 'Nueva venta'} ancho="lg" scrollKey={ventaAEditar ? `venta-edit-${ventaAEditar.id}` : 'venta-nueva'}>
       <form onSubmit={guardar} className="space-y-4">
         {/* Cabecera */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">

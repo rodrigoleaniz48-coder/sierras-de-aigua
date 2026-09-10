@@ -172,7 +172,7 @@ export function ClienteDialog({
   const rapido = modo === 'rapido' && !editar
 
   return (
-    <Dialog abierto={abierto} onCerrar={onCerrar} titulo={editar ? (soloLectura ? 'Cliente' : 'Editar cliente') : (rapido ? 'Nuevo cliente (alta rápida)' : 'Nuevo cliente')} ancho={rapido ? 'md' : 'lg'}>
+    <Dialog abierto={abierto} onCerrar={onCerrar} titulo={editar ? (soloLectura ? 'Cliente' : 'Editar cliente') : (rapido ? 'Nuevo cliente (alta rápida)' : 'Nuevo cliente')} ancho={rapido ? 'md' : 'lg'} scrollKey={editar ? `cliente-edit-${editar.id}` : 'cliente-nuevo'}>
       <form onSubmit={guardar} className="space-y-4">
         <div className={rapido ? 'space-y-3' : 'grid grid-cols-1 sm:grid-cols-2 gap-4'}>
           <div className={rapido ? '' : 'sm:col-span-2'}>
