@@ -53,70 +53,64 @@ export function BottomNav({ onAbrirMas }: { onAbrirMas: () => void }) {
       }`}
       style={{ paddingBottom: 'env(safe-area-inset-bottom, 0)' }}
     >
-      <div className="relative">
-        {/* Boton elevado "Ventas" (solo si el rol permite) */}
-        {puedeVerVentas && (
-          <NavLink
-            to="/ventas"
-            className="absolute left-1/2 -top-6 -translate-x-1/2 z-10 flex flex-col items-center"
-          >
-            {({ isActive }) => (
-              <>
-                <div
-                  className={`h-14 w-14 rounded-full flex items-center justify-center shadow-lg border-4 border-white transition ${
-                    isActive
-                      ? 'bg-aceite-500 text-white ring-2 ring-aceite-500/40'
-                      : 'bg-oliva-800 text-white hover:bg-oliva-900'
-                  }`}
-                >
-                  {IconVentasBig}
-                </div>
-                <span className={`text-[10px] uppercase tracking-wide mt-1 leading-none ${
-                  isActive ? 'text-oliva-900 font-bold' : 'text-oliva-700 font-semibold'
-                }`}>
-                  Ventas
-                </span>
-              </>
-            )}
-          </NavLink>
-        )}
-
-        {/* Grid con los tabs flat (con placeholder central para reservar el hueco de Ventas) */}
-        <div className={`grid ${
-          slots.length === 6 ? 'grid-cols-6'
-          : slots.length === 5 ? 'grid-cols-5'
-          : slots.length === 4 ? 'grid-cols-4'
-          : slots.length === 3 ? 'grid-cols-3'
-          : slots.length === 2 ? 'grid-cols-2'
-          : 'grid-cols-1'
-        }`}>
-          {slots.map((t, i) => {
-            if (!t) {
-              // Placeholder para que el boton elevado tenga aire debajo
-              return <div key={`slot-${i}`} className="min-h-[56px]" aria-hidden="true" />
-            }
-            const inner = (isActive: boolean) => (
-              <div className={`flex flex-col items-center justify-center gap-0.5 py-2 min-h-[56px] ${
-                isActive ? 'text-oliva-900' : 'text-oliva-500'
-              }`}>
-                <div className={isActive ? 'text-oliva-800' : ''}>{t.icon}</div>
-                <span className={`text-[10px] leading-none uppercase tracking-wide ${isActive ? 'font-bold' : 'font-medium'}`}>{t.label}</span>
+      <div className={`grid ${
+        slots.length === 6 ? 'grid-cols-6'
+        : slots.length === 5 ? 'grid-cols-5'
+        : slots.length === 4 ? 'grid-cols-4'
+        : slots.length === 3 ? 'grid-cols-3'
+        : slots.length === 2 ? 'grid-cols-2'
+        : 'grid-cols-1'
+      }`}>
+        {slots.map((t, i) => {
+          if (!t) {
+            // Slot reservado para el boton elevado de Ventas: ocupa su propia columna
+            // (asi no se pisa con Tareas) y muestra el CTA circular sobresaliendo hacia arriba.
+            return (
+              <div key={`slot-${i}`} className="relative min-h-[56px]">
+                <NavLink to="/ventas" className="absolute inset-x-0 -top-6 flex flex-col items-center">
+                  {({ isActive }) => (
+                    <>
+                      <div
+                        className={`h-14 w-14 rounded-full flex items-center justify-center shadow-lg border-4 border-white transition ${
+                          isActive
+                            ? 'bg-aceite-500 text-white ring-2 ring-aceite-500/40'
+                            : 'bg-oliva-800 text-white hover:bg-oliva-900'
+                        }`}
+                      >
+                        {IconVentasBig}
+                      </div>
+                      <span className={`text-[10px] uppercase tracking-wide mt-1 leading-none ${
+                        isActive ? 'text-oliva-900 font-bold' : 'text-oliva-700 font-semibold'
+                      }`}>
+                        Ventas
+                      </span>
+                    </>
+                  )}
+                </NavLink>
               </div>
             )
-            if (t.onClick) {
-              return (
-                <button key={t.label} type="button" onClick={t.onClick} className="hover:bg-oliva-50/60 active:bg-oliva-100 transition">
-                  {inner(false)}
-                </button>
-              )
-            }
+          }
+          const inner = (isActive: boolean) => (
+            <div className={`flex flex-col items-center justify-center gap-0.5 py-2 min-h-[56px] ${
+              isActive ? 'text-oliva-900' : 'text-oliva-500'
+            }`}>
+              <div className={isActive ? 'text-oliva-800' : ''}>{t.icon}</div>
+              <span className={`text-[10px] leading-none uppercase tracking-wide ${isActive ? 'font-bold' : 'font-medium'}`}>{t.label}</span>
+            </div>
+          )
+          if (t.onClick) {
             return (
-              <NavLink key={t.to} to={t.to!} end={t.to === '/'} className="hover:bg-oliva-50/60 active:bg-oliva-100 transition">
-                {({ isActive }) => inner(isActive)}
-              </NavLink>
+              <button key={t.label} type="button" onClick={t.onClick} className="hover:bg-oliva-50/60 active:bg-oliva-100 transition">
+                {inner(false)}
+              </button>
             )
-          })}
-        </div>
+          }
+          return (
+            <NavLink key={t.to} to={t.to!} end={t.to === '/'} className="hover:bg-oliva-50/60 active:bg-oliva-100 transition">
+              {({ isActive }) => inner(isActive)}
+            </NavLink>
+          )
+        })}
       </div>
     </nav>
   )
