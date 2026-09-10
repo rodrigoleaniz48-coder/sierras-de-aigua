@@ -109,32 +109,48 @@ export function Gastos() {
   const reembPendUYU = filtrados.filter((g) => g.moneda === 'UYU' && g.reembolsable && !g.reembolsado).reduce((s, g) => s + Number(g.monto), 0)
   const reembPendUSD = filtrados.filter((g) => g.moneda === 'USD' && g.reembolsable && !g.reembolsado).reduce((s, g) => s + Number(g.monto), 0)
 
-  // Cuenta socio (por socio filtrado, o solo el propio si no ve todos)
-  const socioFocoId = veTodos ? (filtroSocio !== 'todos' ? filtroSocio : soyYo) : soyYo
-  const socioFocoNombre = socioPorId.get(socioFocoId)?.nombre ?? 'vos'
-  const misGastos = filtrados.filter((g) => g.socio_id === socioFocoId)
-  const reembYoUYU = misGastos.filter((g) => g.moneda === 'UYU' && g.reembolsable && !g.reembolsado).reduce((s, g) => s + Number(g.monto), 0)
-  const reembYoUSD = misGastos.filter((g) => g.moneda === 'USD' && g.reembolsable && !g.reembolsado).reduce((s, g) => s + Number(g.monto), 0)
-  const adelYoUYU  = misGastos.filter((g) => g.moneda === 'UYU' && g.es_adelanto).reduce((s, g) => s + Number(g.monto), 0)
-  const adelYoUSD  = misGastos.filter((g) => g.moneda === 'USD' && g.es_adelanto).reduce((s, g) => s + Number(g.monto), 0)
-  const netoUYU = reembYoUYU - adelYoUYU
-  const netoUSD = reembYoUSD - adelYoUSD
-  const hayCtaSocio = reembYoUYU + reembYoUSD + adelYoUYU + adelYoUSD > 0
+  // Cuentas por socio: si admin con filtroSocio='todos' ve una card por socio (para liquidar sueldos de todos).
+  // Si filtroSocio esta puesto en uno o no ve todos, muestra solo esa card.
+  const sociosCuenta: string[] = (() => {
+    if (!veTodos) return [soyYo]
+    if (filtroSocio !== 'todos') return [filtroSocio]
+    // Todos los socios que tienen movimientos en cuenta este periodo
+    const set = new Set<string>()
+    for (const g of filtrados) {
+      if (g.reembolsable || g.es_adelanto) set.add(g.socio_id)
+    }
+    return [...set]
+  })()
 
-  // Ids de todos los gastos reembolsables pendientes de ese socio en el periodo mostrado
-  const reembPendIdsSocio = misGastos.filter((g) => g.reembolsable && !g.reembolsado).map((g) => g.id)
-  const reembPendCantSocio = reembPendIdsSocio.length
-  const [confirmMarcarReemb, setConfirmMarcarReemb] = useState(false)
-  const [marcandoReemb, setMarcandoReemb] = useState(false)
+  function cuentaDe(sid: string) {
+    const gs = filtrados.filter((g) => g.socio_id === sid)
+    const reembUYU = gs.filter((g) => g.moneda === 'UYU' && g.reembolsable && !g.reembolsado).reduce((s, g) => s + Number(g.monto), 0)
+    const reembUSD = gs.filter((g) => g.moneda === 'USD' && g.reembolsable && !g.reembolsado).reduce((s, g) => s + Number(g.monto), 0)
+    const adelUYU  = gs.filter((g) => g.moneda === 'UYU' && g.es_adelanto).reduce((s, g) => s + Number(g.monto), 0)
+    const adelUSD  = gs.filter((g) => g.moneda === 'USD' && g.es_adelanto).reduce((s, g) => s + Number(g.monto), 0)
+    const pendIds = gs.filter((g) => g.reembolsable && !g.reembolsado).map((g) => g.id)
+    return {
+      sid,
+      nombre: socioPorId.get(sid)?.nombre ?? 'vos',
+      reembUYU, reembUSD, adelUYU, adelUSD,
+      netoUYU: reembUYU - adelUYU,
+      netoUSD: reembUSD - adelUSD,
+      pendIds,
+      tieneAlgo: reembUYU + reembUSD + adelUYU + adelUSD > 0,
+    }
+  }
+  const cuentasSocio = sociosCuenta.map(cuentaDe).filter((c) => c.tieneAlgo)
 
-  async function marcarTodosReembolsados() {
-    if (reembPendCantSocio === 0) return
-    setMarcandoReemb(true)
-    const { error } = await supabase.from('gastos')
-      .update({ reembolsado: true })
-      .in('id', reembPendIdsSocio)
-    setMarcandoReemb(false)
-    setConfirmMarcarReemb(false)
+  // Estado local del "confirmar" por socio (Map: socio_id → booleano)
+  const [confirmMarcarSocio, setConfirmMarcarSocio] = useState<string | null>(null)
+  const [marcandoReembSocio, setMarcandoReembSocio] = useState<string | null>(null)
+
+  async function marcarReembolsadosDe(sid: string, ids: number[]) {
+    if (ids.length === 0) return
+    setMarcandoReembSocio(sid)
+    const { error } = await supabase.from('gastos').update({ reembolsado: true }).in('id', ids)
+    setMarcandoReembSocio(null)
+    setConfirmMarcarSocio(null)
     if (error) { alert('Error: ' + error.message); return }
     cargar()
   }
@@ -204,62 +220,68 @@ export function Gastos() {
         <Kpi titulo="A reembolsar U$S" valor={'U$S ' + Number(reembPendUSD).toLocaleString('es-UY')} tono="aceite" />
       </div>
 
-      {/* Cuenta socio (reembolsables vs adelantos) */}
-      {hayCtaSocio && (
-        <div className="card p-4 border-2 border-oliva-200 bg-oliva-50/40">
+      {/* Cuenta por socio (reembolsables vs adelantos) — una card por socio con movimientos */}
+      {cuentasSocio.map((c) => {
+        const esYo = c.sid === soyYo
+        const yoOSocio = esYo ? 'tuyo' : 'suyo'
+        const yoOSocioPos = esYo ? 'tuyos' : 'suyos'
+        const pendCant = c.pendIds.length
+        const esConfirm = confirmMarcarSocio === c.sid
+        const marcando = marcandoReembSocio === c.sid
+        return (
+        <div key={c.sid} className="card p-4 border-2 border-oliva-200 bg-oliva-50/40">
           <div className="text-xs uppercase tracking-widest text-oliva-700 font-bold mb-2">
-            🧾 Cuenta con la empresa · {socioFocoNombre}
+            🧾 Cuenta con la empresa · {c.nombre}{esYo && ' (vos)'}
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
             <div>
-              <div className="text-[11px] uppercase tracking-wide text-oliva-600">A favor tuyo (reembolsables)</div>
+              <div className="text-[11px] uppercase tracking-wide text-oliva-600">A favor {yoOSocio} (reembolsables)</div>
               <div className="tabular-nums font-semibold text-green-700 mt-0.5">
-                {reembYoUYU > 0 && <div>+ {money(reembYoUYU)}</div>}
-                {reembYoUSD > 0 && <div>+ U$S {Number(reembYoUSD).toLocaleString('es-UY')}</div>}
-                {reembYoUYU === 0 && reembYoUSD === 0 && <div className="text-oliva-400">—</div>}
+                {c.reembUYU > 0 && <div>+ {money(c.reembUYU)}</div>}
+                {c.reembUSD > 0 && <div>+ U$S {Number(c.reembUSD).toLocaleString('es-UY')}</div>}
+                {c.reembUYU === 0 && c.reembUSD === 0 && <div className="text-oliva-400">—</div>}
               </div>
             </div>
             <div>
-              <div className="text-[11px] uppercase tracking-wide text-oliva-600">Adelantos que te llevaste</div>
+              <div className="text-[11px] uppercase tracking-wide text-oliva-600">Adelantos {yoOSocioPos}</div>
               <div className="tabular-nums font-semibold text-red-700 mt-0.5">
-                {adelYoUYU > 0 && <div>− {money(adelYoUYU)}</div>}
-                {adelYoUSD > 0 && <div>− U$S {Number(adelYoUSD).toLocaleString('es-UY')}</div>}
-                {adelYoUYU === 0 && adelYoUSD === 0 && <div className="text-oliva-400">—</div>}
+                {c.adelUYU > 0 && <div>− {money(c.adelUYU)}</div>}
+                {c.adelUSD > 0 && <div>− U$S {Number(c.adelUSD).toLocaleString('es-UY')}</div>}
+                {c.adelUYU === 0 && c.adelUSD === 0 && <div className="text-oliva-400">—</div>}
               </div>
             </div>
             <div className="sm:border-l border-oliva-200 sm:pl-4">
-              <div className="text-[11px] uppercase tracking-wide text-oliva-600 font-bold">Ajuste a cobrar del sueldo</div>
+              <div className="text-[11px] uppercase tracking-wide text-oliva-600 font-bold">Ajuste a {esYo ? 'cobrar del' : 'sumar al'} sueldo</div>
               <div className="tabular-nums font-bold text-oliva-900 text-lg mt-0.5">
-                {netoUYU !== 0 && <div className={netoUYU >= 0 ? 'text-green-800' : 'text-red-800'}>{netoUYU >= 0 ? '+' : '−'} {money(Math.abs(netoUYU))}</div>}
-                {netoUSD !== 0 && <div className={netoUSD >= 0 ? 'text-green-800' : 'text-red-800'}>{netoUSD >= 0 ? '+' : '−'} U$S {Number(Math.abs(netoUSD)).toLocaleString('es-UY')}</div>}
-                {netoUYU === 0 && netoUSD === 0 && <div className="text-oliva-500 text-base">Cero (todo saldado)</div>}
+                {c.netoUYU !== 0 && <div className={c.netoUYU >= 0 ? 'text-green-800' : 'text-red-800'}>{c.netoUYU >= 0 ? '+' : '−'} {money(Math.abs(c.netoUYU))}</div>}
+                {c.netoUSD !== 0 && <div className={c.netoUSD >= 0 ? 'text-green-800' : 'text-red-800'}>{c.netoUSD >= 0 ? '+' : '−'} U$S {Number(Math.abs(c.netoUSD)).toLocaleString('es-UY')}</div>}
+                {c.netoUYU === 0 && c.netoUSD === 0 && <div className="text-oliva-500 text-base">Cero (todo saldado)</div>}
               </div>
             </div>
           </div>
 
-          {/* Accion de saldar reembolsables: al pagar el sueldo se marcan todos los pendientes de un solo tiro */}
-          {reembPendCantSocio > 0 && (
+          {pendCant > 0 && (
             <div className="mt-3 pt-3 border-t border-oliva-200">
-              {!confirmMarcarReemb ? (
+              {!esConfirm ? (
                 <button
                   type="button"
                   className="btn-secondary text-sm"
-                  onClick={() => setConfirmMarcarReemb(true)}
+                  onClick={() => setConfirmMarcarSocio(c.sid)}
                 >
-                  ✅ Marcar todos los reembolsables como pagados ({reembPendCantSocio})
+                  ✅ Marcar todos los reembolsables{!esYo ? ` de ${c.nombre}` : ''} como pagados ({pendCant})
                 </button>
               ) : (
                 <div className="rounded-lg bg-aceite-500/10 border border-aceite-500/40 p-3 space-y-2">
                   <div className="text-sm text-oliva-900">
-                    Se marcarán como <b>reembolsado</b> los <b>{reembPendCantSocio}</b> gasto{reembPendCantSocio === 1 ? '' : 's'} reembolsable{reembPendCantSocio === 1 ? '' : 's'} pendiente{reembPendCantSocio === 1 ? '' : 's'} de <b>{socioFocoNombre}</b> en este período
-                    {reembYoUYU > 0 && <> · <b>{money(reembYoUYU)}</b></>}
-                    {reembYoUSD > 0 && <> · <b>U$S {Number(reembYoUSD).toLocaleString('es-UY')}</b></>}
+                    Se marcarán como <b>reembolsado</b> los <b>{pendCant}</b> gasto{pendCant === 1 ? '' : 's'} reembolsable{pendCant === 1 ? '' : 's'} pendiente{pendCant === 1 ? '' : 's'} de <b>{c.nombre}</b> en este período
+                    {c.reembUYU > 0 && <> · <b>{money(c.reembUYU)}</b></>}
+                    {c.reembUSD > 0 && <> · <b>U$S {Number(c.reembUSD).toLocaleString('es-UY')}</b></>}
                     . Se usa al liquidar el sueldo (sueldo + reembolsos - adelantos).
                   </div>
                   <div className="flex justify-end gap-2">
-                    <button type="button" className="btn-secondary text-xs" onClick={() => setConfirmMarcarReemb(false)} disabled={marcandoReemb}>Cancelar</button>
-                    <button type="button" className="text-xs px-3 py-2 rounded-lg bg-oliva-800 text-white hover:bg-oliva-900 disabled:opacity-50" onClick={marcarTodosReembolsados} disabled={marcandoReemb}>
-                      {marcandoReemb ? 'Marcando…' : 'Sí, marcar todos'}
+                    <button type="button" className="btn-secondary text-xs" onClick={() => setConfirmMarcarSocio(null)} disabled={marcando}>Cancelar</button>
+                    <button type="button" className="text-xs px-3 py-2 rounded-lg bg-oliva-800 text-white hover:bg-oliva-900 disabled:opacity-50" onClick={() => marcarReembolsadosDe(c.sid, c.pendIds)} disabled={marcando}>
+                      {marcando ? 'Marcando…' : 'Sí, marcar todos'}
                     </button>
                   </div>
                 </div>
@@ -267,7 +289,8 @@ export function Gastos() {
             </div>
           )}
         </div>
-      )}
+        )
+      })}
 
       {/* Lista */}
       {cargando ? (
