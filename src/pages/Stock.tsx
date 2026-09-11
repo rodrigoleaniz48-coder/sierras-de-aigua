@@ -135,9 +135,10 @@ export function Stock() {
               {puedeEscribir && <button className="btn-secondary" onClick={() => setAjusteEnv(true)}>Ajuste envasado</button>}
               {puedeEscribir && <button className="btn-primary" onClick={() => setEnvasar(true)}>Envasar</button>}
             </div>
-            {/* Mobile: solo la accion primaria y un "Mas" que abre un bottom sheet */}
+            {/* Mobile: Envasar + Trasladar visibles, resto detras de "Mas" */}
             <div className="sm:hidden flex gap-2">
               {puedeEscribir && <button className="btn-primary text-sm px-3 py-1.5" onClick={() => setEnvasar(true)}>Envasar</button>}
+              {puedeTrasladar && <button className="btn-secondary text-sm px-3 py-1.5" onClick={() => setTrasladar(true)}>Trasladar</button>}
               <button
                 type="button"
                 className="btn-secondary text-sm px-3 py-1.5"
@@ -319,11 +320,6 @@ export function Stock() {
             {puedeEscribir && (
               <button className="w-full text-left px-3 py-3 rounded-md hover:bg-oliva-50 text-oliva-900 text-sm font-medium" onClick={() => { setMasAccionesAbierto(false); setMermaMuestra(true) }}>
                 🧪 Merma / muestra
-              </button>
-            )}
-            {puedeTrasladar && (
-              <button className="w-full text-left px-3 py-3 rounded-md hover:bg-oliva-50 text-oliva-900 text-sm font-medium" onClick={() => { setMasAccionesAbierto(false); setTrasladar(true) }}>
-                🚚 Trasladar
               </button>
             )}
             {puedeEscribir && (
