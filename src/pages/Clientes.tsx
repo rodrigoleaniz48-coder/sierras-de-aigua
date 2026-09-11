@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { ClienteDialog, type Cliente, type Socio, type EstadisticasCliente, TIPOS_CLIENTE } from '../components/ClienteDialog'
+import { EnviarWhatsAppDialog } from '../components/EnviarWhatsAppDialog'
 import { money } from '../lib/format'
 import { guardarFlag, leerFlag } from '../lib/persistencia'
 
@@ -34,6 +35,9 @@ export function Clientes() {
   const [nuevo, setNuevoRaw] = useState(() => abrirNueva || leerFlag('dialog:nuevo-cliente'))
   const setNuevo = (v: boolean) => { setNuevoRaw(v); guardarFlag('dialog:nuevo-cliente', v) }
   const [editando, setEditando] = useState<Cliente | null>(null)
+  // Selección múltiple para acciones masivas (WhatsApp reactivación, etc.)
+  const [seleccion, setSeleccion] = useState<Set<number>>(new Set())
+  const [enviarWAAbierto, setEnviarWAAbierto] = useState(false)
 
   useEffect(() => {
     if (abrirNueva) navigate(location.pathname, { replace: true, state: {} })
@@ -185,9 +189,26 @@ export function Clientes() {
         </div>
       ) : (
         <div className="card p-0 overflow-x-auto">
-          <table className="w-full text-sm min-w-[840px]">
+          <table className="w-full text-sm min-w-[880px]">
             <thead>
               <tr className="text-left text-xs uppercase tracking-wide text-oliva-600 border-b border-oliva-100 bg-oliva-50">
+                <th className="py-2 pl-3 pr-1 w-8">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 accent-oliva-700 cursor-pointer"
+                    title="Seleccionar todos los visibles"
+                    checked={filtrados.length > 0 && filtrados.every((c) => seleccion.has(c.id))}
+                    ref={(el) => { if (el) el.indeterminate = filtrados.some((c) => seleccion.has(c.id)) && !filtrados.every((c) => seleccion.has(c.id)) }}
+                    onChange={(e) => {
+                      const marcar = e.target.checked
+                      setSeleccion((prev) => {
+                        const s = new Set(prev)
+                        for (const c of filtrados) { if (marcar) s.add(c.id); else s.delete(c.id) }
+                        return s
+                      })
+                    }}
+                  />
+                </th>
                 <th className="py-2 px-4">Nombre</th>
                 <th className="py-2 px-4">Tipo</th>
                 <th className="py-2 px-4">Contacto</th>
@@ -202,8 +223,24 @@ export function Clientes() {
               {filtrados.map((c) => {
                 const st = statsPorCliente.get(c.id)
                 const seg = segmentoDe(st)
+                const marcado = seleccion.has(c.id)
                 return (
-                  <tr key={c.id} className="border-b border-oliva-100/70 last:border-0 hover:bg-oliva-50/60 cursor-pointer" onClick={() => setEditando(c)}>
+                  <tr key={c.id} className={`border-b border-oliva-100/70 last:border-0 hover:bg-oliva-50/60 cursor-pointer ${marcado ? 'bg-oliva-100/40' : ''}`} onClick={() => setEditando(c)}>
+                    <td className="py-2 pl-3 pr-1 w-8" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 accent-oliva-700 cursor-pointer"
+                        checked={marcado}
+                        onChange={(e) => {
+                          const marcar = e.target.checked
+                          setSeleccion((prev) => {
+                            const s = new Set(prev)
+                            if (marcar) s.add(c.id); else s.delete(c.id)
+                            return s
+                          })
+                        }}
+                      />
+                    </td>
                     <td className="py-2 px-4 font-medium text-oliva-900">
                       <div>{c.nombre}</div>
                       {seg !== 'todos' && seg !== 'nunca' && (
@@ -237,12 +274,48 @@ export function Clientes() {
                 )
               })}
               {filtrados.length === 0 && (
-                <tr><td colSpan={8} className="py-6 text-center text-sm text-oliva-600">Sin resultados.</td></tr>
+                <tr><td colSpan={9} className="py-6 text-center text-sm text-oliva-600">Sin resultados.</td></tr>
               )}
             </tbody>
           </table>
         </div>
       )}
+
+      {/* Barra flotante de acciones masivas cuando hay clientes seleccionados */}
+      {seleccion.size > 0 && (
+        <div
+          className="fixed left-0 right-0 z-30 pointer-events-none"
+          style={{ bottom: 'calc(76px + env(safe-area-inset-bottom, 0px))' }}
+        >
+          <div className="mx-auto max-w-2xl px-3">
+            <div className="pointer-events-auto rounded-2xl bg-oliva-900 text-white shadow-2xl flex items-center gap-2 px-3 py-2">
+              <span className="text-sm">
+                <b>{seleccion.size}</b> seleccionado{seleccion.size === 1 ? '' : 's'}
+              </span>
+              <button
+                type="button"
+                className="text-xs underline text-oliva-100 hover:text-white"
+                onClick={() => setSeleccion(new Set())}
+              >
+                limpiar
+              </button>
+              <button
+                type="button"
+                onClick={() => setEnviarWAAbierto(true)}
+                className="ml-auto text-sm font-semibold px-3 py-2 rounded-lg bg-[#25D366] text-white hover:brightness-95"
+              >
+                📱 Enviar WhatsApp
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <EnviarWhatsAppDialog
+        abierto={enviarWAAbierto}
+        clientes={clientes.filter((c) => seleccion.has(c.id))}
+        onCerrar={() => setEnviarWAAbierto(false)}
+      />
 
       <ClienteDialog
         abierto={nuevo}
