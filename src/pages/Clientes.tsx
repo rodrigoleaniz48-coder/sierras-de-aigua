@@ -35,9 +35,24 @@ export function Clientes() {
   const [nuevo, setNuevoRaw] = useState(() => abrirNueva || leerFlag('dialog:nuevo-cliente'))
   const setNuevo = (v: boolean) => { setNuevoRaw(v); guardarFlag('dialog:nuevo-cliente', v) }
   const [editando, setEditando] = useState<Cliente | null>(null)
-  // Selección múltiple para acciones masivas (WhatsApp reactivación, etc.)
-  const [seleccion, setSeleccion] = useState<Set<number>>(new Set())
-  const [enviarWAAbierto, setEnviarWAAbierto] = useState(false)
+  // Selección múltiple para acciones masivas (WhatsApp reactivación, etc.).
+  // Se persiste en localStorage para que al volver de WhatsApp (el navegador puede recargar
+  // la app en mobile con memoria justa) no se pierda la selección ni el dialog abierto.
+  const [seleccion, setSeleccionRaw] = useState<Set<number>>(() => {
+    try {
+      const raw = localStorage.getItem('wa:seleccion')
+      return new Set(raw ? (JSON.parse(raw) as number[]) : [])
+    } catch { return new Set() }
+  })
+  const setSeleccion = (updater: Set<number> | ((prev: Set<number>) => Set<number>)) => {
+    setSeleccionRaw((prev) => {
+      const next = typeof updater === 'function' ? updater(prev) : updater
+      try { localStorage.setItem('wa:seleccion', JSON.stringify([...next])) } catch { /* nada */ }
+      return next
+    })
+  }
+  const [enviarWAAbierto, setEnviarWAAbiertoRaw] = useState(() => leerFlag('dialog:enviar-wa'))
+  const setEnviarWAAbierto = (v: boolean) => { setEnviarWAAbiertoRaw(v); guardarFlag('dialog:enviar-wa', v) }
 
   useEffect(() => {
     if (abrirNueva) navigate(location.pathname, { replace: true, state: {} })

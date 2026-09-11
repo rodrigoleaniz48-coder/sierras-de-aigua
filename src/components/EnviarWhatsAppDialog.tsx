@@ -27,6 +27,8 @@ const PLANTILLAS_DEFAULT: Plantilla[] = [
 
 const LS_KEY_PLANTILLAS = 'wa:plantillas'
 const LS_KEY_ENVIADOS = 'wa:enviados'
+const LS_KEY_ULTIMA_PLANTILLA = 'wa:ultima-plantilla-id'
+const LS_KEY_ULTIMO_TEXTO = 'wa:ultimo-texto'
 
 function leerPlantillas(): Plantilla[] {
   try {
@@ -84,13 +86,25 @@ export function EnviarWhatsAppDialog({
     if (!abierto) return
     const ps = leerPlantillas()
     setPlantillas(ps)
-    const pid = ps[0]?.id ?? 'cosecha-2026'
+    // Recuperar ultima plantilla y texto usados (sobrevive reloads al volver de WhatsApp)
+    const ultId = (() => { try { return localStorage.getItem(LS_KEY_ULTIMA_PLANTILLA) } catch { return null } })()
+    const ultTexto = (() => { try { return localStorage.getItem(LS_KEY_ULTIMO_TEXTO) } catch { return null } })()
+    const pid = (ultId && ps.some((p) => p.id === ultId)) ? ultId : (ps[0]?.id ?? 'cosecha-2026')
     setPlantillaId(pid)
-    setTexto(ps.find((p) => p.id === pid)?.texto ?? '')
+    setTexto(ultTexto ?? ps.find((p) => p.id === pid)?.texto ?? '')
     setEnviados(leerEnviadosHoy())
     setEditandoPlantillas(false)
-    setFiltro('todos')
+    setFiltro('pendientes')
   }, [abierto])
+
+  // Cada vez que cambia la plantilla o el texto, lo persisto para no perderlo al recargar
+  useEffect(() => {
+    if (!abierto) return
+    try {
+      localStorage.setItem(LS_KEY_ULTIMA_PLANTILLA, plantillaId)
+      localStorage.setItem(LS_KEY_ULTIMO_TEXTO, texto)
+    } catch { /* nada */ }
+  }, [abierto, plantillaId, texto])
 
   function cambiarPlantilla(id: string) {
     setPlantillaId(id)
@@ -153,10 +167,39 @@ export function EnviarWhatsAppDialog({
   }
 
   const preview = filas[0] ? renderMensaje(texto, filas[0].c.nombre) : renderMensaje(texto, 'Nombre')
+  // Siguiente pendiente (con teléfono, no enviado hoy) para el flujo secuencial "abro → envio → vuelvo → siguiente"
+  const siguientePend = filas.find((f) => f.url && !f.ya) ?? null
 
   return (
     <Dialog abierto={abierto} onCerrar={onCerrar} titulo={`📱 Enviar WhatsApp (${clientes.length})`} ancho="lg" scrollKey="wa-bulk">
       <div className="space-y-4">
+        {/* CTA "Siguiente pendiente" — arriba de todo para que al volver de WhatsApp sea 1 tap */}
+        {siguientePend && siguientePend.url && (
+          <div className="rounded-xl bg-green-50 border-2 border-[#25D366] p-3 space-y-2 sticky top-0 z-10">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <div className="text-[10px] uppercase tracking-widest text-green-800 font-bold">Siguiente pendiente</div>
+                <div className="text-lg font-semibold text-oliva-900">{siguientePend.c.nombre}</div>
+                <div className="text-[11px] text-oliva-600">
+                  {totalPendientes} pendiente{totalPendientes === 1 ? '' : 's'} · {totalEnviados} abierto{totalEnviados === 1 ? '' : 's'} hoy
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => siguientePend.url && abrirWA(siguientePend.c.id, siguientePend.url)}
+                className="text-base font-semibold px-4 py-3 rounded-xl bg-[#25D366] text-white hover:brightness-95 active:scale-95 transition shadow-md whitespace-nowrap"
+              >
+                📱 Enviar a {siguientePend.c.nombre.split(' ')[0]}
+              </button>
+            </div>
+          </div>
+        )}
+        {!siguientePend && totalConTel > 0 && (
+          <div className="rounded-xl bg-oliva-50 border border-oliva-200 p-3 text-center text-sm text-oliva-800">
+            🎉 <b>Listo!</b> Enviaste los {totalEnviados} pendiente{totalEnviados === 1 ? '' : 's'} con teléfono. Se resetea a la medianoche.
+          </div>
+        )}
+
         {/* Selector de plantilla */}
         <div className="rounded-lg bg-oliva-50/60 border border-oliva-100 p-3 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
