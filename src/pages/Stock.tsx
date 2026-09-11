@@ -64,6 +64,7 @@ export function Stock() {
   const [cargarCosecha, setCargarCosecha] = useState(false)
   const [mermaMuestra, setMermaMuestra] = useState(false)
   const [tanqueEdit, setTanqueEdit] = useState<Tanque | null>(null)
+  const [masAccionesAbierto, setMasAccionesAbierto] = useState(false)
 
   async function cargar() {
     setCargando(true)
@@ -124,14 +125,28 @@ export function Stock() {
           </p>
         </div>
         {(puedeEscribir || puedeTrasladar) && (
-          <div className="flex gap-2 flex-wrap">
-            {puedeEscribir && <button className="btn-secondary" onClick={() => setCargarCosecha(true)}>+ Cargar cosecha</button>}
-            {puedeEscribir && <button className="btn-secondary" onClick={() => setTrasegar(true)}>Trasegar / blend</button>}
-            {puedeEscribir && <button className="btn-secondary" onClick={() => setMermaMuestra(true)}>Merma / muestra</button>}
-            {puedeTrasladar && <button className="btn-secondary" onClick={() => setTrasladar(true)}>Trasladar</button>}
-            {puedeEscribir && <button className="btn-secondary" onClick={() => setAjusteEnv(true)}>Ajuste envasado</button>}
-            {puedeEscribir && <button className="btn-primary" onClick={() => setEnvasar(true)}>Envasar</button>}
-          </div>
+          <>
+            {/* Desktop: todos los botones inline (sm en adelante) */}
+            <div className="hidden sm:flex gap-2 flex-wrap">
+              {puedeEscribir && <button className="btn-secondary" onClick={() => setCargarCosecha(true)}>+ Cargar cosecha</button>}
+              {puedeEscribir && <button className="btn-secondary" onClick={() => setTrasegar(true)}>Trasegar / blend</button>}
+              {puedeEscribir && <button className="btn-secondary" onClick={() => setMermaMuestra(true)}>Merma / muestra</button>}
+              {puedeTrasladar && <button className="btn-secondary" onClick={() => setTrasladar(true)}>Trasladar</button>}
+              {puedeEscribir && <button className="btn-secondary" onClick={() => setAjusteEnv(true)}>Ajuste envasado</button>}
+              {puedeEscribir && <button className="btn-primary" onClick={() => setEnvasar(true)}>Envasar</button>}
+            </div>
+            {/* Mobile: solo la accion primaria y un "Mas" que abre un bottom sheet */}
+            <div className="sm:hidden flex gap-2">
+              {puedeEscribir && <button className="btn-primary text-sm px-3 py-1.5" onClick={() => setEnvasar(true)}>Envasar</button>}
+              <button
+                type="button"
+                className="btn-secondary text-sm px-3 py-1.5"
+                onClick={() => setMasAccionesAbierto(true)}
+              >
+                Más ▾
+              </button>
+            </div>
+          </>
         )}
       </div>
 
@@ -275,6 +290,50 @@ export function Stock() {
         onCerrar={() => setTanqueEdit(null)}
         onOk={() => { setTanqueEdit(null); cargar() }}
       />
+
+      {/* Bottom sheet mobile: "Mas acciones" de stock. Se abre desde el boton "Mas". */}
+      {masAccionesAbierto && (
+        <div
+          className="sm:hidden fixed inset-0 z-50 bg-black/40 flex items-end"
+          onClick={() => setMasAccionesAbierto(false)}
+        >
+          <div
+            className="w-full bg-white rounded-t-2xl shadow-xl p-3 space-y-1"
+            onClick={(e) => e.stopPropagation()}
+            style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)' }}
+          >
+            <div className="flex items-center justify-between px-2 py-1 mb-1 border-b border-oliva-100">
+              <div className="text-xs uppercase tracking-widest text-oliva-500 font-bold">Acciones de stock</div>
+              <button className="text-2xl leading-none text-oliva-500 hover:text-oliva-900" onClick={() => setMasAccionesAbierto(false)} aria-label="Cerrar">×</button>
+            </div>
+            {puedeEscribir && (
+              <button className="w-full text-left px-3 py-3 rounded-md hover:bg-oliva-50 text-oliva-900 text-sm font-medium" onClick={() => { setMasAccionesAbierto(false); setCargarCosecha(true) }}>
+                🫒 Cargar cosecha
+              </button>
+            )}
+            {puedeEscribir && (
+              <button className="w-full text-left px-3 py-3 rounded-md hover:bg-oliva-50 text-oliva-900 text-sm font-medium" onClick={() => { setMasAccionesAbierto(false); setTrasegar(true) }}>
+                🔀 Trasegar / blend
+              </button>
+            )}
+            {puedeEscribir && (
+              <button className="w-full text-left px-3 py-3 rounded-md hover:bg-oliva-50 text-oliva-900 text-sm font-medium" onClick={() => { setMasAccionesAbierto(false); setMermaMuestra(true) }}>
+                🧪 Merma / muestra
+              </button>
+            )}
+            {puedeTrasladar && (
+              <button className="w-full text-left px-3 py-3 rounded-md hover:bg-oliva-50 text-oliva-900 text-sm font-medium" onClick={() => { setMasAccionesAbierto(false); setTrasladar(true) }}>
+                🚚 Trasladar
+              </button>
+            )}
+            {puedeEscribir && (
+              <button className="w-full text-left px-3 py-3 rounded-md hover:bg-oliva-50 text-oliva-900 text-sm font-medium" onClick={() => { setMasAccionesAbierto(false); setAjusteEnv(true) }}>
+                📝 Ajuste envasado
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

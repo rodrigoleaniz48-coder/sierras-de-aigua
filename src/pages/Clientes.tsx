@@ -53,6 +53,7 @@ export function Clientes() {
   }
   const [enviarWAAbierto, setEnviarWAAbiertoRaw] = useState(() => leerFlag('dialog:enviar-wa'))
   const setEnviarWAAbierto = (v: boolean) => { setEnviarWAAbiertoRaw(v); guardarFlag('dialog:enviar-wa', v) }
+  const [filtrosAbiertos, setFiltrosAbiertos] = useState(false)
 
   useEffect(() => {
     if (abrirNueva) navigate(location.pathname, { replace: true, state: {} })
@@ -164,24 +165,38 @@ export function Clientes() {
     <div className="space-y-5">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-semibold text-oliva-900">Clientes</h1>
-          <p className="text-sm text-oliva-700 mt-1">
+          <h1 className="text-xl sm:text-2xl font-semibold text-oliva-900">Clientes</h1>
+          <p className="hidden sm:block text-sm text-oliva-700 mt-1">
             Base compartida — todos los socios pueden verla. Marcá cada cliente como minorista o mayorista
             para que el precio se aplique automáticamente al cargar ventas.
           </p>
         </div>
         {puedeEscribir && (
-          <button className="btn-primary" onClick={() => setNuevo(true)}>+ Nuevo cliente</button>
+          <button className="btn-primary text-sm px-3 py-1.5 sm:text-base sm:px-4 sm:py-2" onClick={() => setNuevo(true)}>+ Nuevo cliente</button>
         )}
       </div>
 
-      <div className="card p-3 flex flex-wrap gap-2 items-center">
-        <input
-          className="input flex-1 min-w-[220px]"
-          placeholder="Buscar por nombre, email, teléfono, localidad…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
+      <div className="card p-3 space-y-2">
+        <div className="flex gap-2 items-center">
+          <input
+            className="input flex-1 min-w-0"
+            placeholder="Buscar…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+          {/* Mobile: toggle para desplegar filtros. En sm+ los filtros se muestran inline (abajo). */}
+          <button
+            type="button"
+            className="sm:hidden text-sm px-3 py-2 rounded-lg border border-oliva-200 bg-white text-oliva-700 hover:bg-oliva-50 whitespace-nowrap"
+            onClick={() => setFiltrosAbiertos((v) => !v)}
+          >
+            Filtros {filtrosAbiertos ? '▲' : '▾'}{(tipo !== 'todos' || segmento !== 'todos' || orden !== 'nombre') ? ' •' : ''}
+          </button>
+          <div className="hidden sm:block text-xs text-oliva-600 whitespace-nowrap">
+            {filtrados.length} / {clientes.length}
+          </div>
+        </div>
+        <div className={`${filtrosAbiertos ? 'flex' : 'hidden'} sm:flex flex-wrap gap-2 items-center`}>
         <select className="input w-40" value={tipo} onChange={(e) => setTipo(e.target.value)}>
           <option value="todos">Todos los tipos</option>
           {TIPOS_CLIENTE.map((t) => <option key={t} value={t}>{t}</option>)}
@@ -202,8 +217,9 @@ export function Clientes() {
           <option value="compras">Orden: # compras</option>
           <option value="total">Orden: total gastado</option>
         </select>
-        <div className="text-xs text-oliva-600 ml-auto">
-          {filtrados.length} / {clientes.length}
+          <div className="text-xs text-oliva-600 sm:ml-auto">
+            {filtrados.length} / {clientes.length}
+          </div>
         </div>
       </div>
 
