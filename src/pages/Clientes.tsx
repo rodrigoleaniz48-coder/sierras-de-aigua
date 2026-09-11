@@ -96,6 +96,17 @@ export function Clientes() {
     return m
   }, [ventas])
 
+  // Conteo por segmento (para mostrar cuántos hay en cada uno en el dropdown)
+  const conteoPorSegmento = useMemo(() => {
+    const m: Record<string, number> = { nuevos: 0, recientes: 0, frec_activos: 0, frec_inactivos: 0, en_riesgo: 0, perdidos: 0, nunca: 0 }
+    for (const c of clientes) {
+      if (esGonzalo && c.socio_asignado && c.socio_asignado !== perfil?.id) continue
+      const s = segmentoDe(statsPorCliente.get(c.id))
+      if (s in m) m[s] = (m[s] ?? 0) + 1
+    }
+    return m
+  }, [clientes, statsPorCliente, esGonzalo, perfil?.id])
+
   const filtrados = useMemo(() => {
     const t = q.trim().toLowerCase()
     const arr = clientes.filter((c) => {
@@ -162,13 +173,13 @@ export function Clientes() {
         </select>
         <select className="input w-56" value={segmento} onChange={(e) => setSegmento(e.target.value as Segmento)} title="Filtrar por comportamiento de compra">
           <option value="todos">Todos los segmentos</option>
-          <option value="nuevos">Nuevos (1ª compra ≤ 30 días)</option>
-          <option value="recientes">Compraron recién (≤ 30 días)</option>
-          <option value="frec_activos">Frecuentes activos (≥3, ≤ 60d)</option>
-          <option value="frec_inactivos">Frecuentes inactivos (≥3, &gt; 60d)</option>
-          <option value="en_riesgo">En riesgo (60–120 días)</option>
-          <option value="perdidos">Perdidos (&gt; 180 días)</option>
-          <option value="nunca">Nunca compró</option>
+          <option value="nuevos">Nuevos (1ª compra ≤ 30 días) · {conteoPorSegmento.nuevos ?? 0}</option>
+          <option value="recientes">Compraron recién (≤ 30 días) · {conteoPorSegmento.recientes ?? 0}</option>
+          <option value="frec_activos">Frecuentes activos (≥3, ≤ 60d) · {conteoPorSegmento.frec_activos ?? 0}</option>
+          <option value="frec_inactivos">Frecuentes inactivos (≥3, &gt; 60d) · {conteoPorSegmento.frec_inactivos ?? 0}</option>
+          <option value="en_riesgo">En riesgo (60–120 días) · {conteoPorSegmento.en_riesgo ?? 0}</option>
+          <option value="perdidos">Perdidos (&gt; 180 días) · {conteoPorSegmento.perdidos ?? 0}</option>
+          <option value="nunca">Nunca compró · {conteoPorSegmento.nunca ?? 0}</option>
         </select>
         <select className="input w-44" value={orden} onChange={(e) => setOrden(e.target.value as OrdenClientes)} title="Ordenar por">
           <option value="nombre">Orden: nombre</option>
@@ -274,7 +285,16 @@ export function Clientes() {
                 )
               })}
               {filtrados.length === 0 && (
-                <tr><td colSpan={9} className="py-6 text-center text-sm text-oliva-600">Sin resultados.</td></tr>
+                <tr><td colSpan={9} className="py-6 text-center text-sm text-oliva-600">
+                  {segmento !== 'todos' && conteoPorSegmento[segmento] === 0 ? (
+                    <div className="space-y-1">
+                      <div>Todavía no hay clientes en este segmento.</div>
+                      <div className="text-[11px] text-oliva-500">
+                        La app arrancó hace poco: <b>recientes</b>, <b>frecuentes</b>, <b>en riesgo</b> y <b>perdidos</b> se van poblando a medida que pasan las semanas y hay más historial de compras.
+                      </div>
+                    </div>
+                  ) : 'Sin resultados.'}
+                </td></tr>
               )}
             </tbody>
           </table>
