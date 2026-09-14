@@ -46,6 +46,12 @@ const paleta: Record<string, ColorProducto> = {
     chip: 'bg-oliva-100 text-oliva-700',
     dot:  'bg-oliva-300',
   },
+  miel: {
+    card: 'bg-yellow-50 border-yellow-300',
+    fill: 'bg-gradient-to-t from-yellow-500 to-yellow-300',
+    chip: 'bg-yellow-100 text-yellow-900',
+    dot:  'bg-yellow-500',
+  },
 }
 
 /**
@@ -65,5 +71,6 @@ export function colorProducto(nombre?: string | null): ColorProducto {
   if (n.includes('premiado'))  return paleta.amarillo
   if (n.includes('sin filtrar') || n.includes('sin_filtrar')) return paleta.amarillo
   if (n.includes('aceite'))    return paleta.amarillo // cualquier otro aceite (Elaia, blend genérico, etc.)
-  return paleta.violeta // productos que NO son aceite (aceituna, miel, jabón, vinagre, etc.)
+  if (n.includes('miel'))      return paleta.miel     // miel (dorado)
+  return paleta.violeta // productos que NO son aceite/miel (aceituna, jabón, vinagre, etc.)
 }
