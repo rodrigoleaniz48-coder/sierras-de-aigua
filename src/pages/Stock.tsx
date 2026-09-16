@@ -233,6 +233,8 @@ export function Stock() {
         tanques={tanques.filter((t) => t.activo && Number(t.litros_actuales) > 0)}
         presentaciones={presentaciones.filter((x) => x.activo && x.volumen_ml)}
         prodPorId={prodPorId}
+        productos={productos}
+        stock={stock}
         onCerrar={() => setEnvasar(false)}
         onOk={() => { setEnvasar(false); cargar() }}
       />
@@ -713,12 +715,14 @@ function badgeTipo(t: string) {
 // ============================================================
 
 function EnvasarDialog({
-  abierto, tanques, presentaciones, prodPorId, onCerrar, onOk,
+  abierto, tanques, presentaciones, prodPorId, productos, stock, onCerrar, onOk,
 }: {
   abierto: boolean
   tanques: Tanque[]
   presentaciones: Presentacion[]
   prodPorId: Map<number, Producto>
+  productos: Producto[]
+  stock: StockRow[]
   onCerrar: () => void
   onOk: () => void
 }) {
@@ -741,6 +745,19 @@ function EnvasarDialog({
   const pres = presDelTanque.find((p) => p.id === Number(presentacionId))
   const litrosNecesarios = pres && unidades ? (Number(unidades) * (pres.volumen_ml ?? 0)) / 1000 : 0
   const litrosOk = tanque ? litrosNecesarios <= Number(tanque.litros_actuales) + 0.0001 : false
+
+  // Envase vacio correspondiente al volumen de la presentacion a envasar.
+  // Regla: producto categoria='envases_vacios' y nombre generico "Envases vacios"
+  // (excluye specialties como "Envases Vina Eden"). Match por volumen_ml.
+  const prodEnvasesGenerico = productos.find((p) => p.categoria === 'envases_vacios' && p.nombre.toLowerCase().includes('vacios') && !p.nombre.toLowerCase().includes('vina'))
+  const presEnvaseVacio = (pres && prodEnvasesGenerico)
+    ? presentaciones.find((p) => p.producto_id === prodEnvasesGenerico.id && p.volumen_ml === pres.volumen_ml)
+    : undefined
+  const stockEnvaseAlmazara = presEnvaseVacio
+    ? stock.filter((s) => s.presentacion_id === presEnvaseVacio.id && s.ubicacion_id === 1).reduce((s, x) => s + Number(x.unidades), 0)
+    : 0
+  const nUnidades = Number(unidades) || 0
+  const envasesFaltan = presEnvaseVacio ? Math.max(0, nUnidades - stockEnvaseAlmazara) : 0
 
   async function guardar(e: React.FormEvent) {
     e.preventDefault()
@@ -787,6 +804,36 @@ function EnvasarDialog({
       stock_id: stockId, tipo: 'envasado', unidades: n,
       usuario_id: user?.id ?? null, nota: nota.trim() || `Envasado desde ${tanque.nombre}`,
     })
+
+    // 5) Descontar envases vacios del mismo volumen (categoria envases_vacios, generico).
+    //    Se hace en Almazara (donde ocurre el envasado). Puede quedar negativo si no
+    //    hay stock suficiente cargado — se avisa arriba pero no bloquea.
+    if (presEnvaseVacio) {
+      const { data: sEnvase } = await supabase.from('stock')
+        .select('id,unidades')
+        .eq('presentacion_id', presEnvaseVacio.id).eq('ubicacion_id', 1).is('tanque_id', null)
+        .maybeSingle()
+      let envaseStockId: number | null = null
+      if (sEnvase) {
+        await supabase.from('stock')
+          .update({ unidades: Number(sEnvase.unidades) - n, actualizado_en: new Date().toISOString() })
+          .eq('id', sEnvase.id)
+        envaseStockId = sEnvase.id
+      } else {
+        // Sin fila previa: crear con -n (queda negativo hasta que se cargue el stock real)
+        const { data: creado } = await supabase.from('stock')
+          .insert({ presentacion_id: presEnvaseVacio.id, ubicacion_id: 1, tanque_id: null, unidades: -n })
+          .select('id').single()
+        envaseStockId = creado?.id ?? null
+      }
+      if (envaseStockId) {
+        await supabase.from('movimientos_stock').insert({
+          stock_id: envaseStockId, tipo: 'envasado', unidades: -n,
+          usuario_id: user?.id ?? null,
+          nota: `Consumo de envase vacio por envasado de ${n} u de ${pres.nombre} desde ${tanque.nombre}`,
+        })
+      }
+    }
 
     setGuardando(false)
     onOk()
@@ -843,6 +890,23 @@ function EnvasarDialog({
                 </div>
               </div>
             </div>
+
+            {/* Aviso de envases vacios (Almazara) — se descuentan automaticamente al envasar */}
+            {pres && (
+              <div className={`text-xs rounded-md p-2 ${
+                !presEnvaseVacio ? 'bg-oliva-50 text-oliva-700 border border-oliva-200'
+                : envasesFaltan > 0 ? 'bg-amber-50 text-amber-900 border border-amber-300'
+                : 'bg-green-50 text-green-900 border border-green-200'
+              }`}>
+                {!presEnvaseVacio ? (
+                  <>No hay presentacion de <b>envase vacio</b> de {pres.volumen_ml} ml cargada. Al envasar no se descontarán envases (creá la presentacion en Envases vacíos si querés control).</>
+                ) : envasesFaltan > 0 ? (
+                  <>⚠ Envases vacíos de {pres.volumen_ml} ml en Almazara: <b>{stockEnvaseAlmazara}</b>. Vas a envasar <b>{nUnidades}</b> → faltan <b>{envasesFaltan}</b>. Se envasa igual pero el stock quedará en <b>−{envasesFaltan}</b>. Ajustá luego desde Envases vacíos.</>
+                ) : (
+                  <>✓ Envases vacíos disponibles ({pres.volumen_ml} ml) en Almazara: <b>{stockEnvaseAlmazara}</b>. Se descontarán <b>{nUnidades}</b> al envasar → quedarán <b>{stockEnvaseAlmazara - nUnidades}</b>.</>
+                )}
+              </div>
+            )}
 
             <div>
               <label className="label">Nota (opcional)</label>
