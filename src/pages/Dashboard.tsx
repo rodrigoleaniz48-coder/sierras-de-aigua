@@ -139,6 +139,21 @@ export function Dashboard() {
         )}
       </div>
 
+      {/* Pendientes primero — es lo mas accionable del dia */}
+      {!soloReporte && (
+        <AccionCard
+          titulo="Pendientes"
+          valor={cargando ? '…' : String(r.pendTotal)}
+          sub={
+            r.pendTotal === 0
+              ? 'todo al día ✓'
+              : `${r.pendEntrega} sin entregar · ${r.pendCobro} sin cobrar${r.pendCobroMonto > 0 ? ` (${money(r.pendCobroMonto)})` : ''}`
+          }
+          onClick={() => nav('/ventas')}
+          tono={r.pendCobro > 0 ? 'rojo' : r.pendEntrega > 0 ? 'ambar' : 'ok'}
+        />
+      )}
+
       {!soloReporte && <AlertasStockBajo />}
       {!soloReporte && <AlertasTareas />}
 
@@ -178,20 +193,6 @@ export function Dashboard() {
         <KpiCard titulo="Mes anterior" valor={cargando ? '…' : money(r.totalMesAnterior)} sub="para comparar" />
       </div>
 
-      {/* Único botón de Pendientes: agrupa entrega + cobro (llevan al mismo lugar) */}
-      {!soloReporte && (
-        <AccionCard
-          titulo="Pendientes"
-          valor={cargando ? '…' : String(r.pendTotal)}
-          sub={
-            r.pendTotal === 0
-              ? 'todo al día ✓'
-              : `${r.pendEntrega} sin entregar · ${r.pendCobro} sin cobrar${r.pendCobroMonto > 0 ? ` (${money(r.pendCobroMonto)})` : ''}`
-          }
-          onClick={() => nav('/ventas')}
-          tono={r.pendCobro > 0 ? 'rojo' : r.pendEntrega > 0 ? 'ambar' : 'ok'}
-        />
-      )}
     </div>
   )
 }
