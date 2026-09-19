@@ -17,7 +17,7 @@ interface Resumen {
   pendEntrega: number
   pendCobro: number
   pendCobroMonto: number
-  enRiesgo: number
+  pendTotal: number // union: ventas con algo pendiente (entrega u cobro)
 }
 
 export function Dashboard() {
@@ -29,7 +29,7 @@ export function Dashboard() {
 
   const [r, setR] = useState<Resumen>({
     totalMes: 0, cantVentasMes: 0, totalMesAnterior: 0, litrosAceiteMes: 0,
-    pendEntrega: 0, pendCobro: 0, pendCobroMonto: 0, enRiesgo: 0,
+    pendEntrega: 0, pendCobro: 0, pendCobroMonto: 0, pendTotal: 0,
   })
   const [cargando, setCargando] = useState(true)
   const [avisosCadete, setAvisosCadete] = useState<AvisoCadete[]>([])
@@ -75,12 +75,10 @@ export function Dashboard() {
       supabase.from('ventas').select('total').gte('fecha', mesAntInicio).lte('fecha', mesAntFin).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
       // Items del mes con producto y presentación, para calcular litros de aceite (envasado + granel)
       supabase.from('items_venta').select('unidades, presentacion:presentaciones(volumen_ml, producto:productos(nombre, categoria)), venta:ventas!inner(fecha, estado, a_confirmar)').gte('venta.fecha', mesInicio).neq('venta.estado', 'cancelado').eq('venta.a_confirmar', false),
-      // Ventas con última compra vieja (para "en riesgo") — traemos fechas de última venta por cliente
-      supabase.from('ventas').select('cliente_id, fecha').neq('estado', 'cancelado').eq('a_confirmar', false).order('fecha', { ascending: false }),
       // Pendientes de entrega/cobro (todas las fechas, no filtrar por mes: siguen pendientes despues del cierre)
       supabase.from('ventas').select('id, total, entregado, cobrado, promocion_comercial').neq('estado', 'cancelado').eq('a_confirmar', false).or('entregado.eq.false,cobrado.eq.false'),
     ])
-      .then(([vRes, vAntRes, iRes, ultVentasRes, pendRes]) => {
+      .then(([vRes, vAntRes, iRes, pendRes]) => {
         const ventasMes = vRes.data ?? []
         const totalMes = ventasMes.reduce((s, v) => s + Number(v.total ?? 0), 0)
         // Pendientes: TODAS las ventas no-canceladas no-entregadas o no-cobradas (independiente del mes)
@@ -90,6 +88,8 @@ export function Dashboard() {
         const pendCobroList = pendientes.filter((v) => !v.cobrado && !v.promocion_comercial)
         const pendCobro = pendCobroList.length
         const pendCobroMonto = pendCobroList.reduce((s, v) => s + Number(v.total ?? 0), 0)
+        // Union: una venta puede estar pendiente por ambos motivos, pero se cuenta 1 sola vez
+        const pendTotal = pendientes.length
 
         const totalMesAnterior = (vAntRes.data ?? []).reduce((s, v) => s + Number(v.total ?? 0), 0)
 
@@ -103,22 +103,10 @@ export function Dashboard() {
           if (esAceite && vol > 0) litros += (Number(it.unidades) * vol) / 1000
         }
 
-        // En riesgo: clientes cuya última compra fue hace entre 60 y 120 días
-        const ultimaPorCli = new Map<number, string>()
-        for (const v of (ultVentasRes.data as { cliente_id: number | null; fecha: string }[]) ?? []) {
-          if (v.cliente_id == null) continue
-          if (!ultimaPorCli.has(v.cliente_id)) ultimaPorCli.set(v.cliente_id, v.fecha)
-        }
-        let enRiesgo = 0
-        for (const [, fecha] of ultimaPorCli) {
-          const d = Math.floor((Date.now() - new Date(fecha + 'T00:00:00').getTime()) / 86400000)
-          if (d >= 60 && d <= 120) enRiesgo++
-        }
-
         setR({
           totalMes, cantVentasMes: ventasMes.length,
           totalMesAnterior, litrosAceiteMes: litros,
-          pendEntrega, pendCobro, pendCobroMonto, enRiesgo,
+          pendEntrega, pendCobro, pendCobroMonto, pendTotal,
         })
       })
       .finally(() => setCargando(false))
@@ -126,7 +114,6 @@ export function Dashboard() {
 
   const primerNombre = perfil?.nombre ? perfil.nombre.split(' ')[0] : ''
   const hoy = new Date().toLocaleDateString('es-UY', { day: 'numeric', month: 'long', year: 'numeric' })
-  const ticketProm = r.cantVentasMes > 0 ? r.totalMes / r.cantVentasMes : 0
   const deltaMes = r.totalMesAnterior > 0 ? ((r.totalMes - r.totalMesAnterior) / r.totalMesAnterior) * 100 : null
   // Ayelén no ve la parte operativa (alertas de stock y pendientes) — solo reporte semanal + KPIs
   const nombreLower = (perfil?.nombre ?? '').toLowerCase()
@@ -175,8 +162,11 @@ export function Dashboard() {
         </div>
       )}
 
+      {/* Reporte semanal (sube desde el pie al lugar del ex-ticket promedio) */}
+      <ReporteSemanalCard compact />
+
       {/* KPIs del mes */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <KpiCard
           titulo="Ventas del mes"
           valor={cargando ? '…' : money(r.totalMes)}
@@ -184,39 +174,24 @@ export function Dashboard() {
           destacado
           delta={deltaMes}
         />
-        <KpiCard titulo="Ticket promedio" valor={cargando ? '…' : money(ticketProm)} sub="por venta del mes" />
         <KpiCard titulo="Aceite vendido" valor={cargando ? '…' : `${num(r.litrosAceiteMes)} L`} sub="mes en curso" />
         <KpiCard titulo="Mes anterior" valor={cargando ? '…' : money(r.totalMesAnterior)} sub="para comparar" />
       </div>
 
-      {/* Qué hacer ahora (oculto para Ayelén) */}
+      {/* Único botón de Pendientes: agrupa entrega + cobro (llevan al mismo lugar) */}
       {!soloReporte && (
-        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-          <AccionCard
-            titulo="Pendientes de entrega"
-            valor={cargando ? '…' : String(r.pendEntrega)}
-            sub={r.pendEntrega > 0 ? 'clic para ver' : 'todo entregado ✓'}
-            onClick={() => nav('/ventas')}
-            tono={r.pendEntrega > 0 ? 'ambar' : 'ok'}
-          />
-          <AccionCard
-            titulo="Pendientes de cobro"
-            valor={cargando ? '…' : String(r.pendCobro)}
-            sub={r.pendCobro > 0 ? money(r.pendCobroMonto) + ' pendiente' : 'todo cobrado ✓'}
-            onClick={() => nav('/ventas')}
-            tono={r.pendCobro > 0 ? 'rojo' : 'ok'}
-          />
-          <AccionCard
-            titulo="Clientes en riesgo"
-            valor={cargando ? '…' : String(r.enRiesgo)}
-            sub={r.enRiesgo > 0 ? 'no compran hace 60–120 d' : 'sin alertas'}
-            onClick={() => nav('/clientes')}
-            tono={r.enRiesgo > 0 ? 'ambar' : 'ok'}
-          />
-        </div>
+        <AccionCard
+          titulo="Pendientes"
+          valor={cargando ? '…' : String(r.pendTotal)}
+          sub={
+            r.pendTotal === 0
+              ? 'todo al día ✓'
+              : `${r.pendEntrega} sin entregar · ${r.pendCobro} sin cobrar${r.pendCobroMonto > 0 ? ` (${money(r.pendCobroMonto)})` : ''}`
+          }
+          onClick={() => nav('/ventas')}
+          tono={r.pendCobro > 0 ? 'rojo' : r.pendEntrega > 0 ? 'ambar' : 'ok'}
+        />
       )}
-
-      <ReporteSemanalCard compact />
     </div>
   )
 }
