@@ -120,15 +120,15 @@ export function Dashboard() {
   const soloReporte = nombreLower.includes('ayelen') || nombreLower.includes('ayelén')
 
   return (
-    <div className="space-y-2 max-w-[1200px]">
+    <div className="space-y-3 max-w-[1200px]">
       {/* Topbar compacto (una linea) */}
       <div className="flex items-center justify-between gap-3">
-        <h1 className="text-base sm:text-lg font-bold text-oliva-900 truncate">
-          Hola{primerNombre && `, ${primerNombre}`} <span className="text-oliva-400 font-normal text-xs">· {hoy}</span>
+        <h1 className="text-lg sm:text-xl font-bold text-oliva-900 truncate">
+          Hola{primerNombre && `, ${primerNombre}`} <span className="text-oliva-400 font-normal text-sm">· {hoy}</span>
         </h1>
         {puedeVender && (
-          <button onClick={() => nav('/ventas', { state: { abrirNueva: true } })} className="btn-primary text-xs px-2.5 py-1.5 shrink-0">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="inline-block mr-1">
+          <button onClick={() => nav('/ventas', { state: { abrirNueva: true } })} className="btn-primary text-sm px-3 py-2 shrink-0">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="inline-block mr-1">
               <path d="M12 5v14M5 12h14" />
             </svg>
             Nueva venta
@@ -175,7 +175,7 @@ export function Dashboard() {
       <ReporteSemanalCard compact />
 
       {/* KPIs del mes — 3 columnas siempre (incluso en mobile) para que entren en una pantalla */}
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-3 gap-2 sm:gap-3">
         <KpiCard
           titulo="Ventas mes"
           valor={cargando ? '…' : money(r.totalMes)}
@@ -184,7 +184,7 @@ export function Dashboard() {
           delta={deltaMes}
         />
         <KpiCard titulo="Aceite" valor={cargando ? '…' : `${num(r.litrosAceiteMes)} L`} sub="mes" />
-        <KpiCard titulo="Mes anterior" valor={cargando ? '…' : money(r.totalMesAnterior)} />
+        <KpiCard titulo="Mes anterior" valor={cargando ? '…' : money(r.totalMesAnterior)} sub="para comparar" />
       </div>
 
     </div>
@@ -203,32 +203,32 @@ function PendientesBar({ cargando, total, entrega, cobro, cobroMonto, onClick }:
     <button
       type="button"
       onClick={onClick}
-      className={`w-full flex items-center gap-3 rounded-lg border px-3 py-2 transition text-left ${cls}`}
+      className={`w-full flex items-center gap-3 rounded-lg border px-3.5 py-3 transition text-left ${cls}`}
     >
-      <span className="text-[10px] font-bold uppercase tracking-widest text-oliva-500 shrink-0">Pendientes</span>
-      <span className="text-lg font-extrabold tabular-nums">{cargando ? '…' : total}</span>
-      <span className="text-[11px] text-oliva-700 truncate">
+      <span className="text-[11px] font-bold uppercase tracking-widest text-oliva-500 shrink-0">Pendientes</span>
+      <span className="text-2xl font-extrabold tabular-nums leading-none">{cargando ? '…' : total}</span>
+      <span className="text-xs text-oliva-700 truncate">
         {total === 0
           ? 'todo al día ✓'
           : <>{entrega} sin entregar · {cobro} sin cobrar{cobroMonto > 0 && ` (${money(cobroMonto)})`}</>
         }
       </span>
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="ml-auto text-oliva-400 shrink-0"><path d="M5 12h14M13 5l7 7-7 7" /></svg>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="ml-auto text-oliva-400 shrink-0"><path d="M5 12h14M13 5l7 7-7 7" /></svg>
     </button>
   )
 }
 
 function KpiCard({ titulo, valor, sub, destacado, delta }: { titulo: string; valor: string; sub?: string; destacado?: boolean; delta?: number | null }) {
   return (
-    <div className="rounded-lg border border-oliva-100 bg-white p-2 min-w-0">
-      <div className="text-[9px] font-bold uppercase tracking-wider text-oliva-500 truncate">{titulo}</div>
-      <div className={`text-base sm:text-lg font-extrabold mt-0.5 tabular-nums tracking-tight truncate ${destacado ? 'text-oliva-800' : 'text-oliva-900'}`}>
+    <div className="rounded-lg border border-oliva-100 bg-white p-3 min-w-0">
+      <div className="text-[10px] font-bold uppercase tracking-widest text-oliva-500 truncate">{titulo}</div>
+      <div className={`text-lg sm:text-xl font-extrabold mt-1 tabular-nums tracking-tight truncate ${destacado ? 'text-oliva-800' : 'text-oliva-900'}`}>
         {valor}
       </div>
       <div className="flex items-baseline gap-1 mt-0.5 min-w-0">
-        {sub && <div className="text-[10px] text-oliva-500 truncate">{sub}</div>}
+        {sub && <div className="text-[11px] text-oliva-500 truncate">{sub}</div>}
         {delta !== null && delta !== undefined && !isNaN(delta) && (
-          <div className={`text-[10px] font-semibold ${delta >= 0 ? 'text-green-700' : 'text-red-700'} shrink-0`}>
+          <div className={`text-[11px] font-semibold ${delta >= 0 ? 'text-green-700' : 'text-red-700'} shrink-0`}>
             {delta >= 0 ? '↑' : '↓'}{Math.abs(delta).toFixed(0)}%
           </div>
         )}
