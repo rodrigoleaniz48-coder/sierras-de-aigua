@@ -120,18 +120,15 @@ export function Dashboard() {
   const soloReporte = nombreLower.includes('ayelen') || nombreLower.includes('ayelén')
 
   return (
-    <div className="space-y-4 max-w-[1200px]">
-      {/* Topbar */}
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <div className="text-[11px] font-semibold uppercase tracking-widest text-oliva-500">Inicio</div>
-          <h1 className="text-xl font-bold text-oliva-900 mt-1">
-            Hola{primerNombre && `, ${primerNombre}`} <span className="text-oliva-400 font-normal">· {hoy}</span>
-          </h1>
-        </div>
+    <div className="space-y-2 max-w-[1200px]">
+      {/* Topbar compacto (una linea) */}
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-base sm:text-lg font-bold text-oliva-900 truncate">
+          Hola{primerNombre && `, ${primerNombre}`} <span className="text-oliva-400 font-normal text-xs">· {hoy}</span>
+        </h1>
         {puedeVender && (
-          <button onClick={() => nav('/ventas', { state: { abrirNueva: true } })} className="btn-primary">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+          <button onClick={() => nav('/ventas', { state: { abrirNueva: true } })} className="btn-primary text-xs px-2.5 py-1.5 shrink-0">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="inline-block mr-1">
               <path d="M12 5v14M5 12h14" />
             </svg>
             Nueva venta
@@ -139,18 +136,15 @@ export function Dashboard() {
         )}
       </div>
 
-      {/* Pendientes primero — es lo mas accionable del dia */}
+      {/* Pendientes compacto (barra horizontal, no card) */}
       {!soloReporte && (
-        <AccionCard
-          titulo="Pendientes"
-          valor={cargando ? '…' : String(r.pendTotal)}
-          sub={
-            r.pendTotal === 0
-              ? 'todo al día ✓'
-              : `${r.pendEntrega} sin entregar · ${r.pendCobro} sin cobrar${r.pendCobroMonto > 0 ? ` (${money(r.pendCobroMonto)})` : ''}`
-          }
+        <PendientesBar
+          cargando={cargando}
+          total={r.pendTotal}
+          entrega={r.pendEntrega}
+          cobro={r.pendCobro}
+          cobroMonto={r.pendCobroMonto}
           onClick={() => nav('/ventas')}
-          tono={r.pendCobro > 0 ? 'rojo' : r.pendEntrega > 0 ? 'ambar' : 'ok'}
         />
       )}
 
@@ -180,35 +174,62 @@ export function Dashboard() {
       {/* Reporte semanal (sube desde el pie al lugar del ex-ticket promedio) */}
       <ReporteSemanalCard compact />
 
-      {/* KPIs del mes */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      {/* KPIs del mes — 3 columnas siempre (incluso en mobile) para que entren en una pantalla */}
+      <div className="grid grid-cols-3 gap-2">
         <KpiCard
-          titulo="Ventas del mes"
+          titulo="Ventas mes"
           valor={cargando ? '…' : money(r.totalMes)}
-          sub={`${r.cantVentasMes} operaciones`}
+          sub={`${r.cantVentasMes} op.`}
           destacado
           delta={deltaMes}
         />
-        <KpiCard titulo="Aceite vendido" valor={cargando ? '…' : `${num(r.litrosAceiteMes)} L`} sub="mes en curso" />
-        <KpiCard titulo="Mes anterior" valor={cargando ? '…' : money(r.totalMesAnterior)} sub="para comparar" />
+        <KpiCard titulo="Aceite" valor={cargando ? '…' : `${num(r.litrosAceiteMes)} L`} sub="mes" />
+        <KpiCard titulo="Mes anterior" valor={cargando ? '…' : money(r.totalMesAnterior)} />
       </div>
 
     </div>
   )
 }
 
+function PendientesBar({ cargando, total, entrega, cobro, cobroMonto, onClick }: {
+  cargando: boolean; total: number; entrega: number; cobro: number; cobroMonto: number; onClick: () => void
+}) {
+  const tono = cobro > 0 ? 'rojo' : entrega > 0 ? 'ambar' : 'ok'
+  const cls =
+    tono === 'rojo'  ? 'border-red-200 bg-red-50/60 hover:bg-red-50 text-red-800' :
+    tono === 'ambar' ? 'border-amber-200 bg-amber-50/60 hover:bg-amber-50 text-amber-900' :
+                       'border-oliva-100 bg-white hover:bg-oliva-50 text-oliva-900'
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`w-full flex items-center gap-3 rounded-lg border px-3 py-2 transition text-left ${cls}`}
+    >
+      <span className="text-[10px] font-bold uppercase tracking-widest text-oliva-500 shrink-0">Pendientes</span>
+      <span className="text-lg font-extrabold tabular-nums">{cargando ? '…' : total}</span>
+      <span className="text-[11px] text-oliva-700 truncate">
+        {total === 0
+          ? 'todo al día ✓'
+          : <>{entrega} sin entregar · {cobro} sin cobrar{cobroMonto > 0 && ` (${money(cobroMonto)})`}</>
+        }
+      </span>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="ml-auto text-oliva-400 shrink-0"><path d="M5 12h14M13 5l7 7-7 7" /></svg>
+    </button>
+  )
+}
+
 function KpiCard({ titulo, valor, sub, destacado, delta }: { titulo: string; valor: string; sub?: string; destacado?: boolean; delta?: number | null }) {
   return (
-    <div className="panel">
-      <div className="text-[10px] font-bold uppercase tracking-widest text-oliva-500">{titulo}</div>
-      <div className={`text-2xl font-extrabold mt-1.5 tabular-nums tracking-tight ${destacado ? 'text-oliva-800' : 'text-oliva-900'}`}>
+    <div className="rounded-lg border border-oliva-100 bg-white p-2 min-w-0">
+      <div className="text-[9px] font-bold uppercase tracking-wider text-oliva-500 truncate">{titulo}</div>
+      <div className={`text-base sm:text-lg font-extrabold mt-0.5 tabular-nums tracking-tight truncate ${destacado ? 'text-oliva-800' : 'text-oliva-900'}`}>
         {valor}
       </div>
-      <div className="flex items-baseline gap-2 mt-1">
-        {sub && <div className="text-[11px] text-oliva-500">{sub}</div>}
+      <div className="flex items-baseline gap-1 mt-0.5 min-w-0">
+        {sub && <div className="text-[10px] text-oliva-500 truncate">{sub}</div>}
         {delta !== null && delta !== undefined && !isNaN(delta) && (
-          <div className={`text-[11px] font-semibold ${delta >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-            {delta >= 0 ? '↑' : '↓'} {Math.abs(delta).toFixed(0)}%
+          <div className={`text-[10px] font-semibold ${delta >= 0 ? 'text-green-700' : 'text-red-700'} shrink-0`}>
+            {delta >= 0 ? '↑' : '↓'}{Math.abs(delta).toFixed(0)}%
           </div>
         )}
       </div>
@@ -216,23 +237,3 @@ function KpiCard({ titulo, valor, sub, destacado, delta }: { titulo: string; val
   )
 }
 
-function AccionCard({ titulo, valor, sub, onClick, tono }: { titulo: string; valor: string; sub?: string; onClick: () => void; tono: 'ok' | 'ambar' | 'rojo' }) {
-  const cls =
-    tono === 'rojo' ? 'border-red-200 bg-red-50/60 hover:bg-red-50' :
-    tono === 'ambar' ? 'border-amber-200 bg-amber-50/60 hover:bg-amber-50' :
-    'border-oliva-100 bg-white hover:bg-oliva-50'
-  const valCls =
-    tono === 'rojo' ? 'text-red-800' :
-    tono === 'ambar' ? 'text-amber-800' :
-    'text-oliva-900'
-  return (
-    <button type="button" onClick={onClick} className={`rounded-lg border ${cls} p-3 text-left transition group`}>
-      <div className="flex items-baseline justify-between gap-2">
-        <div className="text-[10px] font-bold uppercase tracking-widest text-oliva-500">{titulo}</div>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-oliva-400 group-hover:text-oliva-700"><path d="M5 12h14M13 5l7 7-7 7" /></svg>
-      </div>
-      <div className={`text-2xl font-extrabold mt-1 tabular-nums ${valCls}`}>{valor}</div>
-      {sub && <div className="text-[11px] text-oliva-600 mt-0.5">{sub}</div>}
-    </button>
-  )
-}
