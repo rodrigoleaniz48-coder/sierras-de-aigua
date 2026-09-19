@@ -148,7 +148,6 @@ export function Dashboard() {
         />
       )}
 
-      {!soloReporte && <AlertasStockBajo />}
       {!soloReporte && <AlertasTareas />}
 
       {avisosCadete.length > 0 && (
@@ -186,6 +185,9 @@ export function Dashboard() {
         <KpiCard titulo="Aceite" valor={cargando ? '…' : `${num(r.litrosAceiteMes)} L`} sub="mes" />
         <KpiCard titulo="Mes anterior" valor={cargando ? '…' : money(r.totalMesAnterior)} sub="para comparar" />
       </div>
+
+      {/* Alertas de stock — al pie (no es lo mas urgente del dia a dia) */}
+      {!soloReporte && <AlertasStockBajo />}
 
     </div>
   )
