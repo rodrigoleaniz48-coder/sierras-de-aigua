@@ -84,12 +84,14 @@ export function Dashboard() {
         // Pendientes: TODAS las ventas no-canceladas no-entregadas o no-cobradas (independiente del mes)
         // Las promos no tienen cobro; solo cuentan si falta entregar.
         const pendientes = pendRes.data ?? []
-        const pendEntrega = pendientes.filter((v) => !v.entregado).length
-        const pendCobroList = pendientes.filter((v) => !v.cobrado && !v.promocion_comercial)
+        // Promo entregada NO es pendiente (no requiere cobro). Filtro esas out.
+        const realmentePendientes = pendientes.filter((v) => !v.entregado || (!v.cobrado && !v.promocion_comercial))
+        const pendEntrega = realmentePendientes.filter((v) => !v.entregado).length
+        const pendCobroList = realmentePendientes.filter((v) => !v.cobrado && !v.promocion_comercial)
         const pendCobro = pendCobroList.length
         const pendCobroMonto = pendCobroList.reduce((s, v) => s + Number(v.total ?? 0), 0)
         // Union: una venta puede estar pendiente por ambos motivos, pero se cuenta 1 sola vez
-        const pendTotal = pendientes.length
+        const pendTotal = realmentePendientes.length
 
         const totalMesAnterior = (vAntRes.data ?? []).reduce((s, v) => s + Number(v.total ?? 0), 0)
 
@@ -136,11 +138,10 @@ export function Dashboard() {
         )}
       </div>
 
-      {/* Pendientes compacto (barra horizontal, no card) */}
+      {/* Pendiente ventas — foco en cobros (lo urgente en plata); entregas como secundario */}
       {!soloReporte && (
         <PendientesBar
           cargando={cargando}
-          total={r.pendTotal}
           entrega={r.pendEntrega}
           cobro={r.pendCobro}
           cobroMonto={r.pendCobroMonto}
@@ -193,8 +194,8 @@ export function Dashboard() {
   )
 }
 
-function PendientesBar({ cargando, total, entrega, cobro, cobroMonto, onClick }: {
-  cargando: boolean; total: number; entrega: number; cobro: number; cobroMonto: number; onClick: () => void
+function PendientesBar({ cargando, entrega, cobro, cobroMonto, onClick }: {
+  cargando: boolean; entrega: number; cobro: number; cobroMonto: number; onClick: () => void
 }) {
   const tono = cobro > 0 ? 'rojo' : entrega > 0 ? 'ambar' : 'ok'
   const cls =
@@ -209,15 +210,16 @@ function PendientesBar({ cargando, total, entrega, cobro, cobroMonto, onClick }:
     >
       <div className="flex flex-col min-w-0 flex-1">
         <span className="text-xs font-bold uppercase tracking-widest text-oliva-600">Pendiente ventas</span>
-        <div className="flex items-baseline gap-3 mt-1">
-          <span className="text-4xl font-extrabold tabular-nums leading-none">{cargando ? '…' : total}</span>
-          <span className="text-sm text-oliva-700 truncate">
-            {total === 0
-              ? 'todo al día ✓'
-              : <>{entrega} sin entregar · {cobro} sin cobrar{cobroMonto > 0 && ` · ${money(cobroMonto)}`}</>
-            }
-          </span>
+        <div className="flex items-baseline gap-3 mt-1 flex-wrap">
+          <span className="text-4xl font-extrabold tabular-nums leading-none">{cargando ? '…' : cobro}</span>
+          <span className="text-sm font-semibold">sin cobrar{cobroMonto > 0 && ` · ${money(cobroMonto)}`}</span>
         </div>
+        {entrega > 0 && (
+          <div className="text-xs text-oliva-700 mt-1">+ {entrega} pendiente{entrega === 1 ? '' : 's'} de entrega</div>
+        )}
+        {cobro === 0 && entrega === 0 && (
+          <div className="text-sm text-oliva-600 mt-1">todo al día ✓</div>
+        )}
       </div>
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-oliva-400 shrink-0"><path d="M5 12h14M13 5l7 7-7 7" /></svg>
     </button>
