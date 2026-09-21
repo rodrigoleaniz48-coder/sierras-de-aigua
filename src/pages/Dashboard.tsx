@@ -148,7 +148,6 @@ export function Dashboard() {
         />
       )}
 
-      {!soloReporte && <AlertasTareas />}
 
       {avisosCadete.length > 0 && (
         <div className="rounded-lg border-2 border-blue-300 bg-blue-50 p-3 flex items-start gap-3">
@@ -186,7 +185,8 @@ export function Dashboard() {
         <KpiCard titulo="Mes anterior" valor={cargando ? '…' : money(r.totalMesAnterior)} sub="para comparar" />
       </div>
 
-      {/* Alertas de stock — al pie (no es lo mas urgente del dia a dia) */}
+      {/* Al pie: alertas menos urgentes que el resumen del dia */}
+      {!soloReporte && <AlertasTareas />}
       {!soloReporte && <AlertasStockBajo />}
 
     </div>
@@ -198,24 +198,28 @@ function PendientesBar({ cargando, total, entrega, cobro, cobroMonto, onClick }:
 }) {
   const tono = cobro > 0 ? 'rojo' : entrega > 0 ? 'ambar' : 'ok'
   const cls =
-    tono === 'rojo'  ? 'border-red-200 bg-red-50/60 hover:bg-red-50 text-red-800' :
-    tono === 'ambar' ? 'border-amber-200 bg-amber-50/60 hover:bg-amber-50 text-amber-900' :
-                       'border-oliva-100 bg-white hover:bg-oliva-50 text-oliva-900'
+    tono === 'rojo'  ? 'border-red-300 bg-red-50 hover:bg-red-100 text-red-800' :
+    tono === 'ambar' ? 'border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900' :
+                       'border-oliva-200 bg-white hover:bg-oliva-50 text-oliva-900'
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`w-full flex items-center gap-3 rounded-lg border px-3.5 py-3 transition text-left ${cls}`}
+      className={`w-full flex items-center gap-4 rounded-xl border-2 px-5 py-4 transition text-left shadow-sm ${cls}`}
     >
-      <span className="text-[11px] font-bold uppercase tracking-widest text-oliva-500 shrink-0">Pendientes</span>
-      <span className="text-2xl font-extrabold tabular-nums leading-none">{cargando ? '…' : total}</span>
-      <span className="text-xs text-oliva-700 truncate">
-        {total === 0
-          ? 'todo al día ✓'
-          : <>{entrega} sin entregar · {cobro} sin cobrar{cobroMonto > 0 && ` (${money(cobroMonto)})`}</>
-        }
-      </span>
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="ml-auto text-oliva-400 shrink-0"><path d="M5 12h14M13 5l7 7-7 7" /></svg>
+      <div className="flex flex-col min-w-0 flex-1">
+        <span className="text-xs font-bold uppercase tracking-widest text-oliva-600">Pendiente ventas</span>
+        <div className="flex items-baseline gap-3 mt-1">
+          <span className="text-4xl font-extrabold tabular-nums leading-none">{cargando ? '…' : total}</span>
+          <span className="text-sm text-oliva-700 truncate">
+            {total === 0
+              ? 'todo al día ✓'
+              : <>{entrega} sin entregar · {cobro} sin cobrar{cobroMonto > 0 && ` · ${money(cobroMonto)}`}</>
+            }
+          </span>
+        </div>
+      </div>
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-oliva-400 shrink-0"><path d="M5 12h14M13 5l7 7-7 7" /></svg>
     </button>
   )
 }
