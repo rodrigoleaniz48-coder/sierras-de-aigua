@@ -4,8 +4,9 @@ import { useAuth } from '../lib/auth'
 import { Dialog } from '../components/Dialog'
 import { money } from '../lib/format'
 import { parsearExtractoBROU } from '../lib/parserBROU'
+import { ConectarGmailCard } from '../components/ConectarGmailCard'
 
-type Tab = 'resultados' | 'conciliacion'
+type Tab = 'resultados' | 'conciliacion' | 'obligaciones'
 
 interface Cuenta {
   id: number
@@ -44,6 +45,12 @@ export function Contabilidad() {
   const veTodos = !!perfil?.ve_todos_gastos
   const [tab, setTab] = useState<Tab>('resultados')
 
+  // Si llega desde el callback OAuth de Gmail, abrir la tab de obligaciones
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search)
+    if (p.has('code')) setTab('obligaciones')
+  }, [])
+
   if (!veTodos) {
     return (
       <div className="card p-6 text-sm text-oliva-700">
@@ -57,12 +64,12 @@ export function Contabilidad() {
       <div>
         <h1 className="text-2xl font-semibold text-oliva-900">Contabilidad</h1>
         <p className="text-sm text-oliva-700 mt-1">
-          Estado de resultados de la empresa y conciliación de las cuentas bancarias.
+          Estado de resultados, conciliación bancaria y obligaciones fiscales.
         </p>
       </div>
 
       <div className="flex gap-1 border-b border-oliva-100 overflow-x-auto">
-        {(['resultados', 'conciliacion'] as Tab[]).map((t) => (
+        {(['resultados', 'conciliacion', 'obligaciones'] as Tab[]).map((t) => (
           <button
             key={t}
             className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition ${
@@ -70,13 +77,28 @@ export function Contabilidad() {
             }`}
             onClick={() => setTab(t)}
           >
-            {t === 'resultados' ? 'Estado de resultados' : 'Conciliación bancaria'}
+            {t === 'resultados' ? 'Estado de resultados' : t === 'conciliacion' ? 'Conciliación bancaria' : 'Obligaciones'}
           </button>
         ))}
       </div>
 
       {tab === 'resultados' && <EstadoResultados />}
       {tab === 'conciliacion' && <Conciliacion />}
+      {tab === 'obligaciones' && <Obligaciones />}
+    </div>
+  )
+}
+
+// ============================================================
+// Obligaciones (correos de impuestos, facturas, proveedores)
+// ============================================================
+function Obligaciones() {
+  return (
+    <div className="space-y-4">
+      <ConectarGmailCard />
+      <div className="card p-5 text-sm text-oliva-600 text-center">
+        Una vez conectada la cuenta, acá se mostrarán los correos relacionados con impuestos, facturas y obligaciones.
+      </div>
     </div>
   )
 }
