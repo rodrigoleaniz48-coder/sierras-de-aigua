@@ -347,12 +347,15 @@ export function Gastos() {
       <GastoDialog
         abierto={nuevo}
         socioId={soyYo}
+        socios={socios}
+        veTodos={veTodos}
         onCerrar={() => setNuevo(false)}
         onOk={() => { setNuevo(false); cargar() }}
       />
       <GastoDialog
         abierto={editando !== null}
         socioId={soyYo}
+        socios={socios}
         editar={editando}
         veTodos={veTodos}
         onCerrar={() => setEditando(null)}
@@ -386,16 +389,19 @@ function Kpi({ titulo, valor, tono }: { titulo: string; valor: string; tono?: 'a
 interface CuentaBancariaBase { id: number; nombre: string; moneda: 'UYU' | 'USD' }
 
 function GastoDialog({
-  abierto, socioId, editar, veTodos, onCerrar, onOk, onEliminar,
+  abierto, socioId, socios, editar, veTodos, onCerrar, onOk, onEliminar,
 }: {
   abierto: boolean
   socioId: string
+  socios: Socio[]
   editar?: Gasto | null
   veTodos?: boolean
   onCerrar: () => void
   onOk: () => void
   onEliminar?: (g: Gasto) => Promise<void>
 }) {
+  // Admin (veTodos) puede cargar/editar gastos de otros socios. Default = uno mismo.
+  const [socioSel, setSocioSel] = useState<string>(socioId)
   const [fecha, setFecha] = useState(() => new Date().toISOString().slice(0, 10))
   const [categoria, setCategoria] = useState<string>('varios')
   const [monto, setMonto] = useState<string>('')
@@ -454,6 +460,7 @@ function GastoDialog({
       setTipo(editar.es_adelanto ? 'adelanto' : editar.reembolsable ? 'reembolsable' : 'normal')
       setReembolsado(editar.reembolsado)
       setCuentaId((editar as Gasto & { cuenta_id?: number | null }).cuenta_id ? String((editar as Gasto & { cuenta_id?: number | null }).cuenta_id) : '')
+      setSocioSel(editar.socio_id)
     } else {
       const b = leerObj<{ fecha: string; categoria: string; monto: string; moneda: 'UYU' | 'USD'; descripcion: string; metodoPago: string; tipo?: TipoGasto; reembolsado: boolean }>('borrador:nuevo-gasto')
       if (b) {
@@ -466,9 +473,10 @@ function GastoDialog({
         setDescripcion(''); setMetodoPago('efectivo')
         setTipo('normal'); setReembolsado(false)
       }
+      setSocioSel(socioId)
     }
     setError(null); setConfirmEliminar(false)
-  }, [abierto, editar])
+  }, [abierto, editar, socioId])
 
   // Guardar borrador al escribir (solo en modo nuevo)
   useEffect(() => {
@@ -484,7 +492,8 @@ function GastoDialog({
     setGuardando(true); setError(null)
     const payload = {
       fecha,
-      socio_id: editar?.socio_id ?? socioId,
+      // Admin puede cargar/reasignar a otro socio via el selector; si no, cae a soyYo (o al que ya tenia el gasto editado).
+      socio_id: veTodos ? socioSel : (editar?.socio_id ?? socioId),
       categoria,
       monto: Number(monto) || 0,
       moneda,
@@ -509,6 +518,26 @@ function GastoDialog({
   return (
     <Dialog abierto={abierto} onCerrar={onCerrar} titulo={editar ? `${tipo === 'adelanto' ? 'Adelanto' : 'Gasto'} del ${editar.fecha}` : (tipo === 'adelanto' ? 'Nuevo adelanto' : 'Nuevo gasto')} ancho="md">
       <form onSubmit={guardar} className="space-y-4">
+        {/* Selector de socio — solo admins (veTodos) pueden cargar/editar en nombre de otro */}
+        {veTodos && (
+          <div className="rounded-xl border border-aceite-500/30 bg-aceite-500/5 p-3">
+            <label className="label mb-1">Socio (a quien se le carga el gasto)</label>
+            <select
+              className="input"
+              value={socioSel}
+              onChange={(e) => setSocioSel(e.target.value)}
+              disabled={soloLectura}
+            >
+              {socios.map((s) => (
+                <option key={s.id} value={s.id}>{s.nombre}{s.id === socioId ? ' (vos)' : ''}</option>
+              ))}
+            </select>
+            {socioSel !== socioId && (
+              <p className="text-[11px] text-aceite-600 mt-1">⚠ Este gasto se carga a nombre de <b>{socios.find((s) => s.id === socioSel)?.nombre}</b>.</p>
+            )}
+          </div>
+        )}
+
         {/* TIPO — primero */}
         <div className="rounded-xl border border-oliva-100 bg-oliva-50/60 p-3 space-y-2">
           <div className="text-[11px] uppercase tracking-wide text-oliva-600 font-semibold mb-1">Tipo</div>
