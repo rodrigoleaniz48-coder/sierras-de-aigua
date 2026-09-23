@@ -45,3 +45,36 @@ export async function desconectarGmail(): Promise<{ ok?: boolean; error?: string
   if (error) return { error: error.message }
   return data as { ok?: boolean; error?: string }
 }
+
+// ---- Sincronización ----
+
+export interface CorreoSincronizado {
+  id: number
+  gmail_id: string
+  de: string
+  asunto: string
+  fecha: string
+  snippet: string
+}
+
+export async function sincronizarGmail(): Promise<{
+  ok?: boolean
+  correos_nuevos?: number
+  primera_sync?: boolean
+  error?: string
+}> {
+  const { data, error } = await supabase.functions.invoke('gmail-sync', {
+    body: { action: 'sync' },
+  })
+  if (error) return { error: error.message }
+  return data as { ok?: boolean; correos_nuevos?: number; primera_sync?: boolean; error?: string }
+}
+
+export async function obtenerCorreosSincronizados(limite = 50): Promise<CorreoSincronizado[]> {
+  const { data } = await supabase
+    .from('correos_sincronizados')
+    .select('id, gmail_id, de, asunto, fecha, snippet')
+    .order('fecha', { ascending: false })
+    .limit(limite)
+  return (data as CorreoSincronizado[]) ?? []
+}

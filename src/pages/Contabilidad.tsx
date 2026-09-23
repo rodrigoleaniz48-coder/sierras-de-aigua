@@ -5,7 +5,14 @@ import { Dialog } from '../components/Dialog'
 import { money } from '../lib/format'
 import { parsearExtractoBROU } from '../lib/parserBROU'
 import { ConectarGmailCard } from '../components/ConectarGmailCard'
-import { intercambiarCodigoGmail } from '../lib/gmail'
+import {
+  intercambiarCodigoGmail,
+  sincronizarGmail,
+  obtenerCorreosSincronizados,
+  obtenerCuentaCorreo,
+  type CorreoSincronizado,
+  type CuentaCorreo,
+} from '../lib/gmail'
 
 type Tab = 'resultados' | 'conciliacion' | 'obligaciones'
 
@@ -110,6 +117,55 @@ export function Contabilidad() {
 // Obligaciones (correos de impuestos, facturas, proveedores)
 // ============================================================
 function Obligaciones({ gmailMsg }: { gmailMsg: { ok?: boolean; error?: string } | null }) {
+  const [cuenta, setCuenta] = useState<CuentaCorreo | null>(null)
+  const [correos, setCorreos] = useState<CorreoSincronizado[]>([])
+  const [sincronizando, setSincronizando] = useState(false)
+  const [syncMsg, setSyncMsg] = useState<string | null>(null)
+  const [syncError, setSyncError] = useState<string | null>(null)
+  const [cargando, setCargando] = useState(true)
+
+  async function cargarDatos() {
+    setCargando(true)
+    const [c, emails] = await Promise.all([
+      obtenerCuentaCorreo(),
+      obtenerCorreosSincronizados(),
+    ])
+    setCuenta(c)
+    setCorreos(emails)
+    setCargando(false)
+  }
+
+  useEffect(() => {
+    cargarDatos()
+  }, [])
+
+  useEffect(() => {
+    if (gmailMsg?.ok) cargarDatos()
+  }, [gmailMsg?.ok])
+
+  async function handleSync() {
+    setSincronizando(true)
+    setSyncMsg(null)
+    setSyncError(null)
+    const res = await sincronizarGmail()
+    setSincronizando(false)
+    if (res.error) {
+      setSyncError(res.error)
+      return
+    }
+    setSyncMsg(
+      res.primera_sync
+        ? `Primera sincronizacion: ${res.correos_nuevos} correos importados.`
+        : `${res.correos_nuevos} correos nuevos sincronizados.`,
+    )
+    cargarDatos()
+  }
+
+  function formatDe(de: string) {
+    const match = de.match(/^(.+?)\s*</)
+    return match ? match[1].replace(/"/g, '') : de
+  }
+
   return (
     <div className="space-y-4">
       {gmailMsg && gmailMsg.ok === undefined && (
@@ -125,10 +181,75 @@ function Obligaciones({ gmailMsg }: { gmailMsg: { ok?: boolean; error?: string }
           Error al conectar Gmail: {gmailMsg.error}
         </div>
       )}
+
       <ConectarGmailCard recargar={gmailMsg?.ok === true} />
-      <div className="card p-5 text-sm text-oliva-600 text-center">
-        Una vez conectada la cuenta, acá se mostrarán los correos relacionados con impuestos, facturas y obligaciones.
-      </div>
+
+      {cuenta && (
+        <>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-sm text-oliva-700">
+              {cuenta.ultima_sync
+                ? `Ultima sync: ${new Date(cuenta.ultima_sync).toLocaleString('es-UY')}`
+                : 'Sin sincronizar todavia'}
+              {correos.length > 0 && ` · ${correos.length} correos`}
+            </div>
+            <button
+              className="btn-primary"
+              onClick={handleSync}
+              disabled={sincronizando}
+            >
+              {sincronizando ? 'Sincronizando…' : cuenta.ultima_sync ? 'Sincronizar nuevos' : 'Primera sincronizacion'}
+            </button>
+          </div>
+
+          {syncMsg && (
+            <div className="card p-3 text-sm text-green-700 bg-green-50 border-green-200">{syncMsg}</div>
+          )}
+          {syncError && (
+            <div className="card p-3 text-sm text-red-700 bg-red-50 border-red-200">{syncError}</div>
+          )}
+
+          {cargando ? (
+            <div className="card p-4 text-sm text-oliva-600">Cargando correos…</div>
+          ) : correos.length === 0 ? (
+            <div className="card p-5 text-sm text-oliva-600 text-center">
+              {cuenta.ultima_sync
+                ? 'No hay correos sincronizados en el rango.'
+                : 'Hace click en "Primera sincronizacion" para importar los correos de los ultimos 30 dias.'}
+            </div>
+          ) : (
+            <div className="card p-0 overflow-x-auto">
+              <table className="w-full text-sm min-w-[600px]">
+                <thead>
+                  <tr className="text-left text-xs uppercase tracking-wide text-oliva-600 border-b border-oliva-100 bg-oliva-50">
+                    <th className="py-2 px-3">Fecha</th>
+                    <th className="py-2 px-3">De</th>
+                    <th className="py-2 px-3">Asunto</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {correos.map((c) => (
+                    <tr key={c.id} className="border-b border-oliva-100/70 last:border-0">
+                      <td className="py-2 px-3 tabular-nums text-oliva-700 whitespace-nowrap">
+                        {new Date(c.fecha).toLocaleDateString('es-UY')}
+                      </td>
+                      <td className="py-2 px-3 text-oliva-800 text-xs truncate max-w-[200px]" title={c.de}>
+                        {formatDe(c.de)}
+                      </td>
+                      <td className="py-2 px-3 text-oliva-800 text-xs">
+                        <div className="font-medium truncate max-w-[350px]">{c.asunto || '(sin asunto)'}</div>
+                        {c.snippet && (
+                          <div className="text-oliva-500 truncate max-w-[350px] mt-0.5">{c.snippet}</div>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
     </div>
   )
 }
