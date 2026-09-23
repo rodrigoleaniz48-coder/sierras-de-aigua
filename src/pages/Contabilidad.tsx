@@ -123,6 +123,7 @@ function Obligaciones({ gmailMsg }: { gmailMsg: { ok?: boolean; error?: string }
   const [syncMsg, setSyncMsg] = useState<string | null>(null)
   const [syncError, setSyncError] = useState<string | null>(null)
   const [cargando, setCargando] = useState(true)
+  const [expandido, setExpandido] = useState<Set<number>>(new Set())
 
   async function cargarDatos() {
     setCargando(true)
@@ -161,9 +162,27 @@ function Obligaciones({ gmailMsg }: { gmailMsg: { ok?: boolean; error?: string }
     cargarDatos()
   }
 
+  function toggleExpandido(id: number) {
+    setExpandido((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
   function formatDe(de: string) {
     const match = de.match(/^(.+?)\s*</)
     return match ? match[1].replace(/"/g, '') : de
+  }
+
+  function formatVenc(fecha: string) {
+    const d = new Date(fecha + 'T12:00:00')
+    return d.toLocaleDateString('es-UY')
+  }
+
+  function esVencido(fecha: string) {
+    return new Date(fecha) < new Date(new Date().toISOString().slice(0, 10))
   }
 
   return (
@@ -218,34 +237,73 @@ function Obligaciones({ gmailMsg }: { gmailMsg: { ok?: boolean; error?: string }
                 : 'Hace click en "Primera sincronizacion" para importar los correos de los ultimos 30 dias.'}
             </div>
           ) : (
-            <div className="card p-0 overflow-x-auto">
-              <table className="w-full text-sm min-w-[600px]">
-                <thead>
-                  <tr className="text-left text-xs uppercase tracking-wide text-oliva-600 border-b border-oliva-100 bg-oliva-50">
-                    <th className="py-2 px-3">Fecha</th>
-                    <th className="py-2 px-3">De</th>
-                    <th className="py-2 px-3">Asunto</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {correos.map((c) => (
-                    <tr key={c.id} className="border-b border-oliva-100/70 last:border-0">
-                      <td className="py-2 px-3 tabular-nums text-oliva-700 whitespace-nowrap">
-                        {new Date(c.fecha).toLocaleDateString('es-UY')}
-                      </td>
-                      <td className="py-2 px-3 text-oliva-800 text-xs truncate max-w-[200px]" title={c.de}>
-                        {formatDe(c.de)}
-                      </td>
-                      <td className="py-2 px-3 text-oliva-800 text-xs">
-                        <div className="font-medium truncate max-w-[350px]">{c.asunto || '(sin asunto)'}</div>
+            <div className="space-y-2">
+              {correos.map((c) => {
+                const abierto = expandido.has(c.id)
+                return (
+                  <div key={c.id} className="card p-0 overflow-hidden">
+                    <button
+                      className="w-full text-left px-4 py-3 flex items-start gap-3 hover:bg-oliva-50/60 transition"
+                      onClick={() => toggleExpandido(c.id)}
+                    >
+                      <span className="text-oliva-400 mt-0.5 shrink-0 text-xs">{abierto ? '▼' : '▶'}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs tabular-nums text-oliva-600">
+                            {new Date(c.fecha).toLocaleDateString('es-UY')}
+                          </span>
+                          <span className="text-xs text-oliva-500">·</span>
+                          <span className="text-xs text-oliva-700 truncate max-w-[180px]" title={c.de}>
+                            {formatDe(c.de)}
+                          </span>
+                          {c.monto_detectado != null && (
+                            <span className="tag tag-neutral text-[10px] tabular-nums">
+                              ${c.monto_detectado.toLocaleString('es-UY')}
+                            </span>
+                          )}
+                          {c.fecha_vencimiento && (
+                            <span className={`tag text-[10px] ${esVencido(c.fecha_vencimiento) ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'}`}>
+                              Vence {formatVenc(c.fecha_vencimiento)}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-sm text-oliva-900 font-medium mt-0.5 truncate">
+                          {c.asunto || '(sin asunto)'}
+                        </div>
+                      </div>
+                    </button>
+
+                    {abierto && (
+                      <div className="px-4 pb-4 pt-1 border-t border-oliva-100 space-y-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          <div>
+                            <div className="text-[10px] uppercase tracking-wide text-oliva-500">Remitente</div>
+                            <div className="text-xs text-oliva-800 mt-0.5">{c.de}</div>
+                          </div>
+                          <div>
+                            <div className="text-[10px] uppercase tracking-wide text-oliva-500">Monto detectado</div>
+                            <div className="text-xs text-oliva-800 mt-0.5 tabular-nums">
+                              {c.monto_detectado != null ? `$${c.monto_detectado.toLocaleString('es-UY')}` : '—'}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-[10px] uppercase tracking-wide text-oliva-500">Fecha de vencimiento</div>
+                            <div className={`text-xs mt-0.5 ${c.fecha_vencimiento && esVencido(c.fecha_vencimiento) ? 'text-red-700 font-medium' : 'text-oliva-800'}`}>
+                              {c.fecha_vencimiento ? formatVenc(c.fecha_vencimiento) : '—'}
+                            </div>
+                          </div>
+                        </div>
                         {c.snippet && (
-                          <div className="text-oliva-500 truncate max-w-[350px] mt-0.5">{c.snippet}</div>
+                          <div>
+                            <div className="text-[10px] uppercase tracking-wide text-oliva-500">Resumen</div>
+                            <div className="text-xs text-oliva-700 mt-0.5 leading-relaxed">{c.snippet}</div>
+                          </div>
                         )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           )}
         </>

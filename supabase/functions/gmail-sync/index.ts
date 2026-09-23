@@ -1,6 +1,5 @@
 // Edge Function: sincronizacion incremental de correos Gmail (solo lectura).
-// POST action: sync — primera vez lista ultimos 30 dias, despues usa History API.
-// No clasifica ni extrae datos. Solo trae metadata (de, asunto, fecha, snippet).
+// Trae metadata + cuerpo texto, extrae monto y fecha de vencimiento con regex.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7'
 
@@ -12,10 +11,8 @@ const CLIENT_SECRET = Deno.env.get('GMAIL_CLIENT_SECRET')!
 const ENC_KEY = Deno.env.get('GMAIL_ENCRYPTION_KEY')!
 
 const DIAS_PRIMERA_SYNC = 30
-const MAX_MENSAJES_PRIMERA_SYNC = 100
+const MAX_MENSAJES = 100
 
-// Filtro Gmail: solo correos de organismos fiscales, proveedores con facturas, etc.
-// Usa sintaxis de busqueda Gmail: {a b c} = a OR b OR c
 const GMAIL_QUERY_FILTER = [
   'from:dgi.gub.uy',
   'from:bps.gub.uy',
@@ -42,7 +39,7 @@ const CORS: Record<string, string> = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 
-// ---- Crypto: misma logica que gmail-auth ----
+// ---- Crypto ----
 
 async function deriveKey(): Promise<CryptoKey> {
   const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(ENC_KEY))
@@ -75,7 +72,7 @@ async function requireAdmin(req: Request) {
   return p?.rol === 'admin' ? user : null
 }
 
-// ---- Gmail API helpers ----
+// ---- Gmail API ----
 
 async function getAccessToken(refreshTokenEnc: string): Promise<string> {
   const refreshToken = await decryptToken(refreshTokenEnc)
@@ -94,10 +91,8 @@ async function getAccessToken(refreshTokenEnc: string): Promise<string> {
   return data.access_token
 }
 
-interface GmailHeader {
-  name: string
-  value: string
-}
+// deno-lint-ignore no-explicit-any
+type GmailPayload = any
 
 interface GmailMessage {
   id: string
@@ -105,15 +100,12 @@ interface GmailMessage {
   labelIds?: string[]
   snippet?: string
   internalDate?: string
-  payload?: {
-    headers?: GmailHeader[]
-  }
+  payload?: GmailPayload
 }
 
 function headerValue(msg: GmailMessage, name: string): string {
-  return msg.payload?.headers?.find(
-    (h) => h.name.toLowerCase() === name.toLowerCase(),
-  )?.value ?? ''
+  const headers = msg.payload?.headers as { name: string; value: string }[] | undefined
+  return headers?.find((h) => h.name.toLowerCase() === name.toLowerCase())?.value ?? ''
 }
 
 async function gmailGet(accessToken: string, path: string): Promise<unknown> {
@@ -127,20 +119,117 @@ async function gmailGet(accessToken: string, path: string): Promise<unknown> {
   return res.json()
 }
 
-async function fetchMessageMeta(accessToken: string, msgId: string): Promise<GmailMessage> {
-  return (await gmailGet(
-    accessToken,
-    `messages/${msgId}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Subject&metadataHeaders=Date`,
-  )) as GmailMessage
+async function fetchMessageFull(accessToken: string, msgId: string): Promise<GmailMessage> {
+  return (await gmailGet(accessToken, `messages/${msgId}?format=full`)) as GmailMessage
 }
 
-// ---- Sync logic ----
+// ---- Extraer texto plano del body ----
 
-async function listarMensajesFiltrados(
+function base64UrlDecode(data: string): string {
+  const b64 = data.replace(/-/g, '+').replace(/_/g, '/')
+  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
+  return new TextDecoder().decode(bytes)
+}
+
+function extractPlainText(payload: GmailPayload): string {
+  if (!payload) return ''
+  if (payload.mimeType === 'text/plain' && payload.body?.data) {
+    return base64UrlDecode(payload.body.data)
+  }
+  if (payload.parts) {
+    for (const part of payload.parts) {
+      if (part.mimeType === 'text/plain' && part.body?.data) {
+        return base64UrlDecode(part.body.data)
+      }
+    }
+    for (const part of payload.parts) {
+      if (part.parts) {
+        const t = extractPlainText(part)
+        if (t) return t
+      }
+    }
+  }
+  return ''
+}
+
+// ---- Deteccion de monto y fecha de vencimiento ----
+
+function detectarMonto(texto: string): number | null {
+  const patterns = [
+    /(?:total|monto|importe|pagar|abonar|deuda|saldo)[\s:$]*(\d[\d.,]*)/gi,
+    /\$\s*([\d.]+(?:,\d{1,2})?)/g,
+    /(?:UYU|U\$S|USD)\s*([\d.]+(?:,\d{1,2})?)/gi,
+  ]
+  for (const re of patterns) {
+    re.lastIndex = 0
+    const match = re.exec(texto)
+    if (match) {
+      let numStr = match[1]
+      if (numStr.includes(',')) {
+        numStr = numStr.replace(/\./g, '').replace(',', '.')
+      }
+      const val = parseFloat(numStr)
+      if (!isNaN(val) && val > 0 && val < 100_000_000) return val
+    }
+  }
+  return null
+}
+
+function detectarFechaVencimiento(texto: string): string | null {
+  const patterns = [
+    /venc\w*[\s.:]*(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})/gi,
+    /fecha\s*l[ií]mite[\s.:]*(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})/gi,
+    /plazo[\s.:]*(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})/gi,
+    /venc\w*[\s.:]*(\d{1,2})\s+de\s+(\w+)\s+(?:de\s+)?(\d{2,4})/gi,
+  ]
+  for (const re of patterns) {
+    re.lastIndex = 0
+    const match = re.exec(texto)
+    if (match) {
+      const [, d, mRaw, yRaw] = match
+      let m = mRaw
+      let y = yRaw
+      // Si m es texto (enero, febrero...) convertir a numero
+      const meses: Record<string, string> = {
+        enero: '01', febrero: '02', marzo: '03', abril: '04',
+        mayo: '05', junio: '06', julio: '07', agosto: '08',
+        septiembre: '09', setiembre: '09', octubre: '10',
+        noviembre: '11', diciembre: '12',
+      }
+      if (meses[m.toLowerCase()]) m = meses[m.toLowerCase()]
+      if (y.length === 2) y = `20${y}`
+      const mm = m.padStart(2, '0')
+      const dd = d.padStart(2, '0')
+      if (Number(mm) >= 1 && Number(mm) <= 12 && Number(dd) >= 1 && Number(dd) <= 31) {
+        return `${y}-${mm}-${dd}`
+      }
+    }
+  }
+  return null
+}
+
+// ---- Sync ----
+
+interface CorreoRow {
+  gmail_id: string
+  thread_id: string
+  de: string
+  asunto: string
+  fecha: string
+  snippet: string
+  label_ids: string[]
+  cuenta_correo_id: number
+  cuerpo_texto: string
+  monto_detectado: number | null
+  fecha_vencimiento: string | null
+}
+
+async function listarYProcesar(
   accessToken: string,
   afterDate: Date,
   maxMensajes: number,
-): Promise<{ messages: GmailMessage[]; historyId: string }> {
+  cuentaId: number,
+): Promise<{ rows: CorreoRow[]; historyId: string }> {
   const afterStr = `${afterDate.getFullYear()}/${String(afterDate.getMonth() + 1).padStart(2, '0')}/${String(afterDate.getDate()).padStart(2, '0')}`
   const q = `{${GMAIL_QUERY_FILTER}} after:${afterStr}`
 
@@ -166,15 +255,33 @@ async function listarMensajesFiltrados(
     pageToken = list.nextPageToken
   }
 
-  const messages: GmailMessage[] = []
-  for (let i = 0; i < allIds.length; i += 10) {
-    const batch = allIds.slice(i, i + 10)
-    const results = await Promise.all(batch.map((id) => fetchMessageMeta(accessToken, id)))
-    messages.push(...results)
+  const rows: CorreoRow[] = []
+  for (let i = 0; i < allIds.length; i += 5) {
+    const batch = allIds.slice(i, i + 5)
+    const results = await Promise.all(batch.map((id) => fetchMessageFull(accessToken, id)))
+    for (const m of results) {
+      const cuerpo = extractPlainText(m.payload)
+      const textoCompleto = `${headerValue(m, 'Subject')} ${m.snippet ?? ''} ${cuerpo}`
+      rows.push({
+        gmail_id: m.id,
+        thread_id: m.threadId,
+        de: headerValue(m, 'From'),
+        asunto: headerValue(m, 'Subject'),
+        fecha: m.internalDate
+          ? new Date(Number(m.internalDate)).toISOString()
+          : new Date().toISOString(),
+        snippet: m.snippet ?? '',
+        label_ids: m.labelIds ?? [],
+        cuenta_correo_id: cuentaId,
+        cuerpo_texto: cuerpo.slice(0, 5000),
+        monto_detectado: detectarMonto(textoCompleto),
+        fecha_vencimiento: detectarFechaVencimiento(textoCompleto),
+      })
+    }
   }
 
   const profile = (await gmailGet(accessToken, 'profile')) as { historyId: string }
-  return { messages, historyId: profile.historyId }
+  return { rows, historyId: profile.historyId }
 }
 
 function json(data: unknown, status = 200) {
@@ -204,7 +311,6 @@ Deno.serve(async (req) => {
 
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY)
 
-  // Obtener cuenta activa
   const { data: cuenta } = await admin
     .from('cuentas_correo')
     .select('id, email, refresh_token_enc, ultimo_history_id, ultima_sync')
@@ -229,35 +335,22 @@ Deno.serve(async (req) => {
   try {
     const esPrimera = !cuenta.ultima_sync
 
-    // Primera sync: ultimos 30 dias. Incremental: desde ultima sync.
-    // Ambas usan el mismo filtro por remitente/asunto fiscal.
     const afterDate = new Date()
     if (esPrimera) {
       afterDate.setDate(afterDate.getDate() - DIAS_PRIMERA_SYNC)
     } else {
       afterDate.setTime(new Date(cuenta.ultima_sync).getTime())
-      afterDate.setDate(afterDate.getDate() - 1) // 1 dia de margen
+      afterDate.setDate(afterDate.getDate() - 1)
     }
 
-    const { messages, historyId: newHistoryId } = await listarMensajesFiltrados(
+    const { rows, historyId: newHistoryId } = await listarYProcesar(
       accessToken,
       afterDate,
-      MAX_MENSAJES_PRIMERA_SYNC,
+      MAX_MENSAJES,
+      cuenta.id,
     )
 
-    // Insertar correos (upsert por gmail_id + cuenta_correo_id)
-    if (messages!.length > 0) {
-      const rows = messages!.map((m) => ({
-        gmail_id: m.id,
-        thread_id: m.threadId,
-        de: headerValue(m, 'From'),
-        asunto: headerValue(m, 'Subject'),
-        fecha: m.internalDate ? new Date(Number(m.internalDate)).toISOString() : new Date().toISOString(),
-        snippet: m.snippet ?? '',
-        label_ids: m.labelIds ?? [],
-        cuenta_correo_id: cuenta.id,
-      }))
-
+    if (rows.length > 0) {
       const { error: insertErr } = await admin
         .from('correos_sincronizados')
         .upsert(rows, { onConflict: 'gmail_id,cuenta_correo_id', ignoreDuplicates: true })
@@ -267,12 +360,11 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Solo actualizar estado tras exito completo
     await admin
       .from('cuentas_correo')
       .update({
         ultima_sync: new Date().toISOString(),
-        ultimo_history_id: newHistoryId!,
+        ultimo_history_id: newHistoryId,
         estado: 'activa',
         error_detalle: null,
       })
@@ -281,8 +373,7 @@ Deno.serve(async (req) => {
     return json({
       ok: true,
       primera_sync: esPrimera,
-      correos_nuevos: messages!.length,
-      history_id: newHistoryId!,
+      correos_nuevos: rows.length,
     })
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
