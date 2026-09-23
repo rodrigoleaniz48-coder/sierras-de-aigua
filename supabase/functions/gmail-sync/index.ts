@@ -14,6 +14,28 @@ const ENC_KEY = Deno.env.get('GMAIL_ENCRYPTION_KEY')!
 const DIAS_PRIMERA_SYNC = 30
 const MAX_MENSAJES_PRIMERA_SYNC = 100
 
+// Filtro Gmail: solo correos de organismos fiscales, proveedores con facturas, etc.
+// Usa sintaxis de busqueda Gmail: {a b c} = a OR b OR c
+const GMAIL_QUERY_FILTER = [
+  'from:dgi.gub.uy',
+  'from:bps.gub.uy',
+  'from:bse.com.uy',
+  'subject:factura',
+  'subject:impuesto',
+  'subject:vencimiento',
+  'subject:obligacion',
+  'subject:tributo',
+  'subject:DGI',
+  'subject:BPS',
+  'subject:BSE',
+  'subject:IRPF',
+  'subject:IVA',
+  'subject:IRAE',
+  'subject:aportes',
+  'subject:contribucion',
+  'subject:proveedor',
+].join(' ')
+
 const CORS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -114,19 +136,21 @@ async function fetchMessageMeta(accessToken: string, msgId: string): Promise<Gma
 
 // ---- Sync logic ----
 
-async function primeraSync(accessToken: string): Promise<{ messages: GmailMessage[]; historyId: string }> {
-  const desde = new Date()
-  desde.setDate(desde.getDate() - DIAS_PRIMERA_SYNC)
-  const afterStr = `${desde.getFullYear()}/${String(desde.getMonth() + 1).padStart(2, '0')}/${String(desde.getDate()).padStart(2, '0')}`
+async function listarMensajesFiltrados(
+  accessToken: string,
+  afterDate: Date,
+  maxMensajes: number,
+): Promise<{ messages: GmailMessage[]; historyId: string }> {
+  const afterStr = `${afterDate.getFullYear()}/${String(afterDate.getMonth() + 1).padStart(2, '0')}/${String(afterDate.getDate()).padStart(2, '0')}`
+  const q = `{${GMAIL_QUERY_FILTER}} after:${afterStr}`
 
   const allIds: string[] = []
   let pageToken: string | undefined
 
-  // Paginar lista de mensajes
-  while (allIds.length < MAX_MENSAJES_PRIMERA_SYNC) {
+  while (allIds.length < maxMensajes) {
     const params = new URLSearchParams({
-      q: `after:${afterStr}`,
-      maxResults: String(Math.min(50, MAX_MENSAJES_PRIMERA_SYNC - allIds.length)),
+      q,
+      maxResults: String(Math.min(50, maxMensajes - allIds.length)),
     })
     if (pageToken) params.set('pageToken', pageToken)
 
@@ -142,7 +166,6 @@ async function primeraSync(accessToken: string): Promise<{ messages: GmailMessag
     pageToken = list.nextPageToken
   }
 
-  // Fetch metadata de cada mensaje (en lotes de 10 para no saturar)
   const messages: GmailMessage[] = []
   for (let i = 0; i < allIds.length; i += 10) {
     const batch = allIds.slice(i, i + 10)
@@ -150,66 +173,8 @@ async function primeraSync(accessToken: string): Promise<{ messages: GmailMessag
     messages.push(...results)
   }
 
-  // Obtener historyId actual del perfil
   const profile = (await gmailGet(accessToken, 'profile')) as { historyId: string }
-
   return { messages, historyId: profile.historyId }
-}
-
-async function syncIncremental(
-  accessToken: string,
-  startHistoryId: string,
-): Promise<{ messages: GmailMessage[]; historyId: string; fullRequired: boolean }> {
-  const newIds = new Set<string>()
-  let pageToken: string | undefined
-
-  try {
-    while (true) {
-      const params = new URLSearchParams({
-        startHistoryId,
-        historyTypes: 'messageAdded',
-        maxResults: '100',
-      })
-      if (pageToken) params.set('pageToken', pageToken)
-
-      const hist = (await gmailGet(accessToken, `history?${params}`)) as {
-        history?: { messagesAdded?: { message: { id: string } }[] }[]
-        nextPageToken?: string
-        historyId: string
-      }
-
-      if (hist.history) {
-        for (const h of hist.history) {
-          if (h.messagesAdded) {
-            for (const ma of h.messagesAdded) newIds.add(ma.message.id)
-          }
-        }
-      }
-      if (!hist.nextPageToken) {
-        // Fetch metadata de mensajes nuevos
-        const ids = [...newIds]
-        const messages: GmailMessage[] = []
-        for (let i = 0; i < ids.length; i += 10) {
-          const batch = ids.slice(i, i + 10)
-          const results = await Promise.all(
-            batch.map((id) =>
-              fetchMessageMeta(accessToken, id).catch(() => null),
-            ),
-          )
-          messages.push(...(results.filter(Boolean) as GmailMessage[]))
-        }
-        return { messages, historyId: hist.historyId, fullRequired: false }
-      }
-      pageToken = hist.nextPageToken
-    }
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    // historyId demasiado viejo: Gmail devuelve 404
-    if (msg.includes('404')) {
-      return { messages: [], historyId: '', fullRequired: true }
-    }
-    throw e
-  }
 }
 
 function json(data: unknown, status = 200) {
@@ -262,27 +227,23 @@ Deno.serve(async (req) => {
   }
 
   try {
-    let messages: GmailMessage[]
-    let newHistoryId: string
-    let esPrimera = !cuenta.ultima_sync
+    const esPrimera = !cuenta.ultima_sync
 
-    if (!esPrimera && cuenta.ultimo_history_id) {
-      // Sync incremental
-      const result = await syncIncremental(accessToken, cuenta.ultimo_history_id)
-      if (result.fullRequired) {
-        // historyId expirado, hacer sync completa
-        esPrimera = true
-      } else {
-        messages = result.messages
-        newHistoryId = result.historyId
-      }
-    }
-
+    // Primera sync: ultimos 30 dias. Incremental: desde ultima sync.
+    // Ambas usan el mismo filtro por remitente/asunto fiscal.
+    const afterDate = new Date()
     if (esPrimera) {
-      const result = await primeraSync(accessToken)
-      messages = result.messages
-      newHistoryId = result.historyId
+      afterDate.setDate(afterDate.getDate() - DIAS_PRIMERA_SYNC)
+    } else {
+      afterDate.setTime(new Date(cuenta.ultima_sync).getTime())
+      afterDate.setDate(afterDate.getDate() - 1) // 1 dia de margen
     }
+
+    const { messages, historyId: newHistoryId } = await listarMensajesFiltrados(
+      accessToken,
+      afterDate,
+      MAX_MENSAJES_PRIMERA_SYNC,
+    )
 
     // Insertar correos (upsert por gmail_id + cuenta_correo_id)
     if (messages!.length > 0) {
