@@ -47,17 +47,15 @@ export function Contabilidad() {
   const [tab, setTab] = useState<Tab>('resultados')
   const [gmailMsg, setGmailMsg] = useState<{ ok?: boolean; error?: string } | null>(null)
 
-  // Callback OAuth de Gmail: detectar code/state en la URL e intercambiar token
+  // Callback OAuth de Gmail: leer code/state de sessionStorage (guardados en main.tsx
+  // antes de que Supabase o React Router pudieran limpiar la URL)
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const code = params.get('code')
-    const state = params.get('state')
+    const code = sessionStorage.getItem('gmail_oauth_code')
+    const state = sessionStorage.getItem('gmail_oauth_state')
     if (!code || !state) return
 
-    // Limpiar URL inmediatamente
-    const url = new URL(window.location.href)
-    url.search = ''
-    window.history.replaceState({}, '', url.toString())
+    sessionStorage.removeItem('gmail_oauth_code')
+    sessionStorage.removeItem('gmail_oauth_state')
 
     setTab('obligaciones')
     setGmailMsg({ ok: undefined })
