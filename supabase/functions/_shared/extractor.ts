@@ -339,6 +339,50 @@ function calcularConfianza(
   return Math.min(1.0, Math.round(score * 100) / 100)
 }
 
+// ---- Deduplicación ----
+
+export function generarClaveDedup(ob: ObligacionExtraida): string {
+  const cat = ob.categoria
+
+  if (ob.numero_documento) {
+    return `doc::${cat}::${ob.numero_documento.toLowerCase()}`
+  }
+
+  if (ob.periodo && ob.tipo_obligacion) {
+    return `per::${cat}::${ob.tipo_obligacion}::${ob.periodo}`
+  }
+
+  if (ob.importe != null && ob.fecha_vencimiento) {
+    return `imp::${cat}::${ob.importe}::${ob.fecha_vencimiento}`
+  }
+
+  return `mail::${ob.gmail_id}`
+}
+
+export function deduplicar(obligaciones: ObligacionExtraida[]): ObligacionExtraida[] {
+  const vistas = new Map<string, ObligacionExtraida>()
+  const gmailVisto = new Set<string>()
+
+  for (const ob of obligaciones) {
+    if (gmailVisto.has(ob.gmail_id)) continue
+    gmailVisto.add(ob.gmail_id)
+
+    const clave = generarClaveDedup(ob)
+    const existente = vistas.get(clave)
+
+    if (!existente) {
+      vistas.set(clave, ob)
+    } else if (
+      ob.confianza > existente.confianza ||
+      (ob.confianza === existente.confianza && ob.fecha_correo > existente.fecha_correo)
+    ) {
+      vistas.set(clave, ob)
+    }
+  }
+
+  return Array.from(vistas.values())
+}
+
 // ---- API pública ----
 
 export function extraer(

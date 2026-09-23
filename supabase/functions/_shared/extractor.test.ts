@@ -10,7 +10,7 @@ function assertNotNull<T>(val: T, msg?: string) {
   }
 }
 
-import { extraer, calcularEstado, detectarImporte, detectarFechaVencimiento, detectarPeriodo, detectarNumeroDocumento } from './extractor.ts'
+import { extraer, calcularEstado, detectarImporte, detectarFechaVencimiento, detectarPeriodo, detectarNumeroDocumento, generarClaveDedup, deduplicar } from './extractor.ts'
 
 // ---- Test 6: Correo con PDF adjunto (extracción correcta) ----
 
@@ -178,4 +178,108 @@ Deno.test('Extraccion: email sin adjuntos detecta datos del cuerpo', () => {
   assertEquals(r.periodo, '07/2026')
   assertEquals(r.fecha_vencimiento, '2026-10-25')
   assertEquals(r.adjunto_relevante, null)
+})
+
+// ---- Test 9: Obligación duplicada ----
+
+Deno.test('Deduplicacion: mismo gmail_id no genera segundo registro', () => {
+  const ob1 = extraer({
+    de: 'BPS <notificaciones@bps.gub.uy>',
+    asunto: 'Adeudo de aportes',
+    cuerpo: 'Aportes pendientes período 08/2026. Monto: $45.320. Vencimiento: 15/09/2026.',
+    fecha: '2026-08-20T10:00:00Z',
+    gmail_id: 'msg_dup_001',
+    thread_id: 'thread_dup_001',
+    categoria: 'bps',
+    confianza_clasificacion: 0.8,
+  })
+  const ob2 = extraer({
+    de: 'BPS <notificaciones@bps.gub.uy>',
+    asunto: 'Adeudo de aportes',
+    cuerpo: 'Aportes pendientes período 08/2026. Monto: $45.320. Vencimiento: 15/09/2026.',
+    fecha: '2026-08-20T10:00:00Z',
+    gmail_id: 'msg_dup_001',
+    thread_id: 'thread_dup_001',
+    categoria: 'bps',
+    confianza_clasificacion: 0.8,
+  })
+  const resultado = deduplicar([ob1, ob2])
+  assertEquals(resultado.length, 1)
+})
+
+Deno.test('Deduplicacion: mismo documento reenviado no genera segundo registro', () => {
+  const original = extraer({
+    de: 'Envases del Este <admin@envasesdeleste.com.uy>',
+    asunto: 'Factura N° 4521',
+    cuerpo: 'Factura N° 4521. Total a pagar: $12.200. Vencimiento: 20/10/2026.',
+    fecha: '2026-09-20T14:00:00Z',
+    gmail_id: 'msg_orig_001',
+    thread_id: 'thread_orig_001',
+    categoria: 'proveedor',
+    confianza_clasificacion: 0.65,
+  })
+  const reenviado = extraer({
+    de: 'Santiago <santiago@sierrasdeaigua.com>',
+    asunto: 'Fwd: Factura N° 4521',
+    cuerpo: 'Te reenvío la factura.\n\nFactura N° 4521. Total a pagar: $12.200. Vencimiento: 20/10/2026.',
+    fecha: '2026-09-21T09:00:00Z',
+    gmail_id: 'msg_fwd_001',
+    thread_id: 'thread_fwd_001',
+    categoria: 'proveedor',
+    confianza_clasificacion: 0.5,
+  })
+  assertEquals(generarClaveDedup(original), generarClaveDedup(reenviado))
+  const resultado = deduplicar([original, reenviado])
+  assertEquals(resultado.length, 1)
+})
+
+Deno.test('Deduplicacion: mismo periodo/organismo no genera segundo registro', () => {
+  const ob1 = extraer({
+    de: 'BPS <notificaciones@bps.gub.uy>',
+    asunto: 'Recordatorio aportes agosto',
+    cuerpo: 'Aportes pendientes período 08/2026. Monto: $45.320.',
+    fecha: '2026-08-20T10:00:00Z',
+    gmail_id: 'msg_per_001',
+    thread_id: 'thread_per_001',
+    categoria: 'bps',
+    confianza_clasificacion: 0.8,
+  })
+  const ob2 = extraer({
+    de: 'BPS <notificaciones@bps.gub.uy>',
+    asunto: 'Segundo aviso aportes agosto',
+    cuerpo: 'Reiteramos: aportes pendientes período 08/2026. Monto: $45.320.',
+    fecha: '2026-09-01T10:00:00Z',
+    gmail_id: 'msg_per_002',
+    thread_id: 'thread_per_002',
+    categoria: 'bps',
+    confianza_clasificacion: 0.8,
+  })
+  assertEquals(generarClaveDedup(ob1), generarClaveDedup(ob2))
+  const resultado = deduplicar([ob1, ob2])
+  assertEquals(resultado.length, 1)
+})
+
+Deno.test('Deduplicacion: obligaciones distintas se mantienen ambas', () => {
+  const bps = extraer({
+    de: 'BPS <notificaciones@bps.gub.uy>',
+    asunto: 'Aportes agosto',
+    cuerpo: 'Aportes período 08/2026. Monto: $45.320.',
+    fecha: '2026-08-20T10:00:00Z',
+    gmail_id: 'msg_dist_001',
+    thread_id: 'thread_dist_001',
+    categoria: 'bps',
+    confianza_clasificacion: 0.8,
+  })
+  const bse = extraer({
+    de: 'BSE <polizas@bse.com.uy>',
+    asunto: 'Vencimiento póliza',
+    cuerpo: 'Póliza N° 12345 vence el 15/10/2026. Prima: $28.500.',
+    fecha: '2026-09-10T10:00:00Z',
+    gmail_id: 'msg_dist_002',
+    thread_id: 'thread_dist_002',
+    categoria: 'bse',
+    confianza_clasificacion: 0.85,
+  })
+  const resultado = deduplicar([bps, bse])
+  assertEquals(resultado.length, 2)
 })
