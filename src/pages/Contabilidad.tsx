@@ -51,7 +51,17 @@ interface Cliente { id: number; nombre: string }
 export function Contabilidad() {
   const { perfil } = useAuth()
   const veTodos = !!perfil?.ve_todos_gastos
-  const [tab, setTab] = useState<Tab>('resultados')
+  const [tab, setTabState] = useState<Tab>(() => {
+    try {
+      const s = sessionStorage.getItem('contabilidad_tab')
+      if (s === 'resultados' || s === 'conciliacion' || s === 'obligaciones') return s
+    } catch { /* ignore */ }
+    return 'resultados'
+  })
+  function setTab(t: Tab) {
+    setTabState(t)
+    try { sessionStorage.setItem('contabilidad_tab', t) } catch { /* ignore */ }
+  }
   const [gmailMsg, setGmailMsg] = useState<{ ok?: boolean; error?: string } | null>(null)
 
   // Callback OAuth de Gmail: leer code/state de sessionStorage (guardados en main.tsx
@@ -114,7 +124,7 @@ export function Contabilidad() {
 }
 
 // ============================================================
-// Obligaciones (correos de impuestos, facturas, proveedores)
+// Obligaciones (facturas, impuestos, proveedores — solo con monto)
 // ============================================================
 function Obligaciones({ gmailMsg }: { gmailMsg: { ok?: boolean; error?: string } | null }) {
   const [cuenta, setCuenta] = useState<CuentaCorreo | null>(null)
@@ -156,7 +166,7 @@ function Obligaciones({ gmailMsg }: { gmailMsg: { ok?: boolean; error?: string }
     }
     setSyncMsg(
       res.primera_sync
-        ? `Primera sincronizacion: ${res.correos_nuevos} correos importados.`
+        ? `Primera sincronizacion: ${res.correos_nuevos} correos fiscales importados.`
         : `${res.correos_nuevos} correos nuevos sincronizados.`,
     )
     cargarDatos()
@@ -185,6 +195,10 @@ function Obligaciones({ gmailMsg }: { gmailMsg: { ok?: boolean; error?: string }
     return new Date(fecha) < new Date(new Date().toISOString().slice(0, 10))
   }
 
+  const conMonto = correos.filter((c) => c.monto_detectado != null)
+  const totalMonto = conMonto.reduce((s, c) => s + (c.monto_detectado ?? 0), 0)
+  const vencidas = correos.filter((c) => c.fecha_vencimiento && esVencido(c.fecha_vencimiento))
+
   return (
     <div className="space-y-4">
       {gmailMsg && gmailMsg.ok === undefined && (
@@ -210,14 +224,14 @@ function Obligaciones({ gmailMsg }: { gmailMsg: { ok?: boolean; error?: string }
               {cuenta.ultima_sync
                 ? `Ultima sync: ${new Date(cuenta.ultima_sync).toLocaleString('es-UY')}`
                 : 'Sin sincronizar todavia'}
-              {correos.length > 0 && ` · ${correos.length} correos`}
+              {correos.length > 0 && ` · ${correos.length} correo${correos.length === 1 ? '' : 's'}`}
             </div>
             <button
               className="btn-primary"
               onClick={handleSync}
               disabled={sincronizando}
             >
-              {sincronizando ? 'Sincronizando…' : cuenta.ultima_sync ? 'Sincronizar nuevos' : 'Primera sincronizacion'}
+              {sincronizando ? 'Sincronizando…' : cuenta.ultima_sync ? 'Sincronizar nuevas' : 'Primera sincronizacion'}
             </button>
           </div>
 
@@ -228,48 +242,79 @@ function Obligaciones({ gmailMsg }: { gmailMsg: { ok?: boolean; error?: string }
             <div className="card p-3 text-sm text-red-700 bg-red-50 border-red-200">{syncError}</div>
           )}
 
+          {correos.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="card p-3">
+                <div className="text-[11px] uppercase tracking-wide text-oliva-600">Correos fiscales</div>
+                <div className="text-lg font-semibold tabular-nums mt-1 text-oliva-900">{correos.length}</div>
+              </div>
+              <div className="card p-3">
+                <div className="text-[11px] uppercase tracking-wide text-oliva-600">Con monto detectado</div>
+                <div className="text-lg font-semibold tabular-nums mt-1 text-oliva-900">{conMonto.length}</div>
+              </div>
+              {totalMonto > 0 && (
+                <div className="card p-3">
+                  <div className="text-[11px] uppercase tracking-wide text-oliva-600">Total detectado</div>
+                  <div className="text-lg font-semibold tabular-nums mt-1 text-oliva-900">${totalMonto.toLocaleString('es-UY')}</div>
+                </div>
+              )}
+              {vencidas.length > 0 && (
+                <div className="card p-3 bg-red-50 border-red-200">
+                  <div className="text-[11px] uppercase tracking-wide text-red-600">Vencidas</div>
+                  <div className="text-lg font-semibold tabular-nums mt-1 text-red-700">{vencidas.length}</div>
+                </div>
+              )}
+            </div>
+          )}
+
           {cargando ? (
             <div className="card p-4 text-sm text-oliva-600">Cargando correos…</div>
           ) : correos.length === 0 ? (
             <div className="card p-5 text-sm text-oliva-600 text-center">
               {cuenta.ultima_sync
-                ? 'No hay correos sincronizados en el rango.'
-                : 'Hace click en "Primera sincronizacion" para importar los correos de los ultimos 30 dias.'}
+                ? 'No se encontraron correos fiscales en el rango.'
+                : 'Hace click en "Primera sincronizacion" para importar correos de los ultimos 30 dias.'}
             </div>
           ) : (
             <div className="space-y-2">
               {correos.map((c) => {
                 const abierto = expandido.has(c.id)
+                const vencido = c.fecha_vencimiento ? esVencido(c.fecha_vencimiento) : false
+                const tieneMonto = c.monto_detectado != null
                 return (
-                  <div key={c.id} className="card p-0 overflow-hidden">
+                  <div key={c.id} className={`card p-0 overflow-hidden ${vencido ? 'border-red-200' : ''}`}>
                     <button
                       className="w-full text-left px-4 py-3 flex items-start gap-3 hover:bg-oliva-50/60 transition"
                       onClick={() => toggleExpandido(c.id)}
                     >
                       <span className="text-oliva-400 mt-0.5 shrink-0 text-xs">{abierto ? '▼' : '▶'}</span>
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-xs tabular-nums text-oliva-600">
-                            {new Date(c.fecha).toLocaleDateString('es-UY')}
-                          </span>
-                          <span className="text-xs text-oliva-500">·</span>
+                        <div className="text-sm text-oliva-900 font-medium truncate">
+                          {c.asunto || '(sin asunto)'}
+                        </div>
+                        <div className="flex items-center gap-2 flex-wrap mt-1">
                           <span className="text-xs text-oliva-700 truncate max-w-[180px]" title={c.de}>
                             {formatDe(c.de)}
                           </span>
-                          {c.monto_detectado != null && (
-                            <span className="tag tag-neutral text-[10px] tabular-nums">
-                              ${c.monto_detectado.toLocaleString('es-UY')}
-                            </span>
-                          )}
-                          {c.fecha_vencimiento && (
-                            <span className={`tag text-[10px] ${esVencido(c.fecha_vencimiento) ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'}`}>
-                              Vence {formatVenc(c.fecha_vencimiento)}
-                            </span>
-                          )}
+                          <span className="text-xs text-oliva-400">·</span>
+                          <span className="text-xs tabular-nums text-oliva-600">
+                            {new Date(c.fecha).toLocaleDateString('es-UY')}
+                          </span>
                         </div>
-                        <div className="text-sm text-oliva-900 font-medium mt-0.5 truncate">
-                          {c.asunto || '(sin asunto)'}
-                        </div>
+                      </div>
+                      <div className="text-right shrink-0 ml-2">
+                        {tieneMonto ? (
+                          <div className="text-sm font-semibold tabular-nums text-oliva-900">
+                            ${c.monto_detectado!.toLocaleString('es-UY')}
+                          </div>
+                        ) : (
+                          <div className="text-[11px] text-oliva-400">sin monto</div>
+                        )}
+                        {c.fecha_vencimiento && (
+                          <div className={`text-[11px] tabular-nums mt-0.5 ${vencido ? 'text-red-700 font-medium' : 'text-amber-700'}`}>
+                            {vencido ? 'Vencida' : 'Vence'} {formatVenc(c.fecha_vencimiento)}
+                          </div>
+                        )}
                       </div>
                     </button>
 
@@ -282,13 +327,13 @@ function Obligaciones({ gmailMsg }: { gmailMsg: { ok?: boolean; error?: string }
                           </div>
                           <div>
                             <div className="text-[10px] uppercase tracking-wide text-oliva-500">Monto detectado</div>
-                            <div className="text-xs text-oliva-800 mt-0.5 tabular-nums">
-                              {c.monto_detectado != null ? `$${c.monto_detectado.toLocaleString('es-UY')}` : '—'}
+                            <div className="text-sm text-oliva-900 mt-0.5 tabular-nums font-semibold">
+                              {tieneMonto ? `$${c.monto_detectado!.toLocaleString('es-UY')}` : '—'}
                             </div>
                           </div>
                           <div>
                             <div className="text-[10px] uppercase tracking-wide text-oliva-500">Fecha de vencimiento</div>
-                            <div className={`text-xs mt-0.5 ${c.fecha_vencimiento && esVencido(c.fecha_vencimiento) ? 'text-red-700 font-medium' : 'text-oliva-800'}`}>
+                            <div className={`text-sm mt-0.5 font-medium ${vencido ? 'text-red-700' : c.fecha_vencimiento ? 'text-amber-700' : 'text-oliva-800'}`}>
                               {c.fecha_vencimiento ? formatVenc(c.fecha_vencimiento) : '—'}
                             </div>
                           </div>
