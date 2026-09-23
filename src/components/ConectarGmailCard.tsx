@@ -2,19 +2,16 @@ import { useState, useEffect } from 'react'
 import {
   obtenerCuentaCorreo,
   conectarGmail,
-  intercambiarCodigoGmail,
   desconectarGmail,
   type CuentaCorreo,
 } from '../lib/gmail'
 
-export function ConectarGmailCard() {
+export function ConectarGmailCard({ recargar }: { recargar?: boolean }) {
   const [cuenta, setCuenta] = useState<CuentaCorreo | null>(null)
   const [cargando, setCargando] = useState(true)
   const [conectando, setConectando] = useState(false)
-  const [intercambiando, setIntercambiando] = useState(false)
   const [desconectando, setDesconectando] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [exito, setExito] = useState<string | null>(null)
 
   async function cargar() {
     setCargando(true)
@@ -27,30 +24,9 @@ export function ConectarGmailCard() {
     cargar()
   }, [])
 
-  // Detectar callback de OAuth en los query params (?code=...&state=...)
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const code = params.get('code')
-    const state = params.get('state')
-    if (!code || !state) return
-
-    // Limpiar URL inmediatamente
-    const url = new URL(window.location.href)
-    url.search = ''
-    window.history.replaceState({}, '', url.toString())
-
-    setIntercambiando(true)
-    setError(null)
-    intercambiarCodigoGmail(code, state).then((res) => {
-      setIntercambiando(false)
-      if (res.error) {
-        setError(res.error)
-      } else {
-        setExito(`Cuenta conectada: ${res.email}`)
-        cargar()
-      }
-    })
-  }, [])
+    if (recargar) cargar()
+  }, [recargar])
 
   async function handleConectar() {
     setConectando(true)
@@ -77,14 +53,11 @@ export function ConectarGmailCard() {
       return
     }
     setCuenta(null)
-    setExito(null)
   }
 
-  if (cargando || intercambiando) {
+  if (cargando) {
     return (
-      <div className="card p-4 text-sm text-oliva-600">
-        {intercambiando ? 'Conectando cuenta de Gmail…' : 'Cargando…'}
-      </div>
+      <div className="card p-4 text-sm text-oliva-600">Cargando…</div>
     )
   }
 
@@ -106,9 +79,6 @@ export function ConectarGmailCard() {
           Solo lectura — la app no puede enviar, borrar ni modificar correos. Podes desconectar en
           cualquier momento.
         </div>
-        {exito && (
-          <div className="text-sm text-green-700 bg-green-50 rounded px-3 py-2">{exito}</div>
-        )}
         {error && (
           <div className="text-sm text-red-700 bg-red-50 rounded px-3 py-2">{error}</div>
         )}

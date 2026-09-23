@@ -5,6 +5,7 @@ import { Dialog } from '../components/Dialog'
 import { money } from '../lib/format'
 import { parsearExtractoBROU } from '../lib/parserBROU'
 import { ConectarGmailCard } from '../components/ConectarGmailCard'
+import { intercambiarCodigoGmail } from '../lib/gmail'
 
 type Tab = 'resultados' | 'conciliacion' | 'obligaciones'
 
@@ -44,11 +45,29 @@ export function Contabilidad() {
   const { perfil } = useAuth()
   const veTodos = !!perfil?.ve_todos_gastos
   const [tab, setTab] = useState<Tab>('resultados')
+  const [gmailMsg, setGmailMsg] = useState<{ ok?: boolean; error?: string } | null>(null)
 
-  // Si llega desde el callback OAuth de Gmail, abrir la tab de obligaciones
+  // Callback OAuth de Gmail: detectar code/state en la URL e intercambiar token
   useEffect(() => {
-    const p = new URLSearchParams(window.location.search)
-    if (p.has('code')) setTab('obligaciones')
+    const params = new URLSearchParams(window.location.search)
+    const code = params.get('code')
+    const state = params.get('state')
+    if (!code || !state) return
+
+    // Limpiar URL inmediatamente
+    const url = new URL(window.location.href)
+    url.search = ''
+    window.history.replaceState({}, '', url.toString())
+
+    setTab('obligaciones')
+    setGmailMsg({ ok: undefined })
+    intercambiarCodigoGmail(code, state).then((res) => {
+      if (res.error) {
+        setGmailMsg({ error: res.error })
+      } else {
+        setGmailMsg({ ok: true })
+      }
+    })
   }, [])
 
   if (!veTodos) {
@@ -84,7 +103,7 @@ export function Contabilidad() {
 
       {tab === 'resultados' && <EstadoResultados />}
       {tab === 'conciliacion' && <Conciliacion />}
-      {tab === 'obligaciones' && <Obligaciones />}
+      {tab === 'obligaciones' && <Obligaciones gmailMsg={gmailMsg} />}
     </div>
   )
 }
@@ -92,10 +111,23 @@ export function Contabilidad() {
 // ============================================================
 // Obligaciones (correos de impuestos, facturas, proveedores)
 // ============================================================
-function Obligaciones() {
+function Obligaciones({ gmailMsg }: { gmailMsg: { ok?: boolean; error?: string } | null }) {
   return (
     <div className="space-y-4">
-      <ConectarGmailCard />
+      {gmailMsg && gmailMsg.ok === undefined && (
+        <div className="card p-4 text-sm text-oliva-600">Conectando cuenta de Gmail…</div>
+      )}
+      {gmailMsg?.ok && (
+        <div className="card p-3 text-sm text-green-700 bg-green-50 border-green-200">
+          Cuenta de Gmail conectada correctamente.
+        </div>
+      )}
+      {gmailMsg?.error && (
+        <div className="card p-3 text-sm text-red-700 bg-red-50 border-red-200">
+          Error al conectar Gmail: {gmailMsg.error}
+        </div>
+      )}
+      <ConectarGmailCard recargar={gmailMsg?.ok === true} />
       <div className="card p-5 text-sm text-oliva-600 text-center">
         Una vez conectada la cuenta, acá se mostrarán los correos relacionados con impuestos, facturas y obligaciones.
       </div>
