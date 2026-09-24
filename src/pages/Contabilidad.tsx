@@ -10,9 +10,15 @@ import {
   sincronizarGmail,
   obtenerCorreosSincronizados,
   obtenerCuentaCorreo,
-  type CorreoSincronizado,
   type CuentaCorreo,
 } from '../lib/gmail'
+import {
+  procesarCorreos,
+  estadoDisplay,
+  categoriaLabel,
+  type Obligacion,
+  type EstadoManual,
+} from '../lib/obligaciones'
 
 type Tab = 'resultados' | 'conciliacion' | 'obligaciones'
 
@@ -128,31 +134,31 @@ export function Contabilidad() {
 // ============================================================
 function Obligaciones({ gmailMsg }: { gmailMsg: { ok?: boolean; error?: string } | null }) {
   const [cuenta, setCuenta] = useState<CuentaCorreo | null>(null)
-  const [correos, setCorreos] = useState<CorreoSincronizado[]>([])
+  const [obligaciones, setObligaciones] = useState<Obligacion[]>([])
   const [sincronizando, setSincronizando] = useState(false)
   const [syncMsg, setSyncMsg] = useState<string | null>(null)
   const [syncError, setSyncError] = useState<string | null>(null)
   const [cargando, setCargando] = useState(true)
-  const [expandido, setExpandido] = useState<Set<number>>(new Set())
+  const [detalle, setDetalle] = useState<Obligacion | null>(null)
+  const [filtroOrg, setFiltroOrg] = useState<string>('todos')
+  const [filtroEstado, setFiltroEstado] = useState<string>('activas')
+  const [filtroMoneda, setFiltroMoneda] = useState<string>('todas')
+
+  const hoy = new Date().toISOString().slice(0, 10)
 
   async function cargarDatos() {
     setCargando(true)
     const [c, emails] = await Promise.all([
       obtenerCuentaCorreo(),
-      obtenerCorreosSincronizados(),
+      obtenerCorreosSincronizados(200),
     ])
     setCuenta(c)
-    setCorreos(emails)
+    setObligaciones(procesarCorreos(emails, hoy))
     setCargando(false)
   }
 
-  useEffect(() => {
-    cargarDatos()
-  }, [])
-
-  useEffect(() => {
-    if (gmailMsg?.ok) cargarDatos()
-  }, [gmailMsg?.ok])
+  useEffect(() => { cargarDatos() }, [])
+  useEffect(() => { if (gmailMsg?.ok) cargarDatos() }, [gmailMsg?.ok])
 
   async function handleSync() {
     setSincronizando(true)
@@ -160,10 +166,7 @@ function Obligaciones({ gmailMsg }: { gmailMsg: { ok?: boolean; error?: string }
     setSyncError(null)
     const res = await sincronizarGmail()
     setSincronizando(false)
-    if (res.error) {
-      setSyncError(res.error)
-      return
-    }
+    if (res.error) { setSyncError(res.error); return }
     setSyncMsg(
       res.primera_sync
         ? `Primera sincronizacion: ${res.correos_nuevos} correos fiscales importados.`
@@ -172,32 +175,54 @@ function Obligaciones({ gmailMsg }: { gmailMsg: { ok?: boolean; error?: string }
     cargarDatos()
   }
 
-  function toggleExpandido(id: number) {
-    setExpandido((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
+  async function cambiarEstadoManual(ob: Obligacion, nuevoEstado: EstadoManual) {
+    const { error } = await supabase
+      .from('correos_sincronizados')
+      .update({ estado_manual: nuevoEstado })
+      .eq('id', ob.id)
+    if (error) return
+    setObligaciones(prev => prev.map(o =>
+      o.id === ob.id ? { ...o, estado_manual: nuevoEstado } : o,
+    ))
+    if (detalle?.id === ob.id) setDetalle({ ...detalle, estado_manual: nuevoEstado })
+  }
+
+  const organismos = useMemo(() => {
+    const set = new Set(obligaciones.map(o => o.organismo))
+    return [...set].sort()
+  }, [obligaciones])
+
+  const filtradas = useMemo(() => {
+    return obligaciones.filter(ob => {
+      if (filtroOrg !== 'todos' && ob.organismo !== filtroOrg) return false
+      if (filtroMoneda !== 'todas' && ob.moneda !== filtroMoneda) return false
+      const estadoEfectivo = ob.estado_manual ?? ob.estado
+      if (filtroEstado === 'activas') return estadoEfectivo !== 'descartada' && estadoEfectivo !== 'pagada'
+      if (filtroEstado === 'pendiente') return estadoEfectivo === 'pendiente'
+      if (filtroEstado === 'vencido') return ob.estado === 'vencido' && !ob.estado_manual
+      if (filtroEstado === 'posible_pago') return ob.estado === 'posible_pago' && !ob.estado_manual
+      if (filtroEstado === 'revisar') return estadoEfectivo === 'revisar'
+      if (filtroEstado === 'pagada') return ob.estado_manual === 'pagada'
+      if (filtroEstado === 'descartada') return ob.estado_manual === 'descartada'
+      return true
     })
-  }
+  }, [obligaciones, filtroOrg, filtroEstado, filtroMoneda])
 
-  function formatDe(de: string) {
-    const match = de.match(/^(.+?)\s*</)
-    return match ? match[1].replace(/"/g, '') : de
-  }
+  const activas = obligaciones.filter(o => o.estado_manual !== 'descartada' && o.estado_manual !== 'pagada')
+  const vencidas = activas.filter(o => o.estado === 'vencido' && !o.estado_manual)
+  const porVencer = activas.filter(o => {
+    if (!o.fecha_vencimiento || o.estado === 'vencido' || o.estado_manual) return false
+    const diff = (new Date(o.fecha_vencimiento).getTime() - new Date(hoy).getTime()) / 86400000
+    return diff >= 0 && diff <= 7
+  })
+  const pendientesRevision = activas.filter(o => (o.estado_manual === 'revisar' || o.estado === 'revisar'))
+  const totalPendiente = activas
+    .filter(o => o.estado !== 'posible_pago' && !o.estado_manual)
+    .reduce((s, o) => s + (o.importe ?? 0), 0)
 
-  function formatVenc(fecha: string) {
-    const d = new Date(fecha + 'T12:00:00')
-    return d.toLocaleDateString('es-UY')
+  function formatFecha(f: string) {
+    return new Date(f + 'T12:00:00').toLocaleDateString('es-UY')
   }
-
-  function esVencido(fecha: string) {
-    return new Date(fecha) < new Date(new Date().toISOString().slice(0, 10))
-  }
-
-  const conMonto = correos.filter((c) => c.monto_detectado != null)
-  const totalMonto = conMonto.reduce((s, c) => s + (c.monto_detectado ?? 0), 0)
-  const vencidas = correos.filter((c) => c.fecha_vencimiento && esVencido(c.fecha_vencimiento))
 
   return (
     <div className="space-y-4">
@@ -224,135 +249,247 @@ function Obligaciones({ gmailMsg }: { gmailMsg: { ok?: boolean; error?: string }
               {cuenta.ultima_sync
                 ? `Ultima sync: ${new Date(cuenta.ultima_sync).toLocaleString('es-UY')}`
                 : 'Sin sincronizar todavia'}
-              {correos.length > 0 && ` · ${correos.length} correo${correos.length === 1 ? '' : 's'}`}
+              {obligaciones.length > 0 && ` · ${obligaciones.length} obligacion${obligaciones.length === 1 ? '' : 'es'}`}
             </div>
-            <button
-              className="btn-primary"
-              onClick={handleSync}
-              disabled={sincronizando}
-            >
+            <button className="btn-primary" onClick={handleSync} disabled={sincronizando}>
               {sincronizando ? 'Sincronizando…' : cuenta.ultima_sync ? 'Sincronizar nuevas' : 'Primera sincronizacion'}
             </button>
           </div>
 
-          {syncMsg && (
-            <div className="card p-3 text-sm text-green-700 bg-green-50 border-green-200">{syncMsg}</div>
-          )}
-          {syncError && (
-            <div className="card p-3 text-sm text-red-700 bg-red-50 border-red-200">{syncError}</div>
-          )}
+          {syncMsg && <div className="card p-3 text-sm text-green-700 bg-green-50 border-green-200">{syncMsg}</div>}
+          {syncError && <div className="card p-3 text-sm text-red-700 bg-red-50 border-red-200">{syncError}</div>}
 
-          {correos.length > 0 && (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {obligaciones.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
               <div className="card p-3">
-                <div className="text-[11px] uppercase tracking-wide text-oliva-600">Correos fiscales</div>
-                <div className="text-lg font-semibold tabular-nums mt-1 text-oliva-900">{correos.length}</div>
+                <div className="text-[11px] uppercase tracking-wide text-oliva-600">Activas</div>
+                <div className="text-lg font-semibold tabular-nums mt-1 text-oliva-900">{activas.length}</div>
               </div>
-              <div className="card p-3">
-                <div className="text-[11px] uppercase tracking-wide text-oliva-600">Con monto detectado</div>
-                <div className="text-lg font-semibold tabular-nums mt-1 text-oliva-900">{conMonto.length}</div>
-              </div>
-              {totalMonto > 0 && (
-                <div className="card p-3">
-                  <div className="text-[11px] uppercase tracking-wide text-oliva-600">Total detectado</div>
-                  <div className="text-lg font-semibold tabular-nums mt-1 text-oliva-900">${totalMonto.toLocaleString('es-UY')}</div>
-                </div>
-              )}
               {vencidas.length > 0 && (
-                <div className="card p-3 bg-red-50 border-red-200">
+                <button onClick={() => setFiltroEstado('vencido')} className="card p-3 bg-red-50 border-red-200 text-left hover:bg-red-100 transition">
                   <div className="text-[11px] uppercase tracking-wide text-red-600">Vencidas</div>
                   <div className="text-lg font-semibold tabular-nums mt-1 text-red-700">{vencidas.length}</div>
+                </button>
+              )}
+              {porVencer.length > 0 && (
+                <button onClick={() => setFiltroEstado('pendiente')} className="card p-3 bg-amber-50 border-amber-200 text-left hover:bg-amber-100 transition">
+                  <div className="text-[11px] uppercase tracking-wide text-amber-700">Vencen en 7 dias</div>
+                  <div className="text-lg font-semibold tabular-nums mt-1 text-amber-800">{porVencer.length}</div>
+                </button>
+              )}
+              {pendientesRevision.length > 0 && (
+                <button onClick={() => setFiltroEstado('revisar')} className="card p-3 bg-purple-50 border-purple-200 text-left hover:bg-purple-100 transition">
+                  <div className="text-[11px] uppercase tracking-wide text-purple-700">Revisar</div>
+                  <div className="text-lg font-semibold tabular-nums mt-1 text-purple-800">{pendientesRevision.length}</div>
+                </button>
+              )}
+              {totalPendiente > 0 && (
+                <div className="card p-3">
+                  <div className="text-[11px] uppercase tracking-wide text-oliva-600">Total pendiente</div>
+                  <div className="text-lg font-semibold tabular-nums mt-1 text-oliva-900">${totalPendiente.toLocaleString('es-UY')}</div>
                 </div>
               )}
+            </div>
+          )}
+
+          {obligaciones.length > 0 && (
+            <div className="card p-3 grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="label">Organismo</label>
+                <select className="input" value={filtroOrg} onChange={e => setFiltroOrg(e.target.value)}>
+                  <option value="todos">Todos</option>
+                  {organismos.map(o => <option key={o} value={o}>{o}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="label">Estado</label>
+                <select className="input" value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)}>
+                  <option value="activas">Activas (sin pagadas/descartadas)</option>
+                  <option value="todos">Todos</option>
+                  <option value="pendiente">Pendientes</option>
+                  <option value="vencido">Vencidas</option>
+                  <option value="posible_pago">Posible pago</option>
+                  <option value="revisar">Revisar</option>
+                  <option value="pagada">Pagadas</option>
+                  <option value="descartada">Descartadas</option>
+                </select>
+              </div>
+              <div>
+                <label className="label">Moneda</label>
+                <select className="input" value={filtroMoneda} onChange={e => setFiltroMoneda(e.target.value)}>
+                  <option value="todas">Todas</option>
+                  <option value="UYU">UYU</option>
+                  <option value="USD">USD</option>
+                </select>
+              </div>
             </div>
           )}
 
           {cargando ? (
-            <div className="card p-4 text-sm text-oliva-600">Cargando correos…</div>
-          ) : correos.length === 0 ? (
+            <div className="card p-4 text-sm text-oliva-600">Cargando obligaciones…</div>
+          ) : obligaciones.length === 0 ? (
             <div className="card p-5 text-sm text-oliva-600 text-center">
               {cuenta.ultima_sync
-                ? 'No se encontraron correos fiscales en el rango.'
+                ? 'No se encontraron correos fiscales.'
                 : 'Hace click en "Primera sincronizacion" para importar correos de los ultimos 30 dias.'}
+            </div>
+          ) : filtradas.length === 0 ? (
+            <div className="card p-5 text-sm text-oliva-600 text-center">
+              No hay obligaciones con los filtros seleccionados.
             </div>
           ) : (
             <div className="space-y-2">
-              {correos.map((c) => {
-                const abierto = expandido.has(c.id)
-                const vencido = c.fecha_vencimiento ? esVencido(c.fecha_vencimiento) : false
-                const tieneMonto = c.monto_detectado != null
+              <div className="text-xs text-oliva-600">{filtradas.length} obligacion{filtradas.length === 1 ? '' : 'es'}</div>
+              {filtradas.map(ob => {
+                const est = estadoDisplay(ob)
+                const vencido = ob.estado === 'vencido' && !ob.estado_manual
+                const proxVenc = !vencido && ob.fecha_vencimiento && (() => {
+                  const diff = (new Date(ob.fecha_vencimiento!).getTime() - new Date(hoy).getTime()) / 86400000
+                  return diff >= 0 && diff <= 7
+                })()
                 return (
-                  <div key={c.id} className={`card p-0 overflow-hidden ${vencido ? 'border-red-200' : ''}`}>
-                    <button
-                      className="w-full text-left px-4 py-3 flex items-start gap-3 hover:bg-oliva-50/60 transition"
-                      onClick={() => toggleExpandido(c.id)}
-                    >
-                      <span className="text-oliva-400 mt-0.5 shrink-0 text-xs">{abierto ? '▼' : '▶'}</span>
+                  <button
+                    key={ob.id}
+                    className={`card p-0 overflow-hidden w-full text-left hover:bg-oliva-50/60 transition ${
+                      vencido ? 'border-red-200' : proxVenc ? 'border-amber-200' : ''
+                    }`}
+                    onClick={() => setDetalle(ob)}
+                  >
+                    <div className="px-4 py-3 flex items-start gap-3">
                       <div className="flex-1 min-w-0">
-                        <div className="text-sm text-oliva-900 font-medium truncate">
-                          {c.asunto || '(sin asunto)'}
-                        </div>
-                        <div className="flex items-center gap-2 flex-wrap mt-1">
-                          <span className="text-xs text-oliva-700 truncate max-w-[180px]" title={c.de}>
-                            {formatDe(c.de)}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={`text-[10px] font-medium rounded-full px-2 py-[1px] ${est.bg} ${est.color}`}>
+                            {est.label}
                           </span>
+                          {ob.categoria && (
+                            <span className="text-[10px] font-medium rounded-full px-2 py-[1px] bg-oliva-100 text-oliva-700">
+                              {categoriaLabel(ob.categoria)}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-sm text-oliva-900 font-medium truncate mt-1">{ob.concepto}</div>
+                        <div className="flex items-center gap-2 flex-wrap mt-1">
+                          <span className="text-xs text-oliva-700">{ob.organismo}</span>
+                          {ob.periodo && (
+                            <>
+                              <span className="text-xs text-oliva-400">·</span>
+                              <span className="text-xs text-oliva-600">Per. {ob.periodo}</span>
+                            </>
+                          )}
                           <span className="text-xs text-oliva-400">·</span>
                           <span className="text-xs tabular-nums text-oliva-600">
-                            {new Date(c.fecha).toLocaleDateString('es-UY')}
+                            {new Date(ob.fecha_correo).toLocaleDateString('es-UY')}
                           </span>
                         </div>
                       </div>
                       <div className="text-right shrink-0 ml-2">
-                        {tieneMonto ? (
+                        {ob.importe != null ? (
                           <div className="text-sm font-semibold tabular-nums text-oliva-900">
-                            ${c.monto_detectado!.toLocaleString('es-UY')}
+                            {ob.moneda === 'USD' ? 'US$ ' : '$ '}{ob.importe.toLocaleString('es-UY')}
                           </div>
                         ) : (
                           <div className="text-[11px] text-oliva-400">sin monto</div>
                         )}
-                        {c.fecha_vencimiento && (
-                          <div className={`text-[11px] tabular-nums mt-0.5 ${vencido ? 'text-red-700 font-medium' : 'text-amber-700'}`}>
-                            {vencido ? 'Vencida' : 'Vence'} {formatVenc(c.fecha_vencimiento)}
+                        {ob.fecha_vencimiento && (
+                          <div className={`text-[11px] tabular-nums mt-0.5 ${
+                            vencido ? 'text-red-700 font-medium' : proxVenc ? 'text-amber-700 font-medium' : 'text-oliva-600'
+                          }`}>
+                            {vencido ? 'Vencida' : proxVenc ? 'Vence' : 'Venc.'} {formatFecha(ob.fecha_vencimiento)}
                           </div>
                         )}
                       </div>
-                    </button>
-
-                    {abierto && (
-                      <div className="px-4 pb-4 pt-1 border-t border-oliva-100 space-y-3">
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                          <div>
-                            <div className="text-[10px] uppercase tracking-wide text-oliva-500">Remitente</div>
-                            <div className="text-xs text-oliva-800 mt-0.5">{c.de}</div>
-                          </div>
-                          <div>
-                            <div className="text-[10px] uppercase tracking-wide text-oliva-500">Monto detectado</div>
-                            <div className="text-sm text-oliva-900 mt-0.5 tabular-nums font-semibold">
-                              {tieneMonto ? `$${c.monto_detectado!.toLocaleString('es-UY')}` : '—'}
-                            </div>
-                          </div>
-                          <div>
-                            <div className="text-[10px] uppercase tracking-wide text-oliva-500">Fecha de vencimiento</div>
-                            <div className={`text-sm mt-0.5 font-medium ${vencido ? 'text-red-700' : c.fecha_vencimiento ? 'text-amber-700' : 'text-oliva-800'}`}>
-                              {c.fecha_vencimiento ? formatVenc(c.fecha_vencimiento) : '—'}
-                            </div>
-                          </div>
-                        </div>
-                        {c.snippet && (
-                          <div>
-                            <div className="text-[10px] uppercase tracking-wide text-oliva-500">Resumen</div>
-                            <div className="text-xs text-oliva-700 mt-0.5 leading-relaxed">{c.snippet}</div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                    </div>
+                  </button>
                 )
               })}
             </div>
           )}
+
+          {detalle && (
+            <DetalleObligacion ob={detalle} onCerrar={() => setDetalle(null)} onCambiarEstado={cambiarEstadoManual} />
+          )}
         </>
       )}
+    </div>
+  )
+}
+
+function DetalleObligacion({ ob, onCerrar, onCambiarEstado }: {
+  ob: Obligacion; onCerrar: () => void; onCambiarEstado: (ob: Obligacion, estado: EstadoManual) => void
+}) {
+  const est = estadoDisplay(ob)
+  function formatFecha(f: string) { return new Date(f + 'T12:00:00').toLocaleDateString('es-UY') }
+
+  return (
+    <Dialog abierto={true} onCerrar={onCerrar} titulo="Detalle de obligacion" ancho="lg">
+      <div className="space-y-4">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className={`text-xs font-medium rounded-full px-3 py-1 ${est.bg} ${est.color}`}>{est.label}</span>
+          {ob.categoria && <span className="text-xs font-medium rounded-full px-3 py-1 bg-oliva-100 text-oliva-700">{categoriaLabel(ob.categoria)}</span>}
+          {ob.tipo_obligacion && <span className="text-xs rounded-full px-2 py-[2px] bg-oliva-50 text-oliva-600">{ob.tipo_obligacion.replace(/_/g, ' ')}</span>}
+          <span className="text-xs text-oliva-500 ml-auto">Confianza: {Math.round(ob.confianza * 100)}%</span>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <CampoDetalle label="Organismo" valor={ob.organismo} />
+          <CampoDetalle label="Concepto" valor={ob.concepto} />
+          <CampoDetalle label="Periodo" valor={ob.periodo ?? '—'} />
+          <CampoDetalle label="Importe" valor={ob.importe != null ? `${ob.moneda === 'USD' ? 'US$ ' : '$ '}${ob.importe.toLocaleString('es-UY')}` : '—'} destaca />
+          <CampoDetalle label="Moneda" valor={ob.moneda ?? '—'} />
+          <CampoDetalle
+            label="Vencimiento"
+            valor={ob.fecha_vencimiento ? formatFecha(ob.fecha_vencimiento) : '—'}
+            color={ob.estado === 'vencido' && !ob.estado_manual ? 'text-red-700' : ob.fecha_vencimiento ? 'text-amber-700' : undefined}
+          />
+          <CampoDetalle label="N° documento" valor={ob.numero_documento ?? '—'} />
+          <CampoDetalle label="Fecha deteccion" valor={new Date(ob.fecha_correo).toLocaleDateString('es-UY')} />
+          <CampoDetalle label="Remitente" valor={ob.remitente} small />
+        </div>
+
+        {ob.snippet && (
+          <div>
+            <div className="text-[10px] uppercase tracking-wide text-oliva-500 mb-1">Resumen del correo</div>
+            <div className="text-xs text-oliva-700 leading-relaxed bg-oliva-50 rounded-lg p-3">{ob.snippet}</div>
+          </div>
+        )}
+
+        <a href={ob.enlace_gmail} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-700 underline hover:text-blue-900 block">
+          Ver correo original en Gmail
+        </a>
+
+        <div className="border-t border-oliva-100 pt-3">
+          <div className="text-[10px] uppercase tracking-wide text-oliva-500 mb-2">Cambiar estado manualmente</div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              className={`text-xs px-3 py-1.5 rounded-lg border transition ${ob.estado_manual === 'pagada' ? 'bg-green-100 border-green-300 text-green-800' : 'border-oliva-200 text-oliva-700 hover:bg-green-50'}`}
+              onClick={() => onCambiarEstado(ob, ob.estado_manual === 'pagada' ? null : 'pagada')}
+            >{ob.estado_manual === 'pagada' ? 'Marcada como pagada' : 'Marcar pagada'}</button>
+            <button
+              className={`text-xs px-3 py-1.5 rounded-lg border transition ${ob.estado_manual === 'descartada' ? 'bg-gray-100 border-gray-300 text-gray-700' : 'border-oliva-200 text-oliva-700 hover:bg-gray-50'}`}
+              onClick={() => onCambiarEstado(ob, ob.estado_manual === 'descartada' ? null : 'descartada')}
+            >{ob.estado_manual === 'descartada' ? 'Marcada como descartada' : 'Descartar'}</button>
+            <button
+              className={`text-xs px-3 py-1.5 rounded-lg border transition ${ob.estado_manual === 'revisar' ? 'bg-purple-100 border-purple-300 text-purple-800' : 'border-oliva-200 text-oliva-700 hover:bg-purple-50'}`}
+              onClick={() => onCambiarEstado(ob, ob.estado_manual === 'revisar' ? null : 'revisar')}
+            >{ob.estado_manual === 'revisar' ? 'Marcada para revisar' : 'Marcar revisar'}</button>
+          </div>
+        </div>
+
+        <div className="flex justify-end pt-2">
+          <button className="btn-secondary" onClick={onCerrar}>Cerrar</button>
+        </div>
+      </div>
+    </Dialog>
+  )
+}
+
+function CampoDetalle({ label, valor, destaca, color, small }: {
+  label: string; valor: string; destaca?: boolean; color?: string; small?: boolean
+}) {
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wide text-oliva-500">{label}</div>
+      <div className={`mt-0.5 ${destaca ? 'text-sm font-semibold tabular-nums' : small ? 'text-[11px]' : 'text-xs'} ${color ?? 'text-oliva-800'}`}>{valor}</div>
     </div>
   )
 }

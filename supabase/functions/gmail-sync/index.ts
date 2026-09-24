@@ -357,6 +357,32 @@ async function extraerTextoAdjuntos(
 
 // ---- Deteccion de monto y fecha de vencimiento ----
 
+function parseAmount(raw: string): number | null {
+  let s = raw.trim()
+  if (s.includes(',') && s.includes('.')) {
+    s = s.replace(/\./g, '').replace(',', '.')
+  } else if (s.includes(',')) {
+    const afterComma = s.split(',')[1]
+    if (afterComma && afterComma.length <= 2) {
+      s = s.replace(',', '.')
+    } else {
+      s = s.replace(/,/g, '')
+    }
+  } else if (s.includes('.')) {
+    const parts = s.split('.')
+    if (parts.length > 2) {
+      s = s.replace(/\./g, '')
+    } else {
+      const afterDot = parts[1]
+      if (afterDot && afterDot.length === 3) {
+        s = s.replace('.', '')
+      }
+    }
+  }
+  const val = parseFloat(s)
+  return isNaN(val) ? null : val
+}
+
 function detectarMonto(texto: string): number | null {
   const patterns = [
     /(?:total|monto|importe|pagar|abonar|deuda|saldo|cobrar|cuota|prima|aporte)[\s:$U]*(\d[\d.,]*)/gi,
@@ -369,12 +395,8 @@ function detectarMonto(texto: string): number | null {
     re.lastIndex = 0
     let match
     while ((match = re.exec(texto)) !== null) {
-      let numStr = match[1]
-      if (numStr.includes(',')) {
-        numStr = numStr.replace(/\./g, '').replace(',', '.')
-      }
-      const val = parseFloat(numStr)
-      if (!isNaN(val) && val > 10 && val < 100_000_000) {
+      const val = parseAmount(match[1])
+      if (val != null && val > 10 && val < 5_000_000) {
         if (best === null || val > best) best = val
       }
     }
@@ -406,7 +428,8 @@ function detectarFechaVencimiento(texto: string): string | null {
       if (y.length === 2) y = `20${y}`
       const mm = m.padStart(2, '0')
       const dd = d.padStart(2, '0')
-      if (Number(mm) >= 1 && Number(mm) <= 12 && Number(dd) >= 1 && Number(dd) <= 31) {
+      const yNum = Number(y)
+      if (Number(mm) >= 1 && Number(mm) <= 12 && Number(dd) >= 1 && Number(dd) <= 31 && yNum >= 2020 && yNum <= 2035) {
         return `${y}-${mm}-${dd}`
       }
     }

@@ -105,7 +105,7 @@ export function detectarImporte(texto: string): { importe: number | null; moneda
     re.lastIndex = 0
     while ((match = re.exec(norm)) !== null) {
       const val = parseAmount(match[1])
-      if (val != null && val > 10 && val < 100_000_000) {
+      if (val != null && val > 10 && val < 5_000_000) {
         if (best === null || val > best) best = val
       }
     }
@@ -143,7 +143,8 @@ export function detectarFechaVencimiento(texto: string): string | null {
       if (y.length === 2) y = `20${y}`
       const mm = mRaw.padStart(2, '0')
       const dd = d.padStart(2, '0')
-      if (Number(mm) >= 1 && Number(mm) <= 12 && Number(dd) >= 1 && Number(dd) <= 31) {
+      const yNum = Number(y)
+      if (Number(mm) >= 1 && Number(mm) <= 12 && Number(dd) >= 1 && Number(dd) <= 31 && yNum >= 2020 && yNum <= 2035) {
         return `${y}-${mm}-${dd}`
       }
     }
@@ -161,7 +162,8 @@ export function detectarFechaVencimiento(texto: string): string | null {
     if (mm) {
       let y = yRaw
       if (y.length === 2) y = `20${y}`
-      return `${y}-${mm}-${d.padStart(2, '0')}`
+      const yNum = Number(y)
+      if (yNum >= 2020 && yNum <= 2035) return `${y}-${mm}-${d.padStart(2, '0')}`
     }
   }
 

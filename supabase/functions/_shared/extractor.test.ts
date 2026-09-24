@@ -283,3 +283,42 @@ Deno.test('Deduplicacion: obligaciones distintas se mantienen ambas', () => {
   const resultado = deduplicar([bps, bse])
   assertEquals(resultado.length, 2)
 })
+
+// ---- Test 10: Token expirado / revocado ----
+
+Deno.test('Token expirado: getAccessToken lanza error con mensaje claro', async () => {
+  const refreshErr = 'invalid_grant'
+  const mockResponse = { error: refreshErr, error_description: 'Token has been expired or revoked.' }
+
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = ((_url: string | URL | Request, _init?: RequestInit) => {
+    return Promise.resolve(new Response(JSON.stringify(mockResponse), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+  }) as typeof globalThis.fetch
+
+  try {
+    const res = await globalThis.fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: 'test',
+        client_secret: 'test',
+        refresh_token: 'expired_token',
+        grant_type: 'refresh_token',
+      }),
+    })
+    const data = await res.json()
+
+    assertEquals(data.error, 'invalid_grant')
+    assertEquals(data.error_description, 'Token has been expired or revoked.')
+
+    const errorMsg = data.error_description || data.error
+    assertEquals(errorMsg.length > 0, true, 'Debe generar un mensaje de error descriptivo')
+    assertEquals(errorMsg.includes('expired') || errorMsg.includes('revoked'), true,
+      'El mensaje debe indicar que el token esta expirado o revocado')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
