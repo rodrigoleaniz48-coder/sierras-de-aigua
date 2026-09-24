@@ -52,7 +52,7 @@ function normalize(s: string): string {
 }
 
 function parseAmount(raw: string): number | null {
-  let s = raw.trim()
+  let s = raw.trim().replace(/[.,]+$/, '')
 
   if (s.includes(',') && s.includes('.')) {
     s = s.replace(/\./g, '').replace(',', '.')
@@ -66,7 +66,11 @@ function parseAmount(raw: string): number | null {
   } else if (s.includes('.')) {
     const parts = s.split('.')
     if (parts.length > 2) {
-      s = s.replace(/\./g, '')
+      if (parts.slice(1).every(p => p.length === 3)) {
+        s = s.replace(/\./g, '')
+      } else {
+        return null
+      }
     } else {
       const afterDot = parts[1]
       if (afterDot && afterDot.length === 3) {

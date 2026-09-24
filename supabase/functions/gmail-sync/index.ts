@@ -358,7 +358,7 @@ async function extraerTextoAdjuntos(
 // ---- Deteccion de monto y fecha de vencimiento ----
 
 function parseAmount(raw: string): number | null {
-  let s = raw.trim()
+  let s = raw.trim().replace(/[.,]+$/, '')
   if (s.includes(',') && s.includes('.')) {
     s = s.replace(/\./g, '').replace(',', '.')
   } else if (s.includes(',')) {
@@ -371,7 +371,11 @@ function parseAmount(raw: string): number | null {
   } else if (s.includes('.')) {
     const parts = s.split('.')
     if (parts.length > 2) {
-      s = s.replace(/\./g, '')
+      if (parts.slice(1).every(p => p.length === 3)) {
+        s = s.replace(/\./g, '')
+      } else {
+        return null
+      }
     } else {
       const afterDot = parts[1]
       if (afterDot && afterDot.length === 3) {
@@ -391,14 +395,27 @@ function detectarMoneda(texto: string): 'UYU' | 'USD' | null {
 }
 
 function detectarMonto(texto: string): number | null {
-  const patterns = [
-    /(?:total|monto|importe|pagar|abonar|deuda|saldo|cobrar|cuota|prima|aporte)[\s:$U]*(\d[\d.,]*)/gi,
+  const totalPatterns = [
+    /total\s*a\s*pagar[\s:]*(\d[\d.,]*)/gi,
+    /total[\s:]*(\d[\d.,]*)/gi,
+  ]
+  for (const re of totalPatterns) {
+    re.lastIndex = 0
+    let match
+    while ((match = re.exec(texto)) !== null) {
+      const val = parseAmount(match[1])
+      if (val != null && val > 0 && val < 500_000) return val
+    }
+  }
+
+  const fallback = [
+    /(?:monto|importe|pagar|abonar|deuda|saldo|cobrar|cuota|prima|aporte)[\s:$U]*(\d[\d.,]*)/gi,
     /\$\s*([\d.]+(?:,\d{1,2})?)/g,
     /(?:UYU|U\$S|USD|US\$)\s*([\d.]+(?:,\d{1,2})?)/gi,
     /(\d[\d.]*,\d{2})\s*(?:pesos|UYU|\$)/gi,
   ]
   let best: number | null = null
-  for (const re of patterns) {
+  for (const re of fallback) {
     re.lastIndex = 0
     let match
     while ((match = re.exec(texto)) !== null) {
@@ -516,10 +533,11 @@ async function listarYProcesar(
       let textoCompleto = textoCuerpo
       let fechaVenc = detectarFechaVencimiento(textoCuerpo)
 
-      // Si no hay monto en el cuerpo, leer adjuntos (PDF, TXT, HTML)
+      // Leer adjuntos (PDF, TXT, HTML) para monto, moneda y fecha
+      let textoAdj = ''
       if (montoDetectado == null) {
         try {
-          const textoAdj = await extraerTextoAdjuntos(accessToken, m.id, m.payload)
+          textoAdj = await extraerTextoAdjuntos(accessToken, m.id, m.payload)
           if (textoAdj) {
             textoCompleto += ' ' + textoAdj
             montoDetectado = detectarMonto(textoCompleto)
@@ -529,6 +547,10 @@ async function listarYProcesar(
           // Si falla la lectura de adjuntos, seguir sin ellos
         }
       }
+
+      const cuerpoFull = textoAdj
+        ? (cuerpo + '\n[ADJUNTO]\n' + textoAdj).slice(0, 10000)
+        : cuerpo.slice(0, 5000)
 
       allRows.push({
         gmail_id: m.id,
@@ -541,7 +563,7 @@ async function listarYProcesar(
         snippet: m.snippet ?? '',
         label_ids: m.labelIds ?? [],
         cuenta_correo_id: cuentaId,
-        cuerpo_texto: cuerpo.slice(0, 5000),
+        cuerpo_texto: cuerpoFull,
         monto_detectado: montoDetectado,
         moneda_detectada: montoDetectado != null ? (detectarMoneda(textoCompleto) ?? 'UYU') : null,
         fecha_vencimiento: fechaVenc,
