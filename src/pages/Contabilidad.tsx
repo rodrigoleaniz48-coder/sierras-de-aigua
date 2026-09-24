@@ -20,7 +20,7 @@ import {
   type EstadoManual,
 } from '../lib/obligaciones'
 
-type Tab = 'resultados' | 'conciliacion' | 'obligaciones'
+type Tab = 'resultados' | 'conciliacion' | 'mail'
 
 interface Cuenta {
   id: number
@@ -60,7 +60,7 @@ export function Contabilidad() {
   const [tab, setTabState] = useState<Tab>(() => {
     try {
       const s = sessionStorage.getItem('contabilidad_tab')
-      if (s === 'resultados' || s === 'conciliacion' || s === 'obligaciones') return s
+      if (s === 'resultados' || s === 'conciliacion' || s === 'mail') return s
     } catch { /* ignore */ }
     return 'resultados'
   })
@@ -80,7 +80,7 @@ export function Contabilidad() {
     sessionStorage.removeItem('gmail_oauth_code')
     sessionStorage.removeItem('gmail_oauth_state')
 
-    setTab('obligaciones')
+    setTab('mail')
     setGmailMsg({ ok: undefined })
     intercambiarCodigoGmail(code, state).then((res) => {
       if (res.error) {
@@ -109,7 +109,7 @@ export function Contabilidad() {
       </div>
 
       <div className="flex gap-1 border-b border-oliva-100 overflow-x-auto">
-        {(['resultados', 'conciliacion', 'obligaciones'] as Tab[]).map((t) => (
+        {(['resultados', 'conciliacion', 'mail'] as Tab[]).map((t) => (
           <button
             key={t}
             className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition ${
@@ -117,14 +117,14 @@ export function Contabilidad() {
             }`}
             onClick={() => setTab(t)}
           >
-            {t === 'resultados' ? 'Estado de resultados' : t === 'conciliacion' ? 'Conciliación bancaria' : 'Obligaciones'}
+            {t === 'resultados' ? 'Estado de resultados' : t === 'conciliacion' ? 'Conciliación bancaria' : 'Mail'}
           </button>
         ))}
       </div>
 
       {tab === 'resultados' && <EstadoResultados />}
       {tab === 'conciliacion' && <Conciliacion />}
-      {tab === 'obligaciones' && <Obligaciones gmailMsg={gmailMsg} />}
+      {tab === 'mail' && <Obligaciones gmailMsg={gmailMsg} />}
     </div>
   )
 }
@@ -417,8 +417,40 @@ function Obligaciones({ gmailMsg }: { gmailMsg: { ok?: boolean; error?: string }
 function DetalleObligacion({ ob, onCerrar, onCambiarEstado }: {
   ob: Obligacion; onCerrar: () => void; onCambiarEstado: (ob: Obligacion, estado: EstadoManual) => void
 }) {
+  const { perfil } = useAuth()
   const est = estadoDisplay(ob)
+  const [cargandoGasto, setCargandoGasto] = useState(false)
+  const [gastoMsg, setGastoMsg] = useState<string | null>(null)
+  const [gastoError, setGastoError] = useState<string | null>(null)
   function formatFecha(f: string) { return new Date(f + 'T12:00:00').toLocaleDateString('es-UY') }
+
+  async function cargarComoGasto() {
+    if (!perfil || ob.importe == null) return
+    setCargandoGasto(true)
+    setGastoError(null)
+    setGastoMsg(null)
+    const desc = [ob.organismo, ob.concepto, ob.periodo ? `Per. ${ob.periodo}` : null, ob.numero_documento ? `Doc ${ob.numero_documento}` : null]
+      .filter(Boolean).join(' - ')
+    const { error } = await supabase.from('gastos').insert({
+      fecha: new Date().toISOString().slice(0, 10),
+      socio_id: perfil.id,
+      categoria: 'impuestos_aportes',
+      monto: ob.importe,
+      moneda: ob.moneda ?? 'UYU',
+      descripcion: desc,
+      metodo_pago: null,
+      reembolsable: false,
+      reembolsado: false,
+      es_adelanto: false,
+      cuenta_id: perfil.cuenta_default_id ?? null,
+    })
+    setCargandoGasto(false)
+    if (error) { setGastoError(error.message); return }
+    setGastoMsg('Gasto cargado correctamente')
+    onCambiarEstado(ob, 'pagada')
+  }
+
+  const yaCargado = ob.estado_manual === 'pagada'
 
   return (
     <Dialog abierto={true} onCerrar={onCerrar} titulo="Detalle de obligacion" ancho="lg">
@@ -456,6 +488,24 @@ function DetalleObligacion({ ob, onCerrar, onCambiarEstado }: {
         <a href={ob.enlace_gmail} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-700 underline hover:text-blue-900 block">
           Ver correo original en Gmail
         </a>
+
+        {ob.importe != null && !gastoMsg && (
+          <div className="border-t border-oliva-100 pt-3">
+            <button
+              className="btn-primary w-full"
+              onClick={cargarComoGasto}
+              disabled={cargandoGasto || yaCargado}
+            >
+              {cargandoGasto ? 'Cargando...' : yaCargado ? 'Ya cargada como gasto' : `Cargar como gasto (${ob.moneda === 'USD' ? 'US$ ' : '$ '}${ob.importe.toLocaleString('es-UY')})`}
+            </button>
+            <div className="text-[10px] text-oliva-500 mt-1 text-center">
+              Se carga en Gastos como "{ob.organismo}" con categoria "Impuestos y aportes"
+            </div>
+          </div>
+        )}
+
+        {gastoMsg && <div className="card p-3 text-sm text-green-700 bg-green-50 border-green-200">{gastoMsg}</div>}
+        {gastoError && <div className="card p-3 text-sm text-red-700 bg-red-50 border-red-200">{gastoError}</div>}
 
         <div className="border-t border-oliva-100 pt-3">
           <div className="text-[10px] uppercase tracking-wide text-oliva-500 mb-2">Cambiar estado manualmente</div>

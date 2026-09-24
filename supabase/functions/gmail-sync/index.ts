@@ -396,7 +396,7 @@ function detectarMonto(texto: string): number | null {
     let match
     while ((match = re.exec(texto)) !== null) {
       const val = parseAmount(match[1])
-      if (val != null && val > 10 && val < 5_000_000) {
+      if (val != null && val > 10 && val < 500_000) {
         if (best === null || val > best) best = val
       }
     }
@@ -458,6 +458,7 @@ async function listarYProcesar(
   afterDate: Date,
   maxMensajes: number,
   cuentaId: number,
+  emailCuenta: string | null,
 ): Promise<{ rows: CorreoRow[]; historyId: string }> {
   const afterStr = `${afterDate.getFullYear()}/${String(afterDate.getMonth() + 1).padStart(2, '0')}/${String(afterDate.getDate()).padStart(2, '0')}`
   const q = `{${GMAIL_QUERY_FILTER}} after:${afterStr}`
@@ -494,6 +495,12 @@ async function listarYProcesar(
       ),
     )
     for (const m of results) {
+      if (m.labelIds?.includes('SENT')) continue
+
+      const from = headerValue(m, 'From')
+      const fromEmail = from.match(/<([^>]+)>/)?.[1]?.toLowerCase() ?? from.toLowerCase()
+      if (emailCuenta && fromEmail === emailCuenta) continue
+
       const cuerpo = extractPlainText(m.payload)
       const textoCuerpo = `${headerValue(m, 'Subject')} ${m.snippet ?? ''} ${cuerpo}`
 
@@ -621,6 +628,7 @@ Deno.serve(async (req) => {
       afterDate,
       MAX_MENSAJES,
       cuenta.id,
+      cuenta.email?.toLowerCase() ?? null,
     )
 
     if (rows.length > 0) {

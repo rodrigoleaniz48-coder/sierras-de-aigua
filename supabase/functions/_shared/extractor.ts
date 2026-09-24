@@ -105,7 +105,7 @@ export function detectarImporte(texto: string): { importe: number | null; moneda
     re.lastIndex = 0
     while ((match = re.exec(norm)) !== null) {
       const val = parseAmount(match[1])
-      if (val != null && val > 10 && val < 5_000_000) {
+      if (val != null && val > 10 && val < 500_000) {
         if (best === null || val > best) best = val
       }
     }
