@@ -462,11 +462,12 @@ function GastoDialog({
       setCuentaId((editar as Gasto & { cuenta_id?: number | null }).cuenta_id ? String((editar as Gasto & { cuenta_id?: number | null }).cuenta_id) : '')
       setSocioSel(editar.socio_id)
     } else {
-      const b = leerObj<{ fecha: string; categoria: string; monto: string; moneda: 'UYU' | 'USD'; descripcion: string; metodoPago: string; tipo?: TipoGasto; reembolsado: boolean }>('borrador:nuevo-gasto')
+      const b = leerObj<{ fecha: string; categoria: string; monto: string; moneda: 'UYU' | 'USD'; descripcion: string; metodoPago: string; tipo?: TipoGasto; reembolsado: boolean; cuentaId?: string }>('borrador:nuevo-gasto')
       if (b) {
         setFecha(b.fecha); setCategoria(b.categoria); setMonto(b.monto); setMoneda(b.moneda)
         setDescripcion(b.descripcion); setMetodoPago(b.metodoPago)
         setTipo(b.tipo ?? 'normal'); setReembolsado(b.reembolsado)
+        if (b.cuentaId) setCuentaId(b.cuentaId)
       } else {
         setFecha(new Date().toISOString().slice(0, 10))
         setCategoria('varios'); setMonto(''); setMoneda('UYU')

@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { guardarObj, guardarFlag } from '../lib/persistencia'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { Dialog } from '../components/Dialog'
@@ -418,37 +420,29 @@ function DetalleObligacion({ ob, onCerrar, onCambiarEstado }: {
   ob: Obligacion; onCerrar: () => void; onCambiarEstado: (ob: Obligacion, estado: EstadoManual) => void
 }) {
   const { perfil } = useAuth()
+  const navigate = useNavigate()
   const est = estadoDisplay(ob)
-  const [cargandoGasto, setCargandoGasto] = useState(false)
-  const [gastoMsg, setGastoMsg] = useState<string | null>(null)
-  const [gastoError, setGastoError] = useState<string | null>(null)
   function formatFecha(f: string) { return new Date(f + 'T12:00:00').toLocaleDateString('es-UY') }
 
-  async function cargarComoGasto() {
+  function cargarComoGasto() {
     if (!perfil || ob.importe == null) return
-    setCargandoGasto(true)
-    setGastoError(null)
-    setGastoMsg(null)
     const desc = [ob.organismo, ob.concepto, ob.periodo ? `Per. ${ob.periodo}` : null, ob.numero_documento ? `Doc ${ob.numero_documento}` : null]
       .filter(Boolean).join(' - ')
     const esUTE = ob.organismo?.toUpperCase() === 'UTE'
-    const { error } = await supabase.from('gastos').insert({
+    guardarObj('borrador:nuevo-gasto', {
       fecha: new Date().toISOString().slice(0, 10),
-      socio_id: perfil.id,
       categoria: 'impuestos_aportes',
-      monto: ob.importe,
+      monto: String(ob.importe),
       moneda: ob.moneda ?? 'UYU',
       descripcion: desc,
-      metodo_pago: esUTE ? 'debito_automatico' : null,
-      reembolsable: false,
+      metodoPago: esUTE ? 'debito_automatico' : 'transferencia',
+      tipo: 'normal' as const,
       reembolsado: false,
-      es_adelanto: false,
-      cuenta_id: esUTE ? 1 : (perfil.cuenta_default_id ?? null),
+      cuentaId: esUTE ? '1' : (perfil.cuenta_default_id ? String(perfil.cuenta_default_id) : ''),
     })
-    setCargandoGasto(false)
-    if (error) { setGastoError(error.message); return }
-    setGastoMsg('Gasto cargado correctamente')
+    guardarFlag('dialog:nuevo-gasto', true)
     onCambiarEstado(ob, 'pagada')
+    navigate('/finanzas')
   }
 
   const yaCargado = ob.estado_manual === 'pagada'
@@ -490,23 +484,20 @@ function DetalleObligacion({ ob, onCerrar, onCambiarEstado }: {
           Ver correo original en Gmail
         </a>
 
-        {ob.importe != null && !gastoMsg && (
+        {ob.importe != null && (
           <div className="border-t border-oliva-100 pt-3">
             <button
               className="btn-primary w-full"
               onClick={cargarComoGasto}
-              disabled={cargandoGasto || yaCargado}
+              disabled={yaCargado}
             >
-              {cargandoGasto ? 'Cargando...' : yaCargado ? 'Ya cargada como gasto' : `Pago realizado — cargar a gastos (${ob.moneda === 'USD' ? 'US$ ' : '$ '}${ob.importe.toLocaleString('es-UY')})`}
+              {yaCargado ? 'Ya cargada como gasto' : `Pago realizado — cargar a gastos (${ob.moneda === 'USD' ? 'US$ ' : '$ '}${ob.importe.toLocaleString('es-UY')})`}
             </button>
             <div className="text-[10px] text-oliva-500 mt-1 text-center">
-              Se carga en Gastos como "{ob.organismo}" con categoria "Impuestos y aportes"
+              Se abre el formulario de gastos pre-llenado para revisar antes de guardar
             </div>
           </div>
         )}
-
-        {gastoMsg && <div className="card p-3 text-sm text-green-700 bg-green-50 border-green-200">{gastoMsg}</div>}
-        {gastoError && <div className="card p-3 text-sm text-red-700 bg-red-50 border-red-200">{gastoError}</div>}
 
         <div className="border-t border-oliva-100 pt-3">
           <div className="text-[10px] uppercase tracking-wide text-oliva-500 mb-2">Cambiar estado manualmente</div>
