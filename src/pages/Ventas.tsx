@@ -495,10 +495,11 @@ interface Item {
   descuento_unitario: number
   moneda: 'UYU' | 'USD'
   precio_usd: number // solo si moneda=USD (input del usuario)
+  es_regalo: boolean
 }
 
 function nuevoItem(): Item {
-  return { key: crypto.randomUUID(), presentacion_id: null, stock_id: null, tanque_id: null, unidades: 1, precio_unitario: 0, descuento_unitario: 0, moneda: 'UYU', precio_usd: 0 }
+  return { key: crypto.randomUUID(), presentacion_id: null, stock_id: null, tanque_id: null, unidades: 1, precio_unitario: 0, descuento_unitario: 0, moneda: 'UYU', precio_usd: 0, es_regalo: false }
 }
 
 interface TanqueMin { id: number; nombre: string; producto_id: number | null; variedad_libre: string | null; campana: number | null; litros_actuales: number; activo: boolean }
@@ -701,7 +702,7 @@ function NuevaVentaDialog({
       setComponentes((c.data as Componente[]) ?? [])
       setTanques((tq.data as TanqueMin[]) ?? [])
       if (ventaAEditar) {
-        const itemsExist = ((iv.data as (ItemVenta & { tanque_id: number | null; moneda: 'UYU' | 'USD' | null; precio_usd: number | null })[] | null) ?? []).map((it) => ({
+        const itemsExist = ((iv.data as (ItemVenta & { tanque_id: number | null; moneda: 'UYU' | 'USD' | null; precio_usd: number | null; es_regalo?: boolean })[] | null) ?? []).map((it) => ({
           key: crypto.randomUUID(),
           presentacion_id: it.presentacion_id,
           stock_id: it.stock_id,
@@ -711,6 +712,7 @@ function NuevaVentaDialog({
           descuento_unitario: Number(it.descuento_unitario),
           moneda: (it.moneda ?? 'UYU') as 'UYU' | 'USD',
           precio_usd: Number(it.precio_usd ?? 0),
+          es_regalo: !!it.es_regalo,
         } as Item))
         setItems(itemsExist.length > 0 ? itemsExist : [nuevoItem()])
       }
@@ -833,9 +835,10 @@ function NuevaVentaDialog({
     const st = it.stock_id ? stockPorId.get(it.stock_id) : undefined
     const disponible = st?.unidades ?? 0
     const precioEnMonedaVenta = monedaVenta === 'USD' ? Number(it.precio_usd) : Number(it.precio_unitario)
-    const subtotal = Math.max(0, (precioEnMonedaVenta - Number(it.descuento_unitario)) * Number(it.unidades))
+    const subtotalBruto = Math.max(0, (precioEnMonedaVenta - Number(it.descuento_unitario)) * Number(it.unidades))
+    const subtotal = it.es_regalo ? 0 : subtotalBruto
     const ivaLinea = conFactura && p ? subtotal * (Number(p.iva_pct) / 100) : 0
-    return { it, p, st, disponible, subtotal, ivaLinea }
+    return { it, p, st, disponible, subtotal, subtotalBruto, ivaLinea }
   })
   const subtotal = filas.reduce((s, f) => s + (f.it.presentacion_id ? f.subtotal : 0), 0)
   const iva = filas.reduce((s, f) => s + (f.it.presentacion_id ? f.ivaLinea : 0), 0)
@@ -1058,6 +1061,7 @@ async function guardar(e: React.FormEvent) {
         moneda: monedaVenta,
         precio_usd: monedaVenta === 'USD' ? Number(f.it.precio_usd) : null,
         cotizacion: monedaVenta === 'USD' ? cot : null,
+        es_regalo: f.it.es_regalo,
       }
     })
     const { error: eI } = await supabase.from('items_venta').insert(payloadItems)
@@ -1508,8 +1512,15 @@ async function guardar(e: React.FormEvent) {
                       </div>
                       <div className="hidden sm:block">
                         <label className="label">Subtotal</label>
-                        <div className="input tabular-nums text-right">{money(f.subtotal, monedaVenta)}</div>
-                        {conFactura && f.p && Number(f.p.iva_pct) > 0 && (
+                        {f.it.es_regalo ? (
+                          <div className="input text-right">
+                            <span className="text-purple-700 font-semibold text-xs">Regalo</span>
+                            {f.subtotalBruto > 0 && <span className="line-through text-oliva-400 ml-1 tabular-nums">{money(f.subtotalBruto, monedaVenta)}</span>}
+                          </div>
+                        ) : (
+                          <div className="input tabular-nums text-right">{money(f.subtotal, monedaVenta)}</div>
+                        )}
+                        {conFactura && f.p && Number(f.p.iva_pct) > 0 && !f.it.es_regalo && (
                           <p className="text-[11px] text-oliva-500 mt-1 text-right">
                             IVA {Number(f.p.iva_pct)}%: {money(f.ivaLinea, monedaVenta)}
                           </p>
@@ -1519,16 +1530,28 @@ async function guardar(e: React.FormEvent) {
 
                     <div className="flex items-center justify-between sm:hidden">
                       <div className="text-sm">
-                        Subtotal: <b className="tabular-nums">{money(f.subtotal, monedaVenta)}</b>
-                        {conFactura && f.p && Number(f.p.iva_pct) > 0 && (
+                        {f.it.es_regalo ? (
+                          <span className="text-purple-700 font-semibold">Regalo {f.subtotalBruto > 0 && <span className="line-through text-oliva-400 font-normal ml-1">{money(f.subtotalBruto, monedaVenta)}</span>}</span>
+                        ) : (
+                          <>Subtotal: <b className="tabular-nums">{money(f.subtotal, monedaVenta)}</b></>
+                        )}
+                        {conFactura && f.p && Number(f.p.iva_pct) > 0 && !f.it.es_regalo && (
                           <span className="text-[11px] text-oliva-500 ml-2">
                             · IVA {Number(f.p.iva_pct)}%: {money(f.ivaLinea, monedaVenta)}
                           </span>
                         )}
                       </div>
-                      <button type="button" className="text-xs text-red-700 underline" onClick={() => borrarItem(f.it.key)}>Quitar</button>
+                      <div className="flex items-center gap-3">
+                        <button type="button" className={`text-xs underline ${f.it.es_regalo ? 'text-purple-700' : 'text-purple-600'}`} onClick={() => actualizarItem(f.it.key, { es_regalo: !f.it.es_regalo })}>
+                          {f.it.es_regalo ? 'No es regalo' : 'Regalo'}
+                        </button>
+                        <button type="button" className="text-xs text-red-700 underline" onClick={() => borrarItem(f.it.key)}>Quitar</button>
+                      </div>
                     </div>
-                    <div className="hidden sm:flex justify-end">
+                    <div className="hidden sm:flex justify-end gap-4">
+                      <button type="button" className={`text-xs underline ${f.it.es_regalo ? 'text-purple-700' : 'text-purple-600'}`} onClick={() => actualizarItem(f.it.key, { es_regalo: !f.it.es_regalo })}>
+                        {f.it.es_regalo ? 'No es regalo' : 'Regalo'}
+                      </button>
                       <button type="button" className="text-xs text-red-700 underline" onClick={() => borrarItem(f.it.key)}>Quitar ítem</button>
                     </div>
                   </div>
@@ -1612,6 +1635,7 @@ interface ItemVenta {
   precio_unitario: number
   descuento_unitario: number
   subtotal: number
+  es_regalo: boolean
 }
 
 interface PresentacionInfo { id: number; nombre: string; producto_id: number; es_pack: boolean }
@@ -2033,15 +2057,16 @@ function VentaDetalleDialog({
                     const p = presMap.get(it.presentacion_id)
                     const prod = p ? prodMap.get(p.producto_id) : null
                     return (
-                      <tr key={it.id} className="border-t border-oliva-100/70">
+                      <tr key={it.id} className={`border-t border-oliva-100/70 ${it.es_regalo ? 'bg-purple-50/50' : ''}`}>
                         <td className="py-2 px-3 text-oliva-800">
                           {prod?.nombre ?? '—'} · {p?.nombre ?? '—'}
                           {p?.es_pack && <span className="text-[10px] ml-2 text-oliva-600">(pack)</span>}
+                          {it.es_regalo && <span className="text-[10px] ml-2 rounded-full bg-purple-100 text-purple-800 px-1.5 py-[1px] font-semibold">regalo</span>}
                         </td>
                         <td className="py-2 px-3 text-right tabular-nums">{it.unidades}</td>
                         <td className="py-2 px-3 text-right tabular-nums">{money(convDet(it.precio_unitario), mndDet)}</td>
                         <td className="py-2 px-3 text-right tabular-nums">{Number(it.descuento_unitario) > 0 ? money(convDet(it.descuento_unitario), mndDet) : '—'}</td>
-                        <td className="py-2 px-3 text-right tabular-nums font-medium">{money(convDet(it.subtotal), mndDet)}</td>
+                        <td className={`py-2 px-3 text-right tabular-nums font-medium ${it.es_regalo ? 'line-through text-oliva-400' : ''}`}>{money(convDet(it.es_regalo ? 0 : it.subtotal), mndDet)}</td>
                       </tr>
                     )
                   })}
