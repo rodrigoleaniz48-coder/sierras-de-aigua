@@ -36,7 +36,7 @@ interface Lista { id: number; nombre: string; activo: boolean }
 interface ListaItem { lista_id: number; presentacion_id: number; precio_uyu: number }
 interface Componente { presentacion_pack_id: number; presentacion_componente_id: number; unidades: number }
 
-const CATEGORIAS = ['aceite', 'aceituna', 'miel', 'jabon', 'envases_vacios', 'servicio'] as const
+const CATEGORIAS = ['aceite', 'aceituna', 'miel', 'vinagre', 'jabon', 'envases_vacios', 'servicio'] as const
 const UNIDADES = ['botella', 'bidon', 'frasco', 'unidad'] as const
 
 export function Admin() {
@@ -637,7 +637,7 @@ function EditorListasDialog({ abierto, onCerrar, onOk, listas, listaItems, prese
         orden = 900000
       } else {
         // No-aceite: fila por presentación individual, agrupado por categoría/producto
-        const catOrden: Record<string, number> = { miel: 1_000_000, aceituna: 1_100_000, jabon: 1_200_000 }
+        const catOrden: Record<string, number> = { miel: 1_000_000, aceituna: 1_100_000, vinagre: 1_150_000, jabon: 1_200_000 }
         const base = catOrden[prod.categoria] ?? 1_500_000
         label = `${prod.nombre} · ${p.nombre}`
         orden = base + (p.volumen_ml ?? 0)
