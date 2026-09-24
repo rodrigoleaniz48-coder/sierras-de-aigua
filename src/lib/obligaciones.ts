@@ -37,6 +37,7 @@ interface CorreoRaw {
   fecha: string
   snippet: string
   monto_detectado: number | null
+  moneda_detectada: string | null
   fecha_vencimiento: string | null
   cuerpo_texto: string | null
   estado_manual: EstadoManual
@@ -183,7 +184,9 @@ export function procesarCorreos(correos: CorreoRaw[], hoy: string): Obligacion[]
     const { categoria, confianza: confClasif } = clasificar(c.de, c.asunto, c.cuerpo_texto ?? '')
     const periodo = detectarPeriodo(texto)
     const numDoc = detectarNumDoc(texto)
-    const moneda = c.monto_detectado != null ? (detectarMoneda(texto) ?? 'UYU') : null
+    const moneda = c.monto_detectado != null
+      ? ((c.moneda_detectada as 'UYU' | 'USD') ?? detectarMoneda(texto) ?? 'UYU')
+      : null
     const tipo = detectarTipo(categoria, texto)
     const organismo = orgFijo(categoria) ?? extraerNombreRemitente(c.de)
     const concepto = c.asunto.replace(/^(fwd?|rv|re)\s*:\s*/gi, '').trim() || 'Sin concepto'

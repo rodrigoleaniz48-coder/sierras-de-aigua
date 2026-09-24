@@ -56,6 +56,7 @@ export interface CorreoSincronizado {
   fecha: string
   snippet: string
   monto_detectado: number | null
+  moneda_detectada: string | null
   fecha_vencimiento: string | null
   cuerpo_texto: string | null
   estado_manual: 'pagada' | 'descartada' | 'revisar' | null
@@ -77,7 +78,7 @@ export async function sincronizarGmail(): Promise<{
 export async function obtenerCorreosSincronizados(limite = 50): Promise<CorreoSincronizado[]> {
   const { data } = await supabase
     .from('correos_sincronizados')
-    .select('id, gmail_id, de, asunto, fecha, snippet, monto_detectado, fecha_vencimiento, cuerpo_texto, estado_manual')
+    .select('id, gmail_id, de, asunto, fecha, snippet, monto_detectado, moneda_detectada, fecha_vencimiento, cuerpo_texto, estado_manual')
     .order('fecha', { ascending: false })
     .limit(limite)
   return (data as CorreoSincronizado[]) ?? []

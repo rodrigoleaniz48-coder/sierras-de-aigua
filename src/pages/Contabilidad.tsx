@@ -431,6 +431,7 @@ function DetalleObligacion({ ob, onCerrar, onCambiarEstado }: {
     setGastoMsg(null)
     const desc = [ob.organismo, ob.concepto, ob.periodo ? `Per. ${ob.periodo}` : null, ob.numero_documento ? `Doc ${ob.numero_documento}` : null]
       .filter(Boolean).join(' - ')
+    const esUTE = ob.organismo?.toUpperCase() === 'UTE'
     const { error } = await supabase.from('gastos').insert({
       fecha: new Date().toISOString().slice(0, 10),
       socio_id: perfil.id,
@@ -438,11 +439,11 @@ function DetalleObligacion({ ob, onCerrar, onCambiarEstado }: {
       monto: ob.importe,
       moneda: ob.moneda ?? 'UYU',
       descripcion: desc,
-      metodo_pago: null,
+      metodo_pago: esUTE ? 'debito_automatico' : null,
       reembolsable: false,
       reembolsado: false,
       es_adelanto: false,
-      cuenta_id: perfil.cuenta_default_id ?? null,
+      cuenta_id: esUTE ? 1 : (perfil.cuenta_default_id ?? null),
     })
     setCargandoGasto(false)
     if (error) { setGastoError(error.message); return }
@@ -496,7 +497,7 @@ function DetalleObligacion({ ob, onCerrar, onCambiarEstado }: {
               onClick={cargarComoGasto}
               disabled={cargandoGasto || yaCargado}
             >
-              {cargandoGasto ? 'Cargando...' : yaCargado ? 'Ya cargada como gasto' : `Cargar como gasto (${ob.moneda === 'USD' ? 'US$ ' : '$ '}${ob.importe.toLocaleString('es-UY')})`}
+              {cargandoGasto ? 'Cargando...' : yaCargado ? 'Ya cargada como gasto' : `Pago realizado — cargar a gastos (${ob.moneda === 'USD' ? 'US$ ' : '$ '}${ob.importe.toLocaleString('es-UY')})`}
             </button>
             <div className="text-[10px] text-oliva-500 mt-1 text-center">
               Se carga en Gastos como "{ob.organismo}" con categoria "Impuestos y aportes"

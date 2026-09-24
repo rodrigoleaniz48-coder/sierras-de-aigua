@@ -383,6 +383,13 @@ function parseAmount(raw: string): number | null {
   return isNaN(val) ? null : val
 }
 
+function detectarMoneda(texto: string): 'UYU' | 'USD' | null {
+  const n = texto.toLowerCase()
+  if (/u\$s|usd|us\$|d[oó]lares?\b/.test(n)) return 'USD'
+  if (/\$\s*\d|uyu|pesos\b/.test(n)) return 'UYU'
+  return null
+}
+
 function detectarMonto(texto: string): number | null {
   const patterns = [
     /(?:total|monto|importe|pagar|abonar|deuda|saldo|cobrar|cuota|prima|aporte)[\s:$U]*(\d[\d.,]*)/gi,
@@ -450,6 +457,7 @@ interface CorreoRow {
   cuenta_correo_id: number
   cuerpo_texto: string
   monto_detectado: number | null
+  moneda_detectada: string | null
   fecha_vencimiento: string | null
 }
 
@@ -535,6 +543,7 @@ async function listarYProcesar(
         cuenta_correo_id: cuentaId,
         cuerpo_texto: cuerpo.slice(0, 5000),
         monto_detectado: montoDetectado,
+        moneda_detectada: montoDetectado != null ? (detectarMoneda(textoCompleto) ?? 'UYU') : null,
         fecha_vencimiento: fechaVenc,
       })
     }
