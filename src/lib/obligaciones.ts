@@ -4,7 +4,7 @@
 
 export type Categoria = 'bps' | 'bse' | 'dgi' | 'banco' | 'estudio_contable' | 'organismo_publico' | 'proveedor'
 export type EstadoObligacion = 'pendiente' | 'posible_pago' | 'vencido' | 'revisar'
-export type EstadoManual = 'pagada' | 'descartada' | 'revisar' | null
+export type EstadoManual = 'pagada' | 'descartada' | 'revisar' | 'pendiente' | null
 
 export interface Obligacion {
   id: number

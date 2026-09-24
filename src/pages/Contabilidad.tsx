@@ -200,7 +200,7 @@ function Obligaciones({ gmailMsg }: { gmailMsg: { ok?: boolean; error?: string }
       if (filtroMoneda !== 'todas' && ob.moneda !== filtroMoneda) return false
       const estadoEfectivo = ob.estado_manual ?? ob.estado
       if (filtroEstado === 'activas') return estadoEfectivo !== 'descartada' && estadoEfectivo !== 'pagada'
-      if (filtroEstado === 'pendiente') return estadoEfectivo === 'pendiente'
+      if (filtroEstado === 'pendiente') return estadoEfectivo === 'pendiente' || ob.estado_manual === 'pendiente'
       if (filtroEstado === 'vencido') return ob.estado === 'vencido' && !ob.estado_manual
       if (filtroEstado === 'posible_pago') return ob.estado === 'posible_pago' && !ob.estado_manual
       if (filtroEstado === 'revisar') return estadoEfectivo === 'revisar'
@@ -439,9 +439,9 @@ function DetalleObligacion({ ob, onCerrar, onCambiarEstado }: {
       tipo: 'normal' as const,
       reembolsado: false,
       cuentaId: esUTE ? '1' : (perfil.cuenta_default_id ? String(perfil.cuenta_default_id) : ''),
+      correoId: ob.id,
     })
     guardarFlag('dialog:nuevo-gasto', true)
-    onCambiarEstado(ob, 'pagada')
     navigate('/finanzas')
   }
 
@@ -514,6 +514,10 @@ function DetalleObligacion({ ob, onCerrar, onCambiarEstado }: {
               className={`text-xs px-3 py-1.5 rounded-lg border transition ${ob.estado_manual === 'revisar' ? 'bg-purple-100 border-purple-300 text-purple-800' : 'border-oliva-200 text-oliva-700 hover:bg-purple-50'}`}
               onClick={() => onCambiarEstado(ob, ob.estado_manual === 'revisar' ? null : 'revisar')}
             >{ob.estado_manual === 'revisar' ? 'Marcada para revisar' : 'Marcar revisar'}</button>
+            <button
+              className={`text-xs px-3 py-1.5 rounded-lg border transition ${ob.estado_manual === 'pendiente' ? 'bg-amber-100 border-amber-300 text-amber-800' : 'border-oliva-200 text-oliva-700 hover:bg-amber-50'}`}
+              onClick={() => onCambiarEstado(ob, ob.estado_manual === 'pendiente' ? null : 'pendiente')}
+            >{ob.estado_manual === 'pendiente' ? 'Marcada como pendiente' : 'Marcar pendiente'}</button>
           </div>
         </div>
 

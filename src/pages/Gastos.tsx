@@ -411,6 +411,7 @@ function GastoDialog({
   const [tipo, setTipo] = useState<TipoGasto>('normal')
   const [reembolsado, setReembolsado] = useState(false)
   const [cuentaId, setCuentaId] = useState<string>('')
+  const [correoId, setCorreoId] = useState<number | null>(null)
   const [cuentas, setCuentas] = useState<CuentaBancariaBase[]>([])
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -462,17 +463,19 @@ function GastoDialog({
       setCuentaId((editar as Gasto & { cuenta_id?: number | null }).cuenta_id ? String((editar as Gasto & { cuenta_id?: number | null }).cuenta_id) : '')
       setSocioSel(editar.socio_id)
     } else {
-      const b = leerObj<{ fecha: string; categoria: string; monto: string; moneda: 'UYU' | 'USD'; descripcion: string; metodoPago: string; tipo?: TipoGasto; reembolsado: boolean; cuentaId?: string }>('borrador:nuevo-gasto')
+      const b = leerObj<{ fecha: string; categoria: string; monto: string; moneda: 'UYU' | 'USD'; descripcion: string; metodoPago: string; tipo?: TipoGasto; reembolsado: boolean; cuentaId?: string; correoId?: number }>('borrador:nuevo-gasto')
       if (b) {
         setFecha(b.fecha); setCategoria(b.categoria); setMonto(b.monto); setMoneda(b.moneda)
         setDescripcion(b.descripcion); setMetodoPago(b.metodoPago)
         setTipo(b.tipo ?? 'normal'); setReembolsado(b.reembolsado)
         if (b.cuentaId) setCuentaId(b.cuentaId)
+        setCorreoId(b.correoId ?? null)
       } else {
         setFecha(new Date().toISOString().slice(0, 10))
         setCategoria('varios'); setMonto(''); setMoneda('UYU')
         setDescripcion(''); setMetodoPago('efectivo')
         setTipo('normal'); setReembolsado(false)
+        setCorreoId(null)
       }
       setSocioSel(socioId)
     }
@@ -512,7 +515,12 @@ function GastoDialog({
     const { error } = await q
     setGuardando(false)
     if (error) { setError(error.message); return }
-    if (!editar) borrarKey('borrador:nuevo-gasto')
+    if (!editar) {
+      borrarKey('borrador:nuevo-gasto')
+      if (correoId) {
+        await supabase.from('correos_sincronizados').update({ estado_manual: 'pagada' }).eq('id', correoId)
+      }
+    }
     onOk()
   }
 
