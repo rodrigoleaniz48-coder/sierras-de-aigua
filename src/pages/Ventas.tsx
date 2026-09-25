@@ -16,6 +16,7 @@ interface Presentacion {
   precio_minorista: number; precio_mayorista: number; iva_pct: number; activo: boolean
   es_pack: boolean
   moneda_default?: 'UYU' | 'USD' | null
+  costo_envasado?: number | null
 }
 interface Componente { presentacion_pack_id: number; presentacion_componente_id: number; unidades: number }
 interface StockRow { id: number; tanque_id: number | null; presentacion_id: number; unidades: number; ubicacion_id: number }
@@ -689,7 +690,7 @@ function NuevaVentaDialog({
     setDatosCargados(false)
     Promise.all([
       supabase.from('productos').select('id,nombre,categoria'),
-      supabase.from('presentaciones').select('id,producto_id,nombre,volumen_ml,precio_minorista,precio_mayorista,iva_pct,activo,es_pack,moneda_default').eq('activo', true),
+      supabase.from('presentaciones').select('id,producto_id,nombre,volumen_ml,precio_minorista,precio_mayorista,iva_pct,activo,es_pack,moneda_default,costo_envasado').eq('activo', true),
       supabase.from('stock').select('id,tanque_id,presentacion_id,unidades,ubicacion_id').gt('unidades', 0),
       supabase.from('presentacion_componente').select('*'),
       supabase.from('tanques').select('id,nombre,producto_id,variedad_libre,campana,litros_actuales,activo').eq('activo', true).order('id'),
@@ -1092,36 +1093,48 @@ async function guardar(e: React.FormEvent) {
       }
     }
 
-    // 4) Gasto automático por promoción comercial o items regalo
+    // 4) Gasto automático por promoción comercial o items regalo (a costo real, no precio de venta)
     if (!aConfirmar) {
-      let montoPromo = 0
-      const detalle: string[] = []
-      if (promocion) {
-        montoPromo = Number(cabecera.total)
-        detalle.push('Venta promocional completa')
-      } else {
-        for (const f of filasValidas) {
-          if (f.it.es_regalo && f.subtotalBruto > 0) {
-            montoPromo += monedaVenta === 'USD' ? f.subtotalBruto * cot : f.subtotalBruto
-            detalle.push(`${f.it.unidades}× ${f.p?.nombre ?? 'item'} (regalo)`)
+      const itemsPromo = promocion
+        ? filasValidas
+        : filasValidas.filter(f => f.it.es_regalo)
+      if (itemsPromo.length > 0) {
+        const { data: cfgCosto } = await supabase.from('config_global').select('value').eq('key', 'costo_aceite_por_litro_usd').maybeSingle()
+        const costoAceiteUsdL = Number(cfgCosto?.value ?? 0)
+        const { fetchCotizacionBCU } = await import('../lib/bcu')
+        const cotBcu = await fetchCotizacionBCU()
+        const tipoCambio = cotBcu?.cotizacion ?? 42
+        let montoPromo = 0
+        const detalle: string[] = []
+        for (const f of itemsPromo) {
+          if (!f.p) continue
+          const prod = prodPorId.get(f.p.producto_id)
+          const costoEnvasado = Number(f.p.costo_envasado ?? 0)
+          let costoUnit = costoEnvasado
+          if (prod?.categoria === 'aceite') {
+            const litros = (f.p.volumen_ml ?? 0) / 1000
+            costoUnit = costoEnvasado + costoAceiteUsdL * tipoCambio * litros
           }
+          const costoLinea = costoUnit * Number(f.it.unidades)
+          montoPromo += costoLinea
+          detalle.push(`${f.it.unidades}× ${prod?.nombre ?? ''} ${f.p.nombre} (${promocion ? 'promo' : 'regalo'})`)
         }
-      }
-      if (montoPromo > 0) {
-        const clienteNombre = clienteId ? clientes.find(c => c.id === Number(clienteId))?.nombre : null
-        await supabase.from('gastos').insert({
-          fecha,
-          socio_id: socioId,
-          categoria: 'promociones_comerciales',
-          monto: Math.round(montoPromo * 100) / 100,
-          moneda: 'UYU',
-          descripcion: `Venta #${ventaId}${clienteNombre ? ` · ${clienteNombre}` : ''} — ${detalle.join(', ')}`,
-          metodo_pago: 'transferencia',
-          reembolsable: false,
-          reembolsado: false,
-          es_adelanto: false,
-          actualizado_en: new Date().toISOString(),
-        })
+        if (montoPromo > 0) {
+          const clienteNombre = clienteId ? clientes.find(c => c.id === Number(clienteId))?.nombre : null
+          await supabase.from('gastos').insert({
+            fecha,
+            socio_id: socioId,
+            categoria: 'promociones_comerciales',
+            monto: Math.round(montoPromo * 100) / 100,
+            moneda: 'UYU',
+            descripcion: `Venta #${ventaId}${clienteNombre ? ` · ${clienteNombre}` : ''} — ${detalle.join(', ')}`,
+            metodo_pago: 'transferencia',
+            reembolsable: false,
+            reembolsado: false,
+            es_adelanto: false,
+            actualizado_en: new Date().toISOString(),
+          })
+        }
       }
     }
 
