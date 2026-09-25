@@ -211,14 +211,14 @@ function Obligaciones({ gmailMsg }: { gmailMsg: { ok?: boolean; error?: string }
   }, [obligaciones, filtroOrg, filtroEstado, filtroMoneda])
 
   const activas = obligaciones.filter(o => o.estado_manual !== 'descartada' && o.estado_manual !== 'pagada')
-  const vencidas = activas.filter(o => o.estado === 'vencido' && !o.estado_manual)
+  const vencidas = activas.filter(o => o.estado === 'vencido' && (!o.estado_manual || o.estado_manual === 'pendiente'))
   const porVencer = activas.filter(o => {
-    if (!o.fecha_vencimiento || o.estado === 'vencido' || o.estado_manual) return false
+    if (!o.fecha_vencimiento || o.estado === 'vencido' || (o.estado_manual && o.estado_manual !== 'pendiente')) return false
     const diff = (new Date(o.fecha_vencimiento).getTime() - new Date(hoy).getTime()) / 86400000
     return diff >= 0 && diff <= 7
   })
   const pendientesRevision = activas.filter(o => (o.estado_manual === 'revisar' || o.estado === 'revisar'))
-  const pendientesPago = activas.filter(o => o.estado !== 'posible_pago' && !o.estado_manual)
+  const pendientesPago = activas.filter(o => o.estado !== 'posible_pago' && (!o.estado_manual || o.estado_manual === 'pendiente'))
   const totalPendienteUYU = pendientesPago.filter(o => o.moneda !== 'USD').reduce((s, o) => s + (o.importe ?? 0), 0)
   const totalPendienteUSD = pendientesPago.filter(o => o.moneda === 'USD').reduce((s, o) => s + (o.importe ?? 0), 0)
 
