@@ -596,12 +596,19 @@ function EstadoResultados() {
   const margenUYU = totalIngresosUYU - gastosUYU
   const margenUSD = totalIngresosUSD - gastosUSD
 
-  // Egresos por categoría (UYU)
-  const porCat = new Map<string, number>()
-  for (const g of gastos.filter((x) => x.moneda === 'UYU')) {
-    porCat.set(g.categoria, (porCat.get(g.categoria) ?? 0) + Number(g.monto))
+  // Egresos por categoría (UYU + USD separados)
+  const porCatUYU = new Map<string, number>()
+  const porCatUSD = new Map<string, number>()
+  for (const g of gastos) {
+    const map = g.moneda === 'USD' ? porCatUSD : porCatUYU
+    map.set(g.categoria, (map.get(g.categoria) ?? 0) + Number(g.monto))
   }
-  const catArr = [...porCat.entries()].sort((a, b) => b[1] - a[1])
+  const allCats = new Set([...porCatUYU.keys(), ...porCatUSD.keys()])
+  const catArr = [...allCats].map(cat => ({
+    cat,
+    uyu: porCatUYU.get(cat) ?? 0,
+    usd: porCatUSD.get(cat) ?? 0,
+  })).sort((a, b) => b.uyu - a.uyu || b.usd - a.usd)
 
   return (
     <div className="space-y-4">
@@ -682,22 +689,29 @@ function EstadoResultados() {
       )}
 
       <div className="card p-4">
-        <div className="text-xs uppercase tracking-wide text-oliva-600 mb-3">Gastos por categoría (UYU)</div>
+        <div className="text-xs uppercase tracking-wide text-oliva-600 mb-3">Gastos por categoría</div>
         {catArr.length === 0 ? (
           <div className="text-sm text-oliva-600 italic">Sin gastos en el período.</div>
         ) : (
           <div className="space-y-1.5">
-            {catArr.map(([cat, total]) => {
-              const pct = gastosUYU > 0 ? (total / gastosUYU) * 100 : 0
+            {catArr.map(({ cat, uyu, usd }) => {
+              const pct = gastosUYU > 0 && uyu > 0 ? (uyu / gastosUYU) * 100 : 0
               return (
                 <div key={cat}>
                   <div className="flex justify-between text-sm">
                     <span className="text-oliva-800 capitalize">{cat.replace(/_/g, ' ')}</span>
-                    <span className="tabular-nums text-oliva-700">{money(total)} <span className="text-xs text-oliva-500">({pct.toFixed(0)}%)</span></span>
+                    <span className="tabular-nums text-oliva-700">
+                      {uyu > 0 && <>{money(uyu)}</>}
+                      {uyu > 0 && usd > 0 && ' + '}
+                      {usd > 0 && <>{money(usd, 'USD')}</>}
+                      {pct > 0 && <span className="text-xs text-oliva-500 ml-1">({pct.toFixed(0)}%)</span>}
+                    </span>
                   </div>
-                  <div className="h-2 bg-oliva-100 rounded overflow-hidden">
-                    <div className="h-full bg-oliva-500" style={{ width: pct + '%' }} />
-                  </div>
+                  {pct > 0 && (
+                    <div className="h-2 bg-oliva-100 rounded overflow-hidden">
+                      <div className="h-full bg-oliva-500" style={{ width: pct + '%' }} />
+                    </div>
+                  )}
                 </div>
               )
             })}
