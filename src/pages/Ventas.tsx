@@ -1092,6 +1092,39 @@ async function guardar(e: React.FormEvent) {
       }
     }
 
+    // 4) Gasto automático por promoción comercial o items regalo
+    if (!aConfirmar) {
+      let montoPromo = 0
+      const detalle: string[] = []
+      if (promocion) {
+        montoPromo = Number(cabecera.total)
+        detalle.push('Venta promocional completa')
+      } else {
+        for (const f of filasValidas) {
+          if (f.it.es_regalo && f.subtotalBruto > 0) {
+            montoPromo += monedaVenta === 'USD' ? f.subtotalBruto * cot : f.subtotalBruto
+            detalle.push(`${f.it.unidades}× ${f.p?.nombre ?? 'item'} (regalo)`)
+          }
+        }
+      }
+      if (montoPromo > 0) {
+        const clienteNombre = clienteId ? clientes.find(c => c.id === Number(clienteId))?.nombre : null
+        await supabase.from('gastos').insert({
+          fecha,
+          socio_id: socioId,
+          categoria: 'promociones_comerciales',
+          monto: Math.round(montoPromo * 100) / 100,
+          moneda: 'UYU',
+          descripcion: `Venta #${ventaId}${clienteNombre ? ` · ${clienteNombre}` : ''} — ${detalle.join(', ')}`,
+          metodo_pago: 'transferencia',
+          reembolsable: false,
+          reembolsado: false,
+          es_adelanto: false,
+          actualizado_en: new Date().toISOString(),
+        })
+      }
+    }
+
     setGuardando(false)
     guardandoRef.current = false
     if (!ventaAEditar) {
