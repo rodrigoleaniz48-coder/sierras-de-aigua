@@ -17,8 +17,10 @@ interface Resumen {
   pendEntrega: number
   pendCobro: number
   pendCobroMonto: number
-  pendTotal: number // union: ventas con algo pendiente (entrega u cobro)
+  pendTotal: number
 }
+
+interface MesDato { label: string; ingresos: number; egresos: number }
 
 export function Dashboard() {
   const { perfil, puede } = useAuth()
@@ -31,6 +33,7 @@ export function Dashboard() {
     totalMes: 0, cantVentasMes: 0, totalMesAnterior: 0, litrosAceiteMes: 0,
     pendEntrega: 0, pendCobro: 0, pendCobroMonto: 0, pendTotal: 0,
   })
+  const [meses, setMeses] = useState<MesDato[]>([])
   const [cargando, setCargando] = useState(true)
   const [avisosCadete, setAvisosCadete] = useState<AvisoCadete[]>([])
   const soyYo = perfil?.id ?? ''
@@ -114,6 +117,42 @@ export function Dashboard() {
       .finally(() => setCargando(false))
   }, [soyYo])
 
+  useEffect(() => {
+    const ahora = new Date()
+    const desde = new Date(ahora.getFullYear(), ahora.getMonth() - 5, 1).toISOString().slice(0, 10)
+    Promise.all([
+      supabase.from('ventas').select('fecha_cobro,total').gte('fecha_cobro', desde).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
+      supabase.from('gastos').select('fecha,monto,moneda').gte('fecha', desde).eq('es_adelanto', false),
+      supabase.from('ingresos').select('fecha,monto,moneda').gte('fecha', desde),
+    ]).then(([vR, gR, iR]) => {
+      const ingPorMes = new Map<string, number>()
+      const egPorMes = new Map<string, number>()
+      for (const v of (vR.data ?? []) as { fecha_cobro: string; total: number }[]) {
+        if (!v.fecha_cobro) continue
+        const k = v.fecha_cobro.slice(0, 7)
+        ingPorMes.set(k, (ingPorMes.get(k) ?? 0) + Number(v.total))
+      }
+      for (const i of (iR.data ?? []) as { fecha: string; monto: number; moneda: string }[]) {
+        if (i.moneda !== 'UYU') continue
+        const k = i.fecha.slice(0, 7)
+        ingPorMes.set(k, (ingPorMes.get(k) ?? 0) + Number(i.monto))
+      }
+      for (const g of (gR.data ?? []) as { fecha: string; monto: number; moneda: string }[]) {
+        if (g.moneda !== 'UYU') continue
+        const k = g.fecha.slice(0, 7)
+        egPorMes.set(k, (egPorMes.get(k) ?? 0) + Number(g.monto))
+      }
+      const arr: MesDato[] = []
+      for (let i = 5; i >= 0; i--) {
+        const d = new Date(ahora.getFullYear(), ahora.getMonth() - i, 1)
+        const k = d.toISOString().slice(0, 7)
+        const label = d.toLocaleString('es-UY', { month: 'short' }).replace('.', '')
+        arr.push({ label, ingresos: ingPorMes.get(k) ?? 0, egresos: egPorMes.get(k) ?? 0 })
+      }
+      setMeses(arr)
+    })
+  }, [])
+
   const primerNombre = perfil?.nombre ? perfil.nombre.split(' ')[0] : ''
   const hoy = new Date().toLocaleDateString('es-UY', { day: 'numeric', month: 'long', year: 'numeric' })
   const deltaMes = r.totalMesAnterior > 0 ? ((r.totalMes - r.totalMesAnterior) / r.totalMesAnterior) * 100 : null
@@ -186,6 +225,9 @@ export function Dashboard() {
         <KpiCard titulo="Mes anterior" valor={cargando ? '…' : money(r.totalMesAnterior)} sub="para comparar" />
       </div>
 
+      {/* Mini gráfica ingresos vs egresos */}
+      {meses.length > 0 && <GraficaMeses meses={meses} />}
+
       {/* Al pie: alertas menos urgentes que el resumen del dia */}
       {!soloReporte && <AlertasTareas />}
       {!soloReporte && <AlertasStockBajo />}
@@ -223,6 +265,38 @@ function PendientesBar({ cargando, entrega, cobro, cobroMonto, onClick }: {
       </div>
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-oliva-400 shrink-0"><path d="M5 12h14M13 5l7 7-7 7" /></svg>
     </button>
+  )
+}
+
+function GraficaMeses({ meses }: { meses: MesDato[] }) {
+  const max = Math.max(...meses.flatMap(m => [m.ingresos, m.egresos]), 1)
+  return (
+    <div className="card p-3">
+      <div className="text-[10px] uppercase tracking-wide text-oliva-600 mb-2">Ingresos vs Egresos (UYU)</div>
+      <div className="flex items-end gap-1.5 sm:gap-3 h-28">
+        {meses.map((m) => {
+          const hIng = Math.max((m.ingresos / max) * 100, 2)
+          const hEg = Math.max((m.egresos / max) * 100, 2)
+          const margen = m.ingresos - m.egresos
+          return (
+            <div key={m.label} className="flex-1 flex flex-col items-center gap-0.5 min-w-0">
+              <div className="flex items-end gap-[2px] w-full justify-center h-20">
+                <div className="w-[40%] max-w-[18px] rounded-t bg-green-500/80" style={{ height: hIng + '%' }} title={`Ingresos: ${money(m.ingresos)}`} />
+                <div className="w-[40%] max-w-[18px] rounded-t bg-red-400/70" style={{ height: hEg + '%' }} title={`Egresos: ${money(m.egresos)}`} />
+              </div>
+              <div className={`text-[9px] font-semibold tabular-nums ${margen >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+                {m.ingresos > 0 || m.egresos > 0 ? (margen >= 0 ? '+' : '') + (margen / 1000).toFixed(0) + 'k' : ''}
+              </div>
+              <div className="text-[10px] text-oliva-600 capitalize truncate w-full text-center">{m.label}</div>
+            </div>
+          )
+        })}
+      </div>
+      <div className="flex justify-center gap-4 mt-1.5 text-[10px] text-oliva-600">
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-green-500/80 inline-block" /> Ingresos</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-red-400/70 inline-block" /> Egresos</span>
+      </div>
+    </div>
   )
 }
 
