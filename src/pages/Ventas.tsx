@@ -76,7 +76,7 @@ export function Ventas() {
   const [cadeteAbierto, setCadeteAbierto] = useState(false)
   const [resumenCadeteAbierto, setResumenCadeteAbierto] = useState(false)
 
-  const [filtroSocio, setFiltroSocio] = useState<string>('todos')
+  const [filtroSocio, setFiltroSocio] = useState<string>(() => session?.user.id ?? 'todos')
   const [soloEnvio, setSoloEnvio] = useState(false)
   const [filtroDesde, setFiltroDesde] = useState<string>(() => {
     const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10)
@@ -125,11 +125,12 @@ export function Ventas() {
   const pendientes = useMemo(
     () => ventas.filter((v) => {
       if (v.estado === 'cancelado') return false
-      if (v.a_confirmar) return true // potenciales siempre en pendientes
+      if (filtroSocio !== 'todos' && v.socio_id !== filtroSocio) return false
+      if (v.a_confirmar) return true
       if (v.promocion_comercial) return !v.entregado
       return !v.entregado || !v.cobrado
     }),
-    [ventas],
+    [ventas, filtroSocio],
   )
 
   // Resumen del pedido (items en 1 línea) para las ventas pendientes
