@@ -76,7 +76,7 @@ export function Dashboard() {
       // Items del mes con producto y presentación, para calcular litros de aceite (envasado + granel)
       supabase.from('items_venta').select('unidades, presentacion:presentaciones(volumen_ml, producto:productos(nombre, categoria)), venta:ventas!inner(fecha, estado, a_confirmar)').gte('venta.fecha', mesInicio).neq('venta.estado', 'cancelado').eq('venta.a_confirmar', false),
       // Pendientes de entrega/cobro (todas las fechas, no filtrar por mes: siguen pendientes despues del cierre)
-      supabase.from('ventas').select('id, total, entregado, cobrado, promocion_comercial').neq('estado', 'cancelado').eq('a_confirmar', false).or('entregado.eq.false,cobrado.eq.false'),
+      supabase.from('ventas').select('id, total, entregado, cobrado, promocion_comercial').eq('socio_id', soyYo).neq('estado', 'cancelado').eq('a_confirmar', false).or('entregado.eq.false,cobrado.eq.false'),
     ])
       .then(([vRes, vAntRes, iRes, pendRes]) => {
         const ventasMes = vRes.data ?? []
@@ -112,7 +112,7 @@ export function Dashboard() {
         })
       })
       .finally(() => setCargando(false))
-  }, [])
+  }, [soyYo])
 
   const primerNombre = perfil?.nombre ? perfil.nombre.split(' ')[0] : ''
   const hoy = new Date().toLocaleDateString('es-UY', { day: 'numeric', month: 'long', year: 'numeric' })
