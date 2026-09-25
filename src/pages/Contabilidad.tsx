@@ -218,9 +218,9 @@ function Obligaciones({ gmailMsg }: { gmailMsg: { ok?: boolean; error?: string }
     return diff >= 0 && diff <= 7
   })
   const pendientesRevision = activas.filter(o => (o.estado_manual === 'revisar' || o.estado === 'revisar'))
-  const totalPendiente = activas
-    .filter(o => o.estado !== 'posible_pago' && !o.estado_manual)
-    .reduce((s, o) => s + (o.importe ?? 0), 0)
+  const pendientesPago = activas.filter(o => o.estado !== 'posible_pago' && !o.estado_manual)
+  const totalPendienteUYU = pendientesPago.filter(o => o.moneda !== 'USD').reduce((s, o) => s + (o.importe ?? 0), 0)
+  const totalPendienteUSD = pendientesPago.filter(o => o.moneda === 'USD').reduce((s, o) => s + (o.importe ?? 0), 0)
 
   function formatFecha(f: string) {
     return new Date(f + 'T12:00:00').toLocaleDateString('es-UY')
@@ -285,10 +285,11 @@ function Obligaciones({ gmailMsg }: { gmailMsg: { ok?: boolean; error?: string }
                   <div className="text-lg font-semibold tabular-nums mt-1 text-purple-800">{pendientesRevision.length}</div>
                 </button>
               )}
-              {totalPendiente > 0 && (
+              {(totalPendienteUYU > 0 || totalPendienteUSD > 0) && (
                 <div className="card p-3">
                   <div className="text-[11px] uppercase tracking-wide text-oliva-600">Total pendiente</div>
-                  <div className="text-lg font-semibold tabular-nums mt-1 text-oliva-900">${totalPendiente.toLocaleString('es-UY')}</div>
+                  {totalPendienteUYU > 0 && <div className="text-lg font-semibold tabular-nums mt-1 text-oliva-900">$ {totalPendienteUYU.toLocaleString('es-UY')}</div>}
+                  {totalPendienteUSD > 0 && <div className={`${totalPendienteUYU > 0 ? 'text-sm' : 'text-lg'} font-semibold tabular-nums mt-0.5 text-oliva-700`}>US$ {totalPendienteUSD.toLocaleString('es-UY')}</div>}
                 </div>
               )}
             </div>
