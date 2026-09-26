@@ -124,7 +124,9 @@ export function Dashboard() {
       supabase.from('ventas').select('fecha_cobro,total').gte('fecha_cobro', desde).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
       supabase.from('gastos').select('fecha,monto,moneda').gte('fecha', desde).eq('es_adelanto', false),
       supabase.from('ingresos').select('fecha,monto,moneda').gte('fecha', desde),
-    ]).then(([vR, gR, iR]) => {
+      import('../lib/bcu').then(m => m.fetchCotizacionBCU()),
+    ]).then(([vR, gR, iR, cotBcu]) => {
+      const tc = cotBcu?.cotizacion ?? 42
       const ingPorMes = new Map<string, number>()
       const egPorMes = new Map<string, number>()
       for (const v of (vR.data ?? []) as { fecha_cobro: string; total: number }[]) {
@@ -133,14 +135,14 @@ export function Dashboard() {
         ingPorMes.set(k, (ingPorMes.get(k) ?? 0) + Number(v.total))
       }
       for (const i of (iR.data ?? []) as { fecha: string; monto: number; moneda: string }[]) {
-        if (i.moneda !== 'UYU') continue
         const k = i.fecha.slice(0, 7)
-        ingPorMes.set(k, (ingPorMes.get(k) ?? 0) + Number(i.monto))
+        const monto = i.moneda === 'USD' ? Number(i.monto) * tc : Number(i.monto)
+        ingPorMes.set(k, (ingPorMes.get(k) ?? 0) + monto)
       }
       for (const g of (gR.data ?? []) as { fecha: string; monto: number; moneda: string }[]) {
-        if (g.moneda !== 'UYU') continue
         const k = g.fecha.slice(0, 7)
-        egPorMes.set(k, (egPorMes.get(k) ?? 0) + Number(g.monto))
+        const monto = g.moneda === 'USD' ? Number(g.monto) * tc : Number(g.monto)
+        egPorMes.set(k, (egPorMes.get(k) ?? 0) + monto)
       }
       const arr: MesDato[] = []
       for (let i = 5; i >= 0; i--) {
