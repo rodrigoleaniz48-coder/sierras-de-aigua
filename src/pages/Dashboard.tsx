@@ -149,7 +149,7 @@ export function Dashboard() {
         const label = d.toLocaleString('es-UY', { month: 'short' }).replace('.', '')
         arr.push({ label, ingresos: ingPorMes.get(k) ?? 0, egresos: egPorMes.get(k) ?? 0 })
       }
-      setMeses(arr)
+      setMeses(arr.filter(m => m.ingresos > 0 || m.egresos > 0))
     })
   }, [])
 
