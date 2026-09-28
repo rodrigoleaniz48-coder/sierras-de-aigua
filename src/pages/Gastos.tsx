@@ -198,7 +198,28 @@ export function Gastos() {
           <label className="label">Categoría</label>
           <select className="input" value={filtroCategoria} onChange={(e) => setFiltroCategoria(e.target.value)}>
             <option value="todas">Todas</option>
-            {categorias.map((c) => <option key={c.slug} value={c.slug}>{c.nombre}</option>)}
+            {(() => {
+              const grupos: [string, string[]][] = [
+                ['Olivos', ['olivos_poda', 'olivos_cultivos']],
+                ['Almazara', ['olivos_procesamiento', 'almazara_-_productos_jabon_miel_etc', 'almazara_-_gastos_y_mo_habilitacion_arre']],
+                ['Ovinos', ['ovinos', 'ovinos_-_general_mo_sanidad_etc', 'ovinos_-_compra_animales']],
+                ['Campo', ['forestacion']],
+                ['Inversiones', ['olivos_inversion', 'inversion_-_almazara', 'inersion_-_casas', 'inversion_-_mejoras_fijas_alambrados_etc', 'inversion_-_maquinaria']],
+                ['Operativo', ['vehiculos', 'maquinaria', 'herramientas_menores', 'administracion', 'impuestos_aportes', 'reformas_obra', 'capacitaciones']],
+                ['Comercial', ['promociones_comerciales']],
+                ['Otros', ['varios']],
+              ]
+              const catMap = new Map(categorias.map(c => [c.slug, c]))
+              return grupos.map(([label, slugs]) => {
+                const items = slugs.map(s => catMap.get(s)).filter(Boolean) as typeof categorias
+                if (items.length === 0) return null
+                return (
+                  <optgroup key={label} label={label}>
+                    {items.map(c => <option key={c.slug} value={c.slug}>{c.nombre}</option>)}
+                  </optgroup>
+                )
+              })
+            })()}
           </select>
         </div>
         {veTodos && (
@@ -596,7 +617,32 @@ function GastoDialog({
               ) : (
                 <>
                   {catsDialog.length === 0 && <option value={categoria}>{categoria || '—'}</option>}
-                  {catsDialog.map((c) => <option key={c.slug} value={c.slug}>{c.nombre}</option>)}
+                  {(() => {
+                    const grupos: [string, string[]][] = [
+                      ['Olivos', ['olivos_poda', 'olivos_cultivos']],
+                      ['Almazara', ['olivos_procesamiento', 'almazara_-_productos_jabon_miel_etc', 'almazara_-_gastos_y_mo_habilitacion_arre']],
+                      ['Ovinos', ['ovinos', 'ovinos_-_general_mo_sanidad_etc', 'ovinos_-_compra_animales']],
+                      ['Campo', ['forestacion']],
+                      ['Inversiones', ['olivos_inversion', 'inversion_-_almazara', 'inersion_-_casas', 'inversion_-_mejoras_fijas_alambrados_etc', 'inversion_-_maquinaria']],
+                      ['Operativo', ['vehiculos', 'maquinaria', 'herramientas_menores', 'administracion', 'impuestos_aportes', 'reformas_obra', 'capacitaciones']],
+                      ['Comercial', ['promociones_comerciales']],
+                      ['Otros', ['varios']],
+                    ]
+                    const catMap = new Map(catsDialog.map(c => [c.slug, c]))
+                    return grupos.map(([label, slugs]) => {
+                      const items = slugs.map(s => catMap.get(s)).filter(Boolean) as Categoria[]
+                      if (items.length === 0) return null
+                      return (
+                        <optgroup key={label} label={label}>
+                          {items.map(c => <option key={c.slug} value={c.slug}>{c.nombre}</option>)}
+                        </optgroup>
+                      )
+                    })
+                  })()}
+                  {/* Categorías sin grupo asignado */}
+                  {catsDialog.filter(c => !['olivos_poda','olivos_cultivos','olivos_procesamiento','almazara_-_productos_jabon_miel_etc','almazara_-_gastos_y_mo_habilitacion_arre','ovinos','ovinos_-_general_mo_sanidad_etc','ovinos_-_compra_animales','forestacion','olivos_inversion','inversion_-_almazara','inersion_-_casas','inversion_-_mejoras_fijas_alambrados_etc','inversion_-_maquinaria','vehiculos','maquinaria','herramientas_menores','administracion','impuestos_aportes','reformas_obra','capacitaciones','promociones_comerciales','varios'].includes(c.slug)).map(c => (
+                    <option key={c.slug} value={c.slug}>{c.nombre}</option>
+                  ))}
                 </>
               )}
             </select>

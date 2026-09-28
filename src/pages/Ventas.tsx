@@ -1094,7 +1094,13 @@ async function guardar(e: React.FormEvent) {
     }
 
     // 4) Gasto automático por promoción comercial o items regalo (a costo real, no precio de venta)
+    //    Al editar, se borra el gasto anterior y se recrea con el monto actualizado.
     if (!aConfirmar) {
+      await supabase.from('gastos')
+        .delete()
+        .eq('categoria', 'promociones_comerciales')
+        .ilike('descripcion', `Venta #${ventaId} %`)
+
       const itemsPromo = promocion
         ? filasValidas
         : filasValidas.filter(f => f.it.es_regalo)
@@ -1424,25 +1430,58 @@ async function guardar(e: React.FormEvent) {
                         onChange={(e) => elegirPresentacion(f.it.key, e.target.value ? Number(e.target.value) : null)}
                       >
                         <option value="">— elegir —</option>
-                        {presentaciones.map((p) => {
-                          const prod = prodPorId.get(p.producto_id)
-                          if (prod?.categoria === 'envases_vacios') return null
-                          const esServicio = prod?.categoria === 'servicio'
-                          const stockEnUbic = (p.es_pack || esServicio) ? 0 : stock
-                            .filter((s) => s.presentacion_id === p.id && s.ubicacion_id === Number(ubicacionId))
-                            .reduce((a, b) => a + b.unidades, 0)
-                          const hayStock = p.es_pack || esServicio ? true : stockEnUbic > 0
-                          const sufijo = p.es_pack
-                            ? ' · pack'
-                            : esServicio
-                              ? ' · servicio'
-                              : !hayStock ? ' · SIN STOCK AQUÍ' : ` · ${stockEnUbic} u`
+                        {(() => {
+                          const aceites = presentaciones
+                            .filter(p => {
+                              const prod = prodPorId.get(p.producto_id)
+                              return prod?.categoria === 'aceite' && !p.es_pack
+                            })
+                            .sort((a, b) => (b.volumen_ml ?? 0) - (a.volumen_ml ?? 0))
+                          const packs = presentaciones.filter(p => p.es_pack)
+                          const resto = presentaciones
+                            .filter(p => {
+                              const prod = prodPorId.get(p.producto_id)
+                              return prod?.categoria !== 'aceite' && prod?.categoria !== 'envases_vacios' && !p.es_pack
+                            })
+                            .sort((a, b) => {
+                              const na = prodPorId.get(a.producto_id)?.nombre ?? ''
+                              const nb = prodPorId.get(b.producto_id)?.nombre ?? ''
+                              return na.localeCompare(nb) || (b.volumen_ml ?? 0) - (a.volumen_ml ?? 0)
+                            })
+                          const renderOption = (p: Presentacion) => {
+                            const prod = prodPorId.get(p.producto_id)
+                            const esServicio = prod?.categoria === 'servicio'
+                            const stockEnUbic = (p.es_pack || esServicio) ? 0 : stock
+                              .filter((s) => s.presentacion_id === p.id && s.ubicacion_id === Number(ubicacionId))
+                              .reduce((a, b) => a + b.unidades, 0)
+                            const hayStock = p.es_pack || esServicio ? true : stockEnUbic > 0
+                            const sufijo = p.es_pack
+                              ? ' · pack'
+                              : esServicio
+                                ? ' · servicio'
+                                : !hayStock ? ' · SIN STOCK AQUÍ' : ` · ${stockEnUbic} u`
+                            return (
+                              <option key={p.id} value={p.id} disabled={!hayStock}>
+                                {prod?.nombre} · {p.nombre}{sufijo}
+                              </option>
+                            )
+                          }
                           return (
-                            <option key={p.id} value={p.id} disabled={!hayStock}>
-                              {prod?.nombre} · {p.nombre}{sufijo}
-                            </option>
+                            <>
+                              <optgroup label="Aceite">
+                                {aceites.map(renderOption)}
+                              </optgroup>
+                              {packs.length > 0 && (
+                                <optgroup label="Packs">
+                                  {packs.map(renderOption)}
+                                </optgroup>
+                              )}
+                              <optgroup label="Otros productos">
+                                {resto.map(renderOption)}
+                              </optgroup>
+                            </>
                           )
-                        })}
+                        })()}
                       </select>
                       {(() => {
                         const prodF = f.p ? prodPorId.get(f.p.producto_id) : undefined

@@ -8,13 +8,20 @@ import {
   type ReporteSemanal,
 } from '../lib/reporte'
 
+interface KpisMes {
+  totalMes: number
+  cantVentasMes: number
+  litrosAceiteMes: number
+  totalMesAnterior: number
+  deltaPct: number | null
+  cargando: boolean
+}
+
 interface Props {
-  /** Si es true, se marca automáticamente como visto al abrir el modal. */
   autoMarcarVisto?: boolean
-  /** Callback cuando se marca como visto (para refrescar el badge en Layout). */
   onVisto?: () => void
-  /** Versión compacta (1 fila) para el dashboard. */
   compact?: boolean
+  kpisMes?: KpisMes
 }
 
 // Renderiza el par pesos + dólares en una línea (ambos si aplican, si no solo el que tenga monto)
@@ -24,7 +31,7 @@ function ambosMontos(uyu: number, usd: number): string {
   return money(uyu, 'UYU')
 }
 
-export function ReporteSemanalCard({ autoMarcarVisto = true, onVisto, compact }: Props) {
+export function ReporteSemanalCard({ autoMarcarVisto = true, onVisto, compact, kpisMes }: Props) {
   const [rep, setRep] = useState<ReporteSemanal | null>(null)
   const [cargando, setCargando] = useState(true)
   const [modal, setModal] = useState(false)
@@ -55,21 +62,48 @@ export function ReporteSemanalCard({ autoMarcarVisto = true, onVisto, compact }:
   return (
     <>
       {compact ? (
-        <button
-          type="button"
-          onClick={abrir}
-          className={`w-full flex items-center gap-3 text-left rounded-lg border px-3 py-2.5 transition ${nuevo ? 'border-aceite-500/60 bg-aceite-500/10 hover:bg-aceite-500/20' : 'border-oliva-100 bg-white hover:bg-oliva-50'}`}
-        >
-          <span className="text-[10px] font-bold uppercase tracking-widest text-oliva-500 shrink-0">Reporte sem.</span>
-          <span className="text-xs text-oliva-600 shrink-0 hidden sm:inline">{rep.desde}–{rep.hasta}</span>
-          <span className="text-sm font-bold text-oliva-900 tabular-nums">{ambosMontos(rep.totalUYU, rep.totalUSD)}</span>
-          <span className="text-[11px] text-oliva-500">·</span>
-          <span className="text-xs text-oliva-700">{rep.cantidadVentas} vta.</span>
-          {nuevo && (
-            <span className="text-[9px] uppercase tracking-wide rounded-full bg-aceite-500 text-white px-1.5 py-0.5 font-bold">nuevo</span>
+        <div className={`rounded-lg border overflow-hidden ${nuevo ? 'border-aceite-500/60 bg-aceite-500/5' : 'border-oliva-100 bg-white'}`}>
+          {/* KPIs del mes */}
+          {kpisMes && (
+            <div className="grid grid-cols-3 gap-px bg-oliva-100/60">
+              <div className="bg-white px-3 py-2.5 text-center">
+                <div className="text-[10px] uppercase tracking-wide text-oliva-500">Ventas mes</div>
+                <div className="text-sm font-bold text-oliva-900 tabular-nums">{kpisMes.cargando ? '…' : money(kpisMes.totalMes)}</div>
+                <div className="text-[10px] text-oliva-500">{kpisMes.cargando ? '' : `${kpisMes.cantVentasMes} op.`}</div>
+              </div>
+              <div className="bg-white px-3 py-2.5 text-center">
+                <div className="text-[10px] uppercase tracking-wide text-oliva-500">Aceite</div>
+                <div className="text-sm font-bold text-oliva-900 tabular-nums">{kpisMes.cargando ? '…' : `${num(kpisMes.litrosAceiteMes)} L`}</div>
+                <div className="text-[10px] text-oliva-500">mes</div>
+              </div>
+              <div className="bg-white px-3 py-2.5 text-center">
+                <div className="text-[10px] uppercase tracking-wide text-oliva-500">Mes anterior</div>
+                <div className="text-sm font-bold text-oliva-900 tabular-nums">{kpisMes.cargando ? '…' : money(kpisMes.totalMesAnterior)}</div>
+                {!kpisMes.cargando && kpisMes.deltaPct !== null && (
+                  <div className={`text-[10px] font-semibold ${kpisMes.deltaPct >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                    {kpisMes.deltaPct >= 0 ? '↑' : '↓'} {Math.abs(kpisMes.deltaPct).toFixed(0)}%
+                  </div>
+                )}
+              </div>
+            </div>
           )}
-          <span className="ml-auto text-xs text-oliva-700 font-semibold">Ver detalle →</span>
-        </button>
+          {/* Reporte semanal */}
+          <button
+            type="button"
+            onClick={abrir}
+            className={`w-full flex items-center gap-3 text-left px-3 py-2 transition ${nuevo ? 'hover:bg-aceite-500/10' : 'hover:bg-oliva-50'}`}
+          >
+            <span className="text-[10px] font-bold uppercase tracking-widest text-oliva-500 shrink-0">Reporte sem.</span>
+            <span className="text-xs text-oliva-600 shrink-0 hidden sm:inline">{rep.desde}–{rep.hasta}</span>
+            <span className="text-sm font-bold text-oliva-900 tabular-nums">{ambosMontos(rep.totalUYU, rep.totalUSD)}</span>
+            <span className="text-[11px] text-oliva-500">·</span>
+            <span className="text-xs text-oliva-700">{rep.cantidadVentas} vta.</span>
+            {nuevo && (
+              <span className="text-[9px] uppercase tracking-wide rounded-full bg-aceite-500 text-white px-1.5 py-0.5 font-bold">nuevo</span>
+            )}
+            <span className="ml-auto text-xs text-oliva-700 font-semibold">Ver detalle →</span>
+          </button>
+        </div>
       ) : (
       <div className={`card p-4 ${nuevo ? 'border-2 border-aceite-500/60 bg-aceite-500/5' : ''}`}>
         <div className="flex items-start justify-between gap-3 flex-wrap">

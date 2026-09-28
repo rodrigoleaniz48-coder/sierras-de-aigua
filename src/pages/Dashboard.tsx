@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
-import { money, num } from '../lib/format'
+import { money } from '../lib/format'
 import { ReporteSemanalCard } from '../components/ReporteSemanalCard'
 import { AlertasStockBajo } from '../components/AlertasStockBajo'
 import { AlertasTareas } from '../components/AlertasTareas'
@@ -151,7 +151,7 @@ export function Dashboard() {
         const label = d.toLocaleString('es-UY', { month: 'short' }).replace('.', '')
         arr.push({ label, ingresos: ingPorMes.get(k) ?? 0, egresos: egPorMes.get(k) ?? 0 })
       }
-      setMeses(arr.filter(m => m.ingresos > 0 || m.egresos > 0))
+      setMeses(arr)
     })
   }, [])
 
@@ -211,21 +211,12 @@ export function Dashboard() {
         </div>
       )}
 
-      {/* Reporte semanal (sube desde el pie al lugar del ex-ticket promedio) */}
-      <ReporteSemanalCard compact />
-
-      {/* KPIs del mes — 3 columnas siempre (incluso en mobile) para que entren en una pantalla */}
-      <div className="grid grid-cols-3 gap-2 sm:gap-3">
-        <KpiCard
-          titulo="Ventas mes"
-          valor={cargando ? '…' : money(r.totalMes)}
-          sub={`${r.cantVentasMes} op.`}
-          destacado
-          delta={deltaMes}
-        />
-        <KpiCard titulo="Aceite" valor={cargando ? '…' : `${num(r.litrosAceiteMes)} L`} sub="mes" />
-        <KpiCard titulo="Mes anterior" valor={cargando ? '…' : money(r.totalMesAnterior)} sub="para comparar" />
-      </div>
+      {/* Reporte semanal + KPIs del mes integrados */}
+      <ReporteSemanalCard compact kpisMes={{
+        totalMes: r.totalMes, cantVentasMes: r.cantVentasMes,
+        litrosAceiteMes: r.litrosAceiteMes, totalMesAnterior: r.totalMesAnterior,
+        deltaPct: deltaMes, cargando,
+      }} />
 
       {/* Mini gráfica ingresos vs egresos */}
       {meses.length > 0 && <GraficaMeses meses={meses} />}
@@ -302,22 +293,4 @@ function GraficaMeses({ meses }: { meses: MesDato[] }) {
   )
 }
 
-function KpiCard({ titulo, valor, sub, destacado, delta }: { titulo: string; valor: string; sub?: string; destacado?: boolean; delta?: number | null }) {
-  return (
-    <div className="rounded-lg border border-oliva-100 bg-white p-3 min-w-0">
-      <div className="text-[10px] font-bold uppercase tracking-widest text-oliva-500 truncate">{titulo}</div>
-      <div className={`text-lg sm:text-xl font-extrabold mt-1 tabular-nums tracking-tight truncate ${destacado ? 'text-oliva-800' : 'text-oliva-900'}`}>
-        {valor}
-      </div>
-      <div className="flex items-baseline gap-1 mt-0.5 min-w-0">
-        {sub && <div className="text-[11px] text-oliva-500 truncate">{sub}</div>}
-        {delta !== null && delta !== undefined && !isNaN(delta) && (
-          <div className={`text-[11px] font-semibold ${delta >= 0 ? 'text-green-700' : 'text-red-700'} shrink-0`}>
-            {delta >= 0 ? '↑' : '↓'}{Math.abs(delta).toFixed(0)}%
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
 
