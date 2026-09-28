@@ -179,7 +179,7 @@ function orgFijo(cat: Categoria | null): string | null {
 // ---- API pública ----
 
 export function procesarCorreos(correos: CorreoRaw[], hoy: string): Obligacion[] {
-  return correos.map(c => {
+  const todas = correos.map(c => {
     const texto = `${c.asunto} ${c.cuerpo_texto ?? ''}`
     const { categoria, confianza: confClasif } = clasificar(c.de, c.asunto, c.cuerpo_texto ?? '')
     const periodo = detectarPeriodo(texto)
@@ -223,6 +223,31 @@ export function procesarCorreos(correos: CorreoRaw[], hoy: string): Obligacion[]
       enlace_gmail: `https://mail.google.com/mail/u/0/#inbox/${c.gmail_id}`,
     }
   })
+
+  // Deduplicar: si dos obligaciones del mismo organismo tienen el mismo
+  // concepto base (asunto sin Re:/Fwd:), fusionar preservando datos de pago
+  const dedup = new Map<string, Obligacion>()
+  for (const ob of todas) {
+    const clave = `${ob.organismo.toLowerCase()}::${ob.concepto.toLowerCase()}`
+    const existing = dedup.get(clave)
+    if (!existing) {
+      dedup.set(clave, ob)
+    } else {
+      // Fusionar: preservar el que tiene monto, fecha mas reciente gana el resto
+      const conMonto = ob.importe != null ? ob : existing.importe != null ? existing : ob
+      const masReciente = ob.fecha_correo > existing.fecha_correo ? ob : existing
+      dedup.set(clave, {
+        ...masReciente,
+        importe: conMonto.importe,
+        moneda: conMonto.moneda ?? masReciente.moneda,
+        fecha_vencimiento: conMonto.fecha_vencimiento ?? masReciente.fecha_vencimiento,
+        numero_documento: conMonto.numero_documento ?? masReciente.numero_documento,
+        confianza: Math.max(ob.confianza, existing.confianza),
+        estado_manual: masReciente.estado_manual ?? existing.estado_manual,
+      })
+    }
+  }
+  return [...dedup.values()]
 }
 
 export function estadoDisplay(ob: Obligacion): { label: string; color: string; bg: string } {
