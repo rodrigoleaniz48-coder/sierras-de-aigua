@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { Dialog } from '../components/Dialog'
-import { num } from '../lib/format'
+import { num, ordenarPresentaciones } from '../lib/format'
 import { colorProducto } from '../lib/colores'
 import { ubicacionesVisiblesPorSocio } from '../lib/permisos'
 import { reglaMinimo } from '../lib/minimos'
@@ -868,7 +868,7 @@ function EnvasarDialog({
               <label className="label">Presentación</label>
               <select className="input" value={presentacionId} onChange={(e) => setPresentacionId(e.target.value)} required>
                 <option value="">— Elegir presentación —</option>
-                {presDelTanque.map((p) => (
+                {ordenarPresentaciones(presDelTanque, prodPorId).map((p) => (
                   <option key={p.id} value={p.id}>{p.nombre} ({p.volumen_ml} ml)</option>
                 ))}
               </select>
@@ -1005,7 +1005,7 @@ function AjusteEnvasadoDialog({
           <label className="label">Presentación</label>
           <select className="input" value={presentacionId} onChange={(e) => setPresentacionId(e.target.value)} required>
             <option value="">— Elegir —</option>
-            {presentaciones.map((p) => {
+            {ordenarPresentaciones(presentaciones, prodPorId).map((p) => {
               const prod = prodPorId.get(p.producto_id)
               return (
                 <option key={p.id} value={p.id}>{prod?.nombre} · {p.nombre}</option>
@@ -1531,7 +1531,14 @@ function TrasladarDialog({
     return presentaciones
       .filter((p) => (stockPorPres.get(p.id) ?? 0) > 0)
       .map((p) => ({ pres: p, prod: prodPorId.get(p.producto_id), disp: stockPorPres.get(p.id) ?? 0 }))
-      .sort((a, b) => (a.prod?.nombre + a.pres.nombre).localeCompare(b.prod?.nombre + b.pres.nombre))
+      .sort((a, b) => {
+        const catOrden: Record<string, number> = { aceite: 0, aceituna: 100, miel: 200, vinagre: 300, jabon: 400, servicio: 500 }
+        const ca = catOrden[a.prod?.categoria ?? ''] ?? 999, cb = catOrden[b.prod?.categoria ?? ''] ?? 999
+        if (ca !== cb) return ca - cb
+        const na = a.prod?.nombre ?? '', nb = b.prod?.nombre ?? ''
+        if (na !== nb) return na.localeCompare(nb)
+        return (b.pres.volumen_ml ?? 0) - (a.pres.volumen_ml ?? 0)
+      })
   }, [stock, presentaciones, prodPorId, origen])
 
   function disponibleEnOrigen(presId: number | null): number {

@@ -5,7 +5,7 @@ import { useAuth } from '../lib/auth'
 import { Dialog } from '../components/Dialog'
 import { ClienteDialog, type Cliente, type Socio } from '../components/ClienteDialog'
 import { ClienteCombo } from '../components/ClienteCombo'
-import { money } from '../lib/format'
+import { money, ordenarPresentaciones } from '../lib/format'
 import { CADETE_MVD_WA, normalizarTelWA } from '../lib/config'
 import { guardarFlag, leerFlag } from '../lib/persistencia'
 
@@ -1430,58 +1430,27 @@ async function guardar(e: React.FormEvent) {
                         onChange={(e) => elegirPresentacion(f.it.key, e.target.value ? Number(e.target.value) : null)}
                       >
                         <option value="">— elegir —</option>
-                        {(() => {
-                          const aceites = presentaciones
-                            .filter(p => {
-                              const prod = prodPorId.get(p.producto_id)
-                              return prod?.categoria === 'aceite' && !p.es_pack
-                            })
-                            .sort((a, b) => (b.volumen_ml ?? 0) - (a.volumen_ml ?? 0))
-                          const packs = presentaciones.filter(p => p.es_pack)
-                          const resto = presentaciones
-                            .filter(p => {
-                              const prod = prodPorId.get(p.producto_id)
-                              return prod?.categoria !== 'aceite' && prod?.categoria !== 'envases_vacios' && !p.es_pack
-                            })
-                            .sort((a, b) => {
-                              const na = prodPorId.get(a.producto_id)?.nombre ?? ''
-                              const nb = prodPorId.get(b.producto_id)?.nombre ?? ''
-                              return na.localeCompare(nb) || (b.volumen_ml ?? 0) - (a.volumen_ml ?? 0)
-                            })
-                          const renderOption = (p: Presentacion) => {
-                            const prod = prodPorId.get(p.producto_id)
-                            const esServicio = prod?.categoria === 'servicio'
-                            const stockEnUbic = (p.es_pack || esServicio) ? 0 : stock
-                              .filter((s) => s.presentacion_id === p.id && s.ubicacion_id === Number(ubicacionId))
-                              .reduce((a, b) => a + b.unidades, 0)
-                            const hayStock = p.es_pack || esServicio ? true : stockEnUbic > 0
-                            const sufijo = p.es_pack
-                              ? ' · pack'
-                              : esServicio
-                                ? ' · servicio'
-                                : !hayStock ? ' · SIN STOCK AQUÍ' : ` · ${stockEnUbic} u`
-                            return (
-                              <option key={p.id} value={p.id} disabled={!hayStock}>
-                                {prod?.nombre} · {p.nombre}{sufijo}
-                              </option>
-                            )
-                          }
+                        {ordenarPresentaciones(
+                          presentaciones.filter(p => prodPorId.get(p.producto_id)?.categoria !== 'envases_vacios'),
+                          prodPorId,
+                        ).map((p) => {
+                          const prod = prodPorId.get(p.producto_id)
+                          const esServicio = prod?.categoria === 'servicio'
+                          const stockEnUbic = (p.es_pack || esServicio) ? 0 : stock
+                            .filter((s) => s.presentacion_id === p.id && s.ubicacion_id === Number(ubicacionId))
+                            .reduce((a, b) => a + b.unidades, 0)
+                          const hayStock = p.es_pack || esServicio ? true : stockEnUbic > 0
+                          const sufijo = p.es_pack
+                            ? ' · pack'
+                            : esServicio
+                              ? ' · servicio'
+                              : !hayStock ? ' · SIN STOCK AQUÍ' : ` · ${stockEnUbic} u`
                           return (
-                            <>
-                              <optgroup label="Aceite">
-                                {aceites.map(renderOption)}
-                              </optgroup>
-                              {packs.length > 0 && (
-                                <optgroup label="Packs">
-                                  {packs.map(renderOption)}
-                                </optgroup>
-                              )}
-                              <optgroup label="Otros productos">
-                                {resto.map(renderOption)}
-                              </optgroup>
-                            </>
+                            <option key={p.id} value={p.id} disabled={!hayStock}>
+                              {prod?.nombre} · {p.nombre}{sufijo}
+                            </option>
                           )
-                        })()}
+                        })}
                       </select>
                       {(() => {
                         const prodF = f.p ? prodPorId.get(f.p.producto_id) : undefined

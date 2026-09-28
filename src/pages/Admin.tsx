@@ -105,7 +105,9 @@ export function Admin() {
   }
   useEffect(() => { cargar() }, [])
 
-  const presDe = (idProd: number) => presentaciones.filter((x) => x.producto_id === idProd)
+  const presDe = (idProd: number) => presentaciones
+    .filter((x) => x.producto_id === idProd)
+    .sort((a, b) => (b.volumen_ml ?? 0) - (a.volumen_ml ?? 0))
 
   const distId = useMemo(() => listas.find((l) => l.nombre === 'distribuidor')?.id ?? null, [listas])
   const precioDist = useMemo(() => {
