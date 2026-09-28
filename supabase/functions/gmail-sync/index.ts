@@ -409,7 +409,7 @@ function detectarMonto(texto: string): number | null {
   }
 
   const fallback = [
-    /(?:monto|importe|pagar|abonar|deuda|saldo|cobrar|cuota|prima|aporte)[\s:$U]*(\d[\d.,]*)/gi,
+    /(?:monto|importe|pagar|abonar|deuda|saldo|cobrar|cuota|prima|aporte)\s*(?:de\s+)?[\s:$U]*(\d[\d.,]*)/gi,
     /\$\s*([\d.]+(?:,\d{1,2})?)/g,
     /(?:UYU|U\$S|USD|US\$)\s*([\d.]+(?:,\d{1,2})?)/gi,
     /(\d[\d.]*,\d{2})\s*(?:pesos|UYU|\$)/gi,
@@ -571,7 +571,9 @@ async function listarYProcesar(
     }
   }
 
-  // Deduplicar por thread: quedarse con el mensaje que tenga monto
+  // Deduplicar por thread: quedarse con el mensaje que tenga monto.
+  // Si hay varios mensajes con monto, preferir el de cuerpo mas largo (mas info).
+  // Si un mensaje nuevo no tiene monto pero el anterior si, preservar los datos de pago.
   const byThread = new Map<string, CorreoRow>()
   for (const row of allRows) {
     const existing = byThread.get(row.thread_id)
@@ -579,6 +581,16 @@ async function listarYProcesar(
       byThread.set(row.thread_id, row)
     } else if (row.monto_detectado != null && existing.monto_detectado == null) {
       byThread.set(row.thread_id, row)
+    } else if (row.monto_detectado == null && existing.monto_detectado != null) {
+      // El mensaje mas reciente no tiene monto pero el anterior si:
+      // usar el nuevo como base pero preservar datos de pago del anterior
+      byThread.set(row.thread_id, {
+        ...row,
+        monto_detectado: existing.monto_detectado,
+        moneda_detectada: existing.moneda_detectada,
+        fecha_vencimiento: existing.fecha_vencimiento ?? row.fecha_vencimiento,
+        cuerpo_texto: existing.cuerpo_texto,
+      })
     } else if (
       row.monto_detectado != null &&
       existing.monto_detectado != null &&
@@ -663,9 +675,37 @@ Deno.serve(async (req) => {
     )
 
     if (rows.length > 0) {
+      // Consultar registros existentes para preservar datos de pago
+      const threadIds = rows.map(r => r.thread_id)
+      const { data: existentes } = await admin
+        .from('correos_sincronizados')
+        .select('thread_id, monto_detectado, moneda_detectada, fecha_vencimiento, cuerpo_texto')
+        .eq('cuenta_correo_id', cuenta.id)
+        .in('thread_id', threadIds)
+      const existMap = new Map(
+        (existentes ?? []).map((e: { thread_id: string; monto_detectado: number | null; moneda_detectada: string | null; fecha_vencimiento: string | null; cuerpo_texto: string | null }) =>
+          [e.thread_id, e]),
+      )
+
+      // Si el registro nuevo no tiene monto pero el existente si, preservar datos
+      const rowsMerge = rows.map(r => {
+        const ex = existMap.get(r.thread_id)
+        if (!ex) return r
+        if (r.monto_detectado == null && ex.monto_detectado != null) {
+          return {
+            ...r,
+            monto_detectado: ex.monto_detectado,
+            moneda_detectada: ex.moneda_detectada,
+            fecha_vencimiento: r.fecha_vencimiento ?? ex.fecha_vencimiento,
+            cuerpo_texto: ex.cuerpo_texto ?? r.cuerpo_texto,
+          }
+        }
+        return r
+      })
+
       const { error: insertErr } = await admin
         .from('correos_sincronizados')
-        .upsert(rows, { onConflict: 'thread_id,cuenta_correo_id', ignoreDuplicates: false })
+        .upsert(rowsMerge, { onConflict: 'thread_id,cuenta_correo_id', ignoreDuplicates: false })
 
       if (insertErr) {
         return json({ error: `Error guardando correos: ${insertErr.message}` }, 500)
