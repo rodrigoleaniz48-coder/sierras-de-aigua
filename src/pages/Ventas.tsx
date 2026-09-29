@@ -106,6 +106,34 @@ export function Ventas() {
   const clientePorId = useMemo(() => new Map(clientes.map((c) => [c.id, c])), [clientes])
   const socioPorId = useMemo(() => new Map(socios.map((s) => [s.id, s])), [socios])
 
+  // Clientes ordenados por actividad: primero quienes compraron mas recientemente,
+  // luego el resto alfabetico. Asi el selector muestra arriba a quien realmente compra.
+  const clientesOrdenados = useMemo(() => {
+    const ultimaVenta = new Map<number, string>()
+    for (const v of ventas) {
+      if (v.cliente_id == null || v.estado === 'cancelado') continue
+      const prev = ultimaVenta.get(v.cliente_id)
+      if (!prev || v.fecha > prev) ultimaVenta.set(v.cliente_id, v.fecha)
+    }
+    return [...clientes].sort((a, b) => {
+      const fa = ultimaVenta.get(a.id), fb = ultimaVenta.get(b.id)
+      if (fa && fb) return fa < fb ? 1 : -1
+      if (fa) return -1
+      if (fb) return 1
+      return a.nombre.localeCompare(b.nombre)
+    })
+  }, [clientes, ventas])
+
+  // Cobros pendientes: entregadas sin cobrar (no promos ni potenciales), ordenadas por antiguedad.
+  const cobrosPendientes = useMemo(() => {
+    const hoy = new Date()
+    return ventas
+      .filter((v) => v.estado !== 'cancelado' && !v.promocion_comercial && !v.a_confirmar && v.entregado && !v.cobrado)
+      .filter((v) => filtroSocio === 'todos' || v.socio_id === filtroSocio)
+      .map((v) => ({ v, dias: Math.floor((hoy.getTime() - new Date(v.fecha + 'T00:00:00').getTime()) / 86400000) }))
+      .sort((a, b) => b.dias - a.dias)
+  }, [ventas, filtroSocio])
+
   const filtradas = useMemo(() => {
     return ventas.filter((v) => {
       if (filtroSocio !== 'todos' && v.socio_id !== filtroSocio) return false
@@ -187,6 +215,17 @@ export function Ventas() {
         </div>
       </div>
 
+      {/* Cobros pendientes: entregado sin cobrar, ordenado por antigüedad */}
+      {cobrosPendientes.length > 0 && (
+        <CobrosPendientes
+          items={cobrosPendientes}
+          clientePorId={clientePorId}
+          socioPorId={socioPorId}
+          perfilNombre={perfil?.nombre}
+          onClic={(v) => setVentaDetalleId(v.id)}
+        />
+      )}
+
       {/* Sección 1: Pendientes de entrega o cobro (siempre visible arriba, sin filtros) */}
       {pendientes.length > 0 && (
         <div className="card p-0 overflow-x-auto border-2 border-amber-300 bg-amber-50/40">
@@ -259,7 +298,7 @@ export function Ventas() {
       <NuevaVentaDialog
         abierto={nueva || ventaEnEdicion !== null}
         socioId={session?.user.id ?? ''}
-        clientes={clientes}
+        clientes={clientesOrdenados}
         socios={socios}
         ubicaciones={ubicaciones}
         ventaAEditar={ventaEnEdicion}
@@ -270,7 +309,7 @@ export function Ventas() {
 
       <VentaDetalleDialog
         venta={ventaDetalleId ? ventas.find((v) => v.id === ventaDetalleId) ?? null : null}
-        clientes={clientes}
+        clientes={clientesOrdenados}
         socios={socios}
         ubicaciones={ubicaciones}
         puedeEditar={puedeEscribir}
@@ -1735,6 +1774,100 @@ function usuarioDatosBancarios(
   return null
 }
 
+// ---------- Cobros pendientes (entregado sin cobrar, por antiguedad) ----------
+
+function CobrosPendientes({ items, clientePorId, socioPorId, perfilNombre, onClic }: {
+  items: { v: Venta; dias: number }[]
+  clientePorId: Map<number, Cliente>
+  socioPorId: Map<string, Socio>
+  perfilNombre: string | null | undefined
+  onClic: (v: Venta) => void
+}) {
+  const totalUYU = items.reduce((s, { v }) => s + (v.moneda === 'USD' ? 0 : Number(v.total ?? 0)), 0)
+  const totalUSD = items.reduce((s, { v }) => {
+    if (v.moneda !== 'USD') return s
+    const cot = v.cotizacion && Number(v.cotizacion) > 0 ? Number(v.cotizacion) : 1
+    return s + Number(v.total ?? 0) / cot
+  }, 0)
+
+  function recordar(v: Venta, e: React.MouseEvent) {
+    e.stopPropagation()
+    const cli = v.cliente_id ? clientePorId.get(v.cliente_id) : null
+    const wa = normalizarTelWA(cli?.whatsapp ?? cli?.telefono ?? null)
+    const esUSD = v.moneda === 'USD' && v.cotizacion && Number(v.cotizacion) > 0
+    const mnd: 'UYU' | 'USD' = esUSD ? 'USD' : 'UYU'
+    const monto = esUSD ? Number(v.total) / Number(v.cotizacion) : Number(v.total)
+    const socioNombre = socioPorId.get(v.socio_id)?.nombre ?? perfilNombre
+    const partes: string[] = []
+    partes.push(`Hola ${cli?.nombre?.split(' ')[0] ?? ''}!`.trim())
+    partes.push('Te escribo de Sierras de Aiguá 🫒')
+    partes.push('')
+    partes.push(`Quedó pendiente el pago del pedido *#${v.id}* del ${v.fecha} por *${money(monto, mnd)}*.`)
+    partes.push('Cuando puedas, te agradezco 🙏')
+    const banco = usuarioDatosBancarios(socioNombre, !!v.con_factura, mnd, v.cuenta_id)
+    if (banco) { partes.push(''); partes.push(...banco) }
+    const texto = encodeURIComponent(partes.join('\n'))
+    const url = wa ? `https://wa.me/${wa}?text=${texto}` : `https://wa.me/?text=${texto}`
+    window.open(url, '_blank')
+  }
+
+  const chipDias = (d: number) =>
+    d >= 30 ? 'bg-red-100 text-red-800'
+    : d >= 15 ? 'bg-orange-100 text-orange-800'
+    : 'bg-amber-100 text-amber-800'
+
+  return (
+    <div className="card p-0 overflow-hidden border-2 border-red-200 bg-red-50/30">
+      <div className="px-4 pt-3 pb-2 flex items-center justify-between gap-2 flex-wrap">
+        <span className="text-xs uppercase tracking-wide text-red-800 font-semibold">
+          💰 Cobros pendientes <span className="text-red-600">({items.length})</span>
+        </span>
+        <span className="text-sm font-semibold text-red-900 tabular-nums">
+          {totalUYU > 0 && money(totalUYU, 'UYU')}
+          {totalUYU > 0 && totalUSD > 0 && ' + '}
+          {totalUSD > 0 && money(totalUSD, 'USD')}
+        </span>
+      </div>
+      <div className="divide-y divide-red-100">
+        {items.map(({ v, dias }) => {
+          const cli = v.cliente_id ? clientePorId.get(v.cliente_id) : null
+          const esUSD = v.moneda === 'USD' && v.cotizacion && Number(v.cotizacion) > 0
+          const mnd: 'UYU' | 'USD' = esUSD ? 'USD' : 'UYU'
+          const monto = esUSD ? Number(v.total) / Number(v.cotizacion) : Number(v.total)
+          return (
+            <div
+              key={v.id}
+              className="flex items-center gap-3 px-4 py-2.5 hover:bg-red-50 cursor-pointer"
+              onClick={() => onClic(v)}
+            >
+              <span className={`text-[11px] font-bold tabular-nums rounded-full px-2 py-0.5 shrink-0 ${chipDias(dias)}`}>
+                {dias}d
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-medium text-oliva-900 truncate">
+                  {cli?.nombre ?? <span className="italic text-oliva-500">sin cliente</span>}
+                </div>
+                <div className="text-[11px] text-oliva-500">
+                  #{v.id} · {v.fecha} · {socioPorId.get(v.socio_id)?.nombre ?? ''}
+                </div>
+              </div>
+              <span className="text-sm font-semibold text-oliva-900 tabular-nums shrink-0">{money(monto, mnd)}</span>
+              <button
+                type="button"
+                className="shrink-0 text-xs rounded-lg bg-green-600 hover:bg-green-700 text-white px-2.5 py-1.5 font-medium"
+                title="Enviar recordatorio de cobro por WhatsApp"
+                onClick={(e) => recordar(v, e)}
+              >
+                Recordar
+              </button>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function VentaDetalleDialog({
   venta, clientes, socios, ubicaciones, puedeEditar, onEditarItems, onCerrar, onCambio, onAnulada,
 }: {
@@ -2027,10 +2160,12 @@ function VentaDetalleDialog({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="label">Cliente</label>
-            <select className="input" value={clienteId} onChange={(e) => setClienteId(e.target.value)} disabled={!puedeEditar || anulada}>
-              <option value="">— sin cliente —</option>
-              {clientes.map((c) => <option key={c.id} value={c.id}>{c.nombre} ({c.tipo})</option>)}
-            </select>
+            <ClienteCombo
+              clientes={clientes}
+              clienteId={clienteId}
+              onCambiar={setClienteId}
+              disabled={!puedeEditar || anulada}
+            />
           </div>
           <div>
             <label className="label">Canal</label>
