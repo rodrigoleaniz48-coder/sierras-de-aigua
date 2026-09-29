@@ -2201,6 +2201,8 @@ function VentaDetalleDialog({
         nota: `Devolucion por anulacion venta #${venta!.id}`,
       })
     }
+    // 2c) Borrar gastos auto-generados por esta venta (adelanto por cobro efectivo, gasto de promo)
+    await supabase.from('gastos').delete().ilike('descripcion', `Venta #${venta!.id} %`)
     // 3) Marcar venta cancelado
     const { error: e2 } = await supabase.from('ventas').update({ estado: 'cancelado' }).eq('id', venta!.id)
     setGuardando(false)
