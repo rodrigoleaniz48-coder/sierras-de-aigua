@@ -1,29 +1,36 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Dialog } from './Dialog'
 import { normalizarTelWA } from '../lib/config'
+import { useAuth } from '../lib/auth'
 import type { Cliente } from './ClienteDialog'
 
 interface Plantilla { id: string; nombre: string; texto: string }
 
 // Plantillas iniciales precargadas. Se guardan en localStorage la primera vez y desde ahi
-// el usuario puede editar, agregar o borrar. Usar {nombre} para insertar el nombre del cliente.
+// el usuario puede editar, agregar o borrar.
+// {nombre} = nombre del cliente. {socio} = nombre del socio que envia (firma).
 const PLANTILLAS_DEFAULT: Plantilla[] = [
   {
     id: 'cosecha-2026',
     nombre: 'Nueva cosecha 2026',
-    texto: 'Hola {nombre}! Cómo andás? Te cuento que ya está la nueva cosecha 2026 — salió muy buena. ¿Te queda aceite? Cualquier cosa avisame.\nUn abrazo, Rodrigo · Sierras de Aiguá 🫒',
+    texto: 'Hola {nombre}! Cómo andás? Te cuento que ya está la nueva cosecha 2026 — salió muy buena. ¿Te queda aceite? Cualquier cosa avisame.\nUn abrazo, {socio} · Sierras de Aiguá 🫒',
   },
   {
     id: 'reactivacion',
     nombre: 'Reactivación suave',
-    texto: 'Hola {nombre}! Cómo andás? Hace un tiempo que no te vemos por acá. ¿Te queda aceite o te mando? Cualquier cosa avisame.\nUn abrazo, *Rodrigo · Sierras de Aiguá* 🫒',
+    texto: 'Hola {nombre}! Cómo andás? Hace un tiempo que no te vemos por acá. ¿Te queda aceite o te mando? Cualquier cosa avisame.\nUn abrazo, *{socio} · Sierras de Aiguá* 🫒',
   },
   {
     id: 'novedad',
     nombre: 'Novedad genérica',
-    texto: 'Hola {nombre}! Espero que estés bien. Te escribo desde *Sierras de Aiguá* para contarte una novedad. Avisame si te interesa y te paso más info.\nAbrazo, *Rodrigo* 🫒',
+    texto: 'Hola {nombre}! Espero que estés bien. Te escribo desde *Sierras de Aiguá* para contarte una novedad. Avisame si te interesa y te paso más info.\nAbrazo, *{socio}* 🫒',
   },
 ]
+
+// Migra plantillas viejas que tenian el nombre fijo "Rodrigo" en la firma a {socio}.
+function migrarFirma(texto: string): string {
+  return texto.split('Rodrigo').join('{socio}')
+}
 
 const LS_KEY_PLANTILLAS = 'wa:plantillas'
 const LS_KEY_ENVIADOS = 'wa:enviados'
@@ -36,7 +43,7 @@ function leerPlantillas(): Plantilla[] {
     if (!raw) return PLANTILLAS_DEFAULT
     const arr = JSON.parse(raw) as Plantilla[]
     if (!Array.isArray(arr) || arr.length === 0) return PLANTILLAS_DEFAULT
-    return arr
+    return arr.map((p) => ({ ...p, texto: migrarFirma(p.texto) }))
   } catch { return PLANTILLAS_DEFAULT }
 }
 
@@ -63,9 +70,9 @@ function marcarEnviado(id: number) {
   } catch { /* nada */ }
 }
 
-function renderMensaje(texto: string, nombre: string): string {
+function renderMensaje(texto: string, nombre: string, socio: string): string {
   const primerNombre = (nombre ?? '').split(' ')[0] || nombre
-  return texto.split('{nombre}').join(primerNombre)
+  return texto.split('{nombre}').join(primerNombre).split('{socio}').join(socio)
 }
 
 export function EnviarWhatsAppDialog({
@@ -75,6 +82,8 @@ export function EnviarWhatsAppDialog({
   clientes: Cliente[]
   onCerrar: () => void
 }) {
+  const { perfil } = useAuth()
+  const socioNombre = (perfil?.nombre ?? '').split(' ')[0] || 'Sierras de Aiguá'
   const [plantillas, setPlantillas] = useState<Plantilla[]>(PLANTILLAS_DEFAULT)
   const [plantillaId, setPlantillaId] = useState<string>('cosecha-2026')
   const [texto, setTexto] = useState<string>('')
@@ -91,7 +100,7 @@ export function EnviarWhatsAppDialog({
     const ultTexto = (() => { try { return localStorage.getItem(LS_KEY_ULTIMO_TEXTO) } catch { return null } })()
     const pid = (ultId && ps.some((p) => p.id === ultId)) ? ultId : (ps[0]?.id ?? 'cosecha-2026')
     setPlantillaId(pid)
-    setTexto(ultTexto ?? ps.find((p) => p.id === pid)?.texto ?? '')
+    setTexto(migrarFirma(ultTexto ?? ps.find((p) => p.id === pid)?.texto ?? ''))
     setEnviados(leerEnviadosHoy())
     setEditandoPlantillas(false)
     setFiltro('pendientes')
@@ -142,11 +151,11 @@ export function EnviarWhatsAppDialog({
   const filas = useMemo(() => {
     return clientes.map((c) => {
       const tel = normalizarTelWA(c.whatsapp ?? c.telefono ?? null)
-      const mensaje = renderMensaje(texto, c.nombre)
+      const mensaje = renderMensaje(texto, c.nombre, socioNombre)
       const url = tel ? `https://wa.me/${tel}?text=${encodeURIComponent(mensaje)}` : null
       return { c, tel, url, ya: enviados.has(c.id) }
     })
-  }, [clientes, texto, enviados])
+  }, [clientes, texto, enviados, socioNombre])
 
   const filasVisibles = useMemo(() => {
     if (filtro === 'sin-tel') return filas.filter((f) => !f.tel)
@@ -166,7 +175,7 @@ export function EnviarWhatsAppDialog({
     setEnviados((prev) => new Set(prev).add(id))
   }
 
-  const preview = filas[0] ? renderMensaje(texto, filas[0].c.nombre) : renderMensaje(texto, 'Nombre')
+  const preview = filas[0] ? renderMensaje(texto, filas[0].c.nombre, socioNombre) : renderMensaje(texto, 'Nombre', socioNombre)
   // Siguiente pendiente (con teléfono, no enviado hoy) para el flujo secuencial "abro → envio → vuelvo → siguiente"
   const siguientePend = filas.find((f) => f.url && !f.ya) ?? null
 
@@ -231,7 +240,7 @@ export function EnviarWhatsAppDialog({
         {/* Editor del mensaje + preview */}
         <div>
           <div className="flex items-center justify-between mb-1">
-            <label className="label !mb-0">Mensaje <span className="text-oliva-500 font-normal text-xs">— usá <code>{'{nombre}'}</code> para insertar el nombre</span></label>
+            <label className="label !mb-0">Mensaje <span className="text-oliva-500 font-normal text-xs">— <code>{'{nombre}'}</code> = cliente · <code>{'{socio}'}</code> = tu nombre (firma)</span></label>
             <button type="button" className="text-xs text-oliva-700 underline hover:text-oliva-900" onClick={guardarCambiosPlantillaActual}>
               💾 Guardar cambios en la plantilla
             </button>
