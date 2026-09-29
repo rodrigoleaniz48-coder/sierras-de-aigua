@@ -215,6 +215,24 @@ create trigger trg_descontar_stock_venta
   after insert on public.items_venta
   for each row execute function public.fn_descontar_stock_venta();
 
+-- Al cancelar una venta, borrar los gastos auto-generados por ella
+-- (adelanto por cobro en efectivo, gasto de promocion comercial).
+-- Ligados por la descripcion 'Venta #<id> ...'. Es red de seguridad
+-- server-side: el cliente tambien los borra, pero esto lo garantiza.
+create or replace function public.fn_borrar_gastos_venta_cancelada()
+returns trigger language plpgsql security definer as $$
+begin
+  if new.estado = 'cancelado' and old.estado is distinct from 'cancelado' then
+    delete from public.gastos where descripcion ilike 'Venta #' || new.id || ' %';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists trg_borrar_gastos_venta_cancelada on public.ventas;
+create trigger trg_borrar_gastos_venta_cancelada
+  after update of estado on public.ventas
+  for each row execute function public.fn_borrar_gastos_venta_cancelada();
+
 -- =========================================================================
 -- 7. Gastos
 -- =========================================================================
