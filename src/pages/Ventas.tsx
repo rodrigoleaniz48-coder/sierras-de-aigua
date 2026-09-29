@@ -76,6 +76,7 @@ export function Ventas() {
   const [ventaEnEdicion, setVentaEnEdicion] = useState<Venta | null>(null)
   const [cadeteAbierto, setCadeteAbierto] = useState(false)
   const [resumenCadeteAbierto, setResumenCadeteAbierto] = useState(false)
+  const [adelantoInfo, setAdelantoInfo] = useState<AdelantoInfo | null>(null)
 
   const [filtroSocio, setFiltroSocio] = useState<string>(() => session?.user.id ?? 'todos')
   const [soloEnvio, setSoloEnvio] = useState(false)
@@ -307,6 +308,7 @@ export function Ventas() {
         onClienteCreado={(c) => setClientes((prev) => [...prev, c].sort((a, b) => a.nombre.localeCompare(b.nombre)))}
         onCerrar={() => { setNueva(false); setVentaEnEdicion(null) }}
         onOk={() => { setNueva(false); setVentaEnEdicion(null); cargar() }}
+        onCobroEfectivo={setAdelantoInfo}
       />
 
       <VentaDetalleDialog
@@ -319,6 +321,7 @@ export function Ventas() {
         onCerrar={() => setVentaDetalleId(null)}
         onCambio={() => { cargar() /* NO cierra: el detalle sigue abierto y se actualiza con la nueva venta */ }}
         onAnulada={() => { setVentaDetalleId(null); cargar() /* Anular sí cierra */ }}
+        onCobroEfectivo={setAdelantoInfo}
       />
 
       <ListaCadeteDialog
@@ -333,6 +336,15 @@ export function Ventas() {
         abierto={resumenCadeteAbierto}
         onCerrar={() => setResumenCadeteAbierto(false)}
       />
+
+      {adelantoInfo && (
+        <AdelantoCobroDialog
+          info={adelantoInfo}
+          socios={socios}
+          onCerrar={() => setAdelantoInfo(null)}
+          onOk={() => { setAdelantoInfo(null); cargar() }}
+        />
+      )}
     </div>
   )
 }
@@ -602,7 +614,7 @@ function guardarBorrador(b: Omit<Borrador, 'ts'>) {
 function limpiarBorrador() { try { localStorage.removeItem(BORRADOR_KEY) } catch { /* nada */ } }
 
 function NuevaVentaDialog({
-  abierto, socioId, clientes, socios, ubicaciones, ventaAEditar, onClienteCreado, onCerrar, onOk,
+  abierto, socioId, clientes, socios, ubicaciones, ventaAEditar, onClienteCreado, onCerrar, onOk, onCobroEfectivo,
 }: {
   abierto: boolean
   socioId: string
@@ -614,6 +626,7 @@ function NuevaVentaDialog({
   onClienteCreado: (cliente: Cliente) => void
   onCerrar: () => void
   onOk: () => void
+  onCobroEfectivo: (info: AdelantoInfo) => void
 }) {
   const { perfil } = useAuth()
   const [nuevoClienteAbierto, setNuevoClienteAbierto] = useState(false)
@@ -1202,6 +1215,27 @@ async function guardar(e: React.FormEvent) {
       }
     }
 
+    // Cobro en efectivo → adelanto del socio (idempotente). Si no es efectivo/cobrado, limpia uno previo.
+    let adelantoPend: AdelantoInfo | null = null
+    if (cobrado && formaPago === 'efectivo' && !aConfirmar && !promocion) {
+      if (!(await existeAdelantoDeVenta(ventaId))) {
+        const esUSD = monedaVenta === 'USD' && cotVenta > 0
+        const monto = esUSD ? totalUyu / cotVenta : totalUyu
+        const origen = await origenEfectivoDeVenta(ventaId)
+        const cli = clienteId ? clientes.find((c) => c.id === Number(clienteId)) : null
+        adelantoPend = {
+          ventaId, socioId,
+          monto: Math.round(monto * 100) / 100,
+          moneda: esUSD ? 'USD' : 'UYU',
+          clienteNombre: cli?.nombre ?? null,
+          fecha: fechaCobroSync ?? fecha,
+          origen,
+        }
+      }
+    } else {
+      await borrarAdelantoDeVenta(ventaId)
+    }
+
     setGuardando(false)
     guardandoRef.current = false
     if (!ventaAEditar) {
@@ -1216,6 +1250,7 @@ async function guardar(e: React.FormEvent) {
       setMonedaVenta('UYU'); setCotizacionUsd('')
     }
     onOk()
+    if (adelantoPend) onCobroEfectivo(adelantoPend)
   }
 
   // Si el usuario cambia la ubicación a Maldonado, forzar envio=false (Maldonado no usa cadete)
@@ -1793,8 +1828,136 @@ function usuarioDatosBancarios(
   return null
 }
 
+// ---------- Adelanto por cobro en efectivo ----------
+
+type OrigenEfectivo = 'aceite_efectivo' | 'otras_ventas_efectivo'
+
+interface AdelantoInfo {
+  ventaId: number
+  socioId: string
+  monto: number
+  moneda: 'UYU' | 'USD'
+  clienteNombre: string | null
+  fecha: string
+  origen: OrigenEfectivo
+}
+
+// Determina si el efectivo cobrado proviene mayormente de aceite o de otras ventas.
+async function origenEfectivoDeVenta(ventaId: number): Promise<OrigenEfectivo> {
+  const { data: its } = await supabase.from('items_venta').select('presentacion_id,unidades,precio_unitario').eq('venta_id', ventaId)
+  if (!its || its.length === 0) return 'otras_ventas_efectivo'
+  const presIds = [...new Set(its.map((i) => i.presentacion_id))]
+  const { data: pres } = await supabase.from('presentaciones').select('id,producto_id').in('id', presIds)
+  const prodIds = [...new Set((pres ?? []).map((p) => p.producto_id))]
+  const { data: prods } = await supabase.from('productos').select('id,categoria').in('id', prodIds)
+  const catPorProd = new Map((prods ?? []).map((p) => [p.id, p.categoria as string]))
+  const catPorPres = new Map((pres ?? []).map((p) => [p.id, catPorProd.get(p.producto_id) ?? '']))
+  let aceite = 0, otros = 0
+  for (const i of its) {
+    const val = Number(i.unidades) * Number(i.precio_unitario ?? 0)
+    if (catPorPres.get(i.presentacion_id) === 'aceite') aceite += val
+    else otros += val
+  }
+  return aceite >= otros ? 'aceite_efectivo' : 'otras_ventas_efectivo'
+}
+
+// Borra el adelanto asociado a una venta (si existe), p.ej. al desmarcar el cobro.
+async function borrarAdelantoDeVenta(ventaId: number) {
+  await supabase.from('gastos').delete().eq('es_adelanto', true).ilike('descripcion', `Venta #${ventaId} %`)
+}
+
+async function existeAdelantoDeVenta(ventaId: number): Promise<boolean> {
+  const { data } = await supabase.from('gastos').select('id').eq('es_adelanto', true).ilike('descripcion', `Venta #${ventaId} %`).limit(1)
+  return (data?.length ?? 0) > 0
+}
+
+function AdelantoCobroDialog({ info, socios, onCerrar, onOk }: {
+  info: AdelantoInfo
+  socios: Socio[]
+  onCerrar: () => void
+  onOk: () => void
+}) {
+  const [socioId, setSocioId] = useState(info.socioId)
+  const [monto, setMonto] = useState(String(info.monto))
+  const [origen, setOrigen] = useState<OrigenEfectivo>(info.origen)
+  const [notas, setNotas] = useState('')
+  const [guardando, setGuardando] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function confirmar() {
+    const val = Number(monto)
+    if (!(val > 0)) { setError('El monto debe ser mayor a cero.'); return }
+    setGuardando(true); setError(null)
+    // Idempotente: reemplaza cualquier adelanto previo de esta venta
+    await borrarAdelantoDeVenta(info.ventaId)
+    const desc = `Venta #${info.ventaId}${info.clienteNombre ? ` · ${info.clienteNombre}` : ''} (cobro efectivo)${notas.trim() ? ` — ${notas.trim()}` : ''}`
+    const { error: e } = await supabase.from('gastos').insert({
+      fecha: info.fecha,
+      socio_id: socioId,
+      categoria: origen,
+      monto: Math.round(val * 100) / 100,
+      moneda: info.moneda,
+      descripcion: desc,
+      metodo_pago: 'efectivo',
+      reembolsable: false,
+      reembolsado: false,
+      es_adelanto: true,
+      actualizado_en: new Date().toISOString(),
+    })
+    setGuardando(false)
+    if (e) { setError(e.message); return }
+    onOk()
+  }
+
+  return (
+    <Dialog abierto={true} onCerrar={onCerrar} titulo="Cobro en efectivo → adelanto" ancho="sm">
+      <div className="space-y-4">
+        <p className="text-sm text-oliva-700">
+          Esta venta se cobró en <b>efectivo</b>. El monto queda como <b>adelanto</b> del socio que lo recibió
+          (se descuenta en la liquidación). Revisá y confirmá.
+        </p>
+
+        <div>
+          <label className="label">Socio que recibió el efectivo</label>
+          <select className="input" value={socioId} onChange={(e) => setSocioId(e.target.value)}>
+            {socios.map((s) => <option key={s.id} value={s.id}>{s.nombre}</option>)}
+          </select>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="label">Monto ({info.moneda})</label>
+            <input className="input tabular-nums" type="number" min="0" step="0.01" value={monto} onChange={(e) => setMonto(e.target.value)} />
+          </div>
+          <div>
+            <label className="label">Origen del efectivo</label>
+            <select className="input" value={origen} onChange={(e) => setOrigen(e.target.value as OrigenEfectivo)}>
+              <option value="aceite_efectivo">Aceite efectivo</option>
+              <option value="otras_ventas_efectivo">Otras ventas en efectivo</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label className="label">Notas (opcional)</label>
+          <input className="input" value={notas} onChange={(e) => setNotas(e.target.value)} placeholder="ej: cobrado en mano" />
+        </div>
+
+        {error && <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-2">{error}</div>}
+
+        <div className="flex justify-end gap-2">
+          <button type="button" className="btn-secondary" onClick={onCerrar} disabled={guardando}>No cargar</button>
+          <button type="button" className="btn-primary" onClick={confirmar} disabled={guardando}>
+            {guardando ? 'Guardando…' : 'Confirmar adelanto'}
+          </button>
+        </div>
+      </div>
+    </Dialog>
+  )
+}
+
 function VentaDetalleDialog({
-  venta, clientes, socios, ubicaciones, puedeEditar, onEditarItems, onCerrar, onCambio, onAnulada,
+  venta, clientes, socios, ubicaciones, puedeEditar, onEditarItems, onCerrar, onCambio, onAnulada, onCobroEfectivo,
 }: {
   venta: Venta | null
   clientes: Cliente[]
@@ -1805,6 +1968,7 @@ function VentaDetalleDialog({
   onCerrar: () => void
   onCambio: () => void
   onAnulada: () => void
+  onCobroEfectivo: (info: AdelantoInfo) => void
 }) {
   const { perfil } = useAuth()
   const [items, setItems] = useState<ItemVenta[]>([])
@@ -1929,13 +2093,36 @@ function VentaDetalleDialog({
     setGuardando(true); setError(null)
     const estadoSync = nuevo ? 'cobrado' : (entregado ? 'entregado' : 'pendiente')
     // fecha_cobro: setear hoy al marcar cobrado (si aun no tenia); null al desmarcar.
+    const fechaCobro = new Date().toISOString().slice(0, 10)
     const patch: Record<string, unknown> = { cobrado: nuevo, estado: estadoSync }
-    if (nuevo && !venta!.fecha_cobro) patch.fecha_cobro = new Date().toISOString().slice(0, 10)
+    if (nuevo && !venta!.fecha_cobro) patch.fecha_cobro = fechaCobro
     if (!nuevo) patch.fecha_cobro = null
     const { error } = await supabase.from('ventas').update(patch).eq('id', venta!.id)
-    setGuardando(false)
-    if (error) { setError(error.message); return }
+    if (error) { setGuardando(false); setError(error.message); return }
     setCobrado(nuevo)
+
+    // Cobro en efectivo → cargar como adelanto del socio. Al descobrar, se borra.
+    const esEfectivo = formaPago === 'efectivo'
+    if (!nuevo) {
+      await borrarAdelantoDeVenta(venta!.id)
+    } else if (esEfectivo && !venta!.promocion_comercial && !venta!.a_confirmar) {
+      if (!(await existeAdelantoDeVenta(venta!.id))) {
+        const esUSD = venta!.moneda === 'USD' && venta!.cotizacion && Number(venta!.cotizacion) > 0
+        const monto = esUSD ? Number(venta!.total) / Number(venta!.cotizacion) : Number(venta!.total)
+        const origen = await origenEfectivoDeVenta(venta!.id)
+        const cli = venta!.cliente_id ? clientes.find((c) => c.id === venta!.cliente_id) : null
+        onCobroEfectivo({
+          ventaId: venta!.id,
+          socioId: venta!.socio_id,
+          monto: Math.round(monto * 100) / 100,
+          moneda: esUSD ? 'USD' : 'UYU',
+          clienteNombre: cli?.nombre ?? null,
+          fecha: venta!.fecha_cobro ?? fechaCobro,
+          origen,
+        })
+      }
+    }
+    setGuardando(false)
     onCambio()
   }
 
