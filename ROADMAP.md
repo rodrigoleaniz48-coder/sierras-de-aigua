@@ -31,7 +31,7 @@ Pendientes por área. El contexto de proyecto (stack, roles, comandos, convencio
 - [ ] Descarga del mensaje del cadete como archivo `.txt` (además de copiar / WhatsApp).
 - [ ] Editar ítems de una venta sin tener que anular.
 - [x] Buscador de cliente con autocompletado (nueva venta y detalle). Ordena por actividad reciente: los que compran aparecen primero.
-- [x] Cobros pendientes por antigüedad: sección en Ventas con días sin cobrar + recordatorio WhatsApp (excluye promos/potenciales).
+- [x] Cobros pendientes: en la lista de Pendientes, cada venta sin cobrar muestra días de atraso + botón "Recordar" (WhatsApp con datos bancarios).
 - [ ] Reportes: ventas por período / socio / producto / cliente; ranking; comparativo mensual.
 - [ ] Ficha de cliente ampliada con historial de compras + próximos seguimientos.
 - [ ] Recibo imprimible / compartible por WhatsApp con el detalle de la venta al cliente.

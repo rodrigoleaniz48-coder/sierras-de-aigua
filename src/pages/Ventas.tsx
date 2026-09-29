@@ -124,15 +124,27 @@ export function Ventas() {
     })
   }, [clientes, ventas])
 
-  // Cobros pendientes: entregadas sin cobrar (no promos ni potenciales), ordenadas por antiguedad.
-  const cobrosPendientes = useMemo(() => {
-    const hoy = new Date()
-    return ventas
-      .filter((v) => v.estado !== 'cancelado' && !v.promocion_comercial && !v.a_confirmar && v.entregado && !v.cobrado)
-      .filter((v) => filtroSocio === 'todos' || v.socio_id === filtroSocio)
-      .map((v) => ({ v, dias: Math.floor((hoy.getTime() - new Date(v.fecha + 'T00:00:00').getTime()) / 86400000) }))
-      .sort((a, b) => b.dias - a.dias)
-  }, [ventas, filtroSocio])
+  // Recordatorio de cobro por WhatsApp (para ventas entregadas sin cobrar)
+  function recordarCobro(v: Venta, e: React.MouseEvent) {
+    e.stopPropagation()
+    const cli = v.cliente_id ? clientePorId.get(v.cliente_id) : null
+    const wa = normalizarTelWA(cli?.whatsapp ?? cli?.telefono ?? null)
+    const esUSD = v.moneda === 'USD' && v.cotizacion && Number(v.cotizacion) > 0
+    const mnd: 'UYU' | 'USD' = esUSD ? 'USD' : 'UYU'
+    const monto = esUSD ? Number(v.total) / Number(v.cotizacion) : Number(v.total)
+    const socioNombre = socioPorId.get(v.socio_id)?.nombre ?? perfil?.nombre
+    const partes: string[] = []
+    partes.push(`Hola ${cli?.nombre?.split(' ')[0] ?? ''}!`.trim())
+    partes.push('Te escribo de Sierras de Aiguá 🫒')
+    partes.push('')
+    partes.push(`Quedó pendiente el pago del pedido *#${v.id}* del ${v.fecha} por *${money(monto, mnd)}*.`)
+    partes.push('Cuando puedas, te agradezco 🙏')
+    const banco = usuarioDatosBancarios(socioNombre, !!v.con_factura, mnd, v.cuenta_id)
+    if (banco) { partes.push(''); partes.push(...banco) }
+    const texto = encodeURIComponent(partes.join('\n'))
+    const url = wa ? `https://wa.me/${wa}?text=${texto}` : `https://wa.me/?text=${texto}`
+    window.open(url, '_blank')
+  }
 
   const filtradas = useMemo(() => {
     return ventas.filter((v) => {
@@ -215,17 +227,6 @@ export function Ventas() {
         </div>
       </div>
 
-      {/* Cobros pendientes: entregado sin cobrar, ordenado por antigüedad */}
-      {cobrosPendientes.length > 0 && (
-        <CobrosPendientes
-          items={cobrosPendientes}
-          clientePorId={clientePorId}
-          socioPorId={socioPorId}
-          perfilNombre={perfil?.nombre}
-          onClic={(v) => setVentaDetalleId(v.id)}
-        />
-      )}
-
       {/* Sección 1: Pendientes de entrega o cobro (siempre visible arriba, sin filtros) */}
       {pendientes.length > 0 && (
         <div className="card p-0 overflow-x-auto border-2 border-amber-300 bg-amber-50/40">
@@ -239,6 +240,7 @@ export function Ventas() {
             ubicaciones={ubicaciones}
             resumenPorId={resumenPendientes}
             onClic={(v) => setVentaDetalleId(v.id)}
+            onRecordarCobro={recordarCobro}
           />
         </div>
       )}
@@ -428,7 +430,7 @@ function SelectorPeriodo({ desde, hasta, onCambio }: {
 
 // ---------- Tabla de ventas (reutilizada en Pendientes y Histórico) ----------
 function TablaVentas({
-  ventas, clientePorId, socioPorId, ubicaciones, onClic, resumenPorId,
+  ventas, clientePorId, socioPorId, ubicaciones, onClic, resumenPorId, onRecordarCobro,
 }: {
   ventas: Venta[]
   clientePorId: Map<number, Cliente>
@@ -436,6 +438,7 @@ function TablaVentas({
   ubicaciones: Ubicacion[]
   onClic: (v: Venta) => void
   resumenPorId?: Map<number, string>
+  onRecordarCobro?: (v: Venta, e: React.MouseEvent) => void
 }) {
   return (
     <table className="w-full text-sm min-w-[860px]">
@@ -497,10 +500,26 @@ function TablaVentas({
                 <td className="py-2 px-4 text-center">
                   {v.promocion_comercial ? (
                     <span className="text-[11px] text-oliva-400">—</span>
+                  ) : v.cobrado ? (
+                    <span className="text-[11px] uppercase tracking-wide rounded-full px-2 py-[1px] bg-aceite-500/20 text-aceite-600">💰 cobrado</span>
                   ) : (
-                    <span className={`text-[11px] uppercase tracking-wide rounded-full px-2 py-[1px] ${v.cobrado ? 'bg-aceite-500/20 text-aceite-600' : 'bg-red-100 text-red-800'}`}>
-                      {v.cobrado ? '💰 cobrado' : '⚠ sin cobrar'}
-                    </span>
+                    <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                      <span className="text-[11px] uppercase tracking-wide rounded-full px-2 py-[1px] bg-red-100 text-red-800">⚠ sin cobrar</span>
+                      {(() => {
+                        const dias = Math.floor((Date.now() - new Date(v.fecha + 'T00:00:00').getTime()) / 86400000)
+                        return dias > 0 ? <span className="text-[10px] text-oliva-500 tabular-nums">{dias}d</span> : null
+                      })()}
+                      {onRecordarCobro && v.entregado && (
+                        <button
+                          type="button"
+                          className="text-[11px] rounded-md bg-green-600 hover:bg-green-700 text-white px-2 py-0.5 font-medium"
+                          title="Enviar recordatorio de cobro por WhatsApp"
+                          onClick={(e) => onRecordarCobro(v, e)}
+                        >
+                          Recordar
+                        </button>
+                      )}
+                    </div>
                   )}
                 </td>
               </>
@@ -1772,100 +1791,6 @@ function usuarioDatosBancarios(
   if (n.includes('gonzalo'))
     return bloque('BROU', 'Caja de ahorro en pesos', '000247689-00002', 'GONZALO LEÁNIZ')
   return null
-}
-
-// ---------- Cobros pendientes (entregado sin cobrar, por antiguedad) ----------
-
-function CobrosPendientes({ items, clientePorId, socioPorId, perfilNombre, onClic }: {
-  items: { v: Venta; dias: number }[]
-  clientePorId: Map<number, Cliente>
-  socioPorId: Map<string, Socio>
-  perfilNombre: string | null | undefined
-  onClic: (v: Venta) => void
-}) {
-  const totalUYU = items.reduce((s, { v }) => s + (v.moneda === 'USD' ? 0 : Number(v.total ?? 0)), 0)
-  const totalUSD = items.reduce((s, { v }) => {
-    if (v.moneda !== 'USD') return s
-    const cot = v.cotizacion && Number(v.cotizacion) > 0 ? Number(v.cotizacion) : 1
-    return s + Number(v.total ?? 0) / cot
-  }, 0)
-
-  function recordar(v: Venta, e: React.MouseEvent) {
-    e.stopPropagation()
-    const cli = v.cliente_id ? clientePorId.get(v.cliente_id) : null
-    const wa = normalizarTelWA(cli?.whatsapp ?? cli?.telefono ?? null)
-    const esUSD = v.moneda === 'USD' && v.cotizacion && Number(v.cotizacion) > 0
-    const mnd: 'UYU' | 'USD' = esUSD ? 'USD' : 'UYU'
-    const monto = esUSD ? Number(v.total) / Number(v.cotizacion) : Number(v.total)
-    const socioNombre = socioPorId.get(v.socio_id)?.nombre ?? perfilNombre
-    const partes: string[] = []
-    partes.push(`Hola ${cli?.nombre?.split(' ')[0] ?? ''}!`.trim())
-    partes.push('Te escribo de Sierras de Aiguá 🫒')
-    partes.push('')
-    partes.push(`Quedó pendiente el pago del pedido *#${v.id}* del ${v.fecha} por *${money(monto, mnd)}*.`)
-    partes.push('Cuando puedas, te agradezco 🙏')
-    const banco = usuarioDatosBancarios(socioNombre, !!v.con_factura, mnd, v.cuenta_id)
-    if (banco) { partes.push(''); partes.push(...banco) }
-    const texto = encodeURIComponent(partes.join('\n'))
-    const url = wa ? `https://wa.me/${wa}?text=${texto}` : `https://wa.me/?text=${texto}`
-    window.open(url, '_blank')
-  }
-
-  const chipDias = (d: number) =>
-    d >= 30 ? 'bg-red-100 text-red-800'
-    : d >= 15 ? 'bg-orange-100 text-orange-800'
-    : 'bg-amber-100 text-amber-800'
-
-  return (
-    <div className="card p-0 overflow-hidden border-2 border-red-200 bg-red-50/30">
-      <div className="px-4 pt-3 pb-2 flex items-center justify-between gap-2 flex-wrap">
-        <span className="text-xs uppercase tracking-wide text-red-800 font-semibold">
-          💰 Cobros pendientes <span className="text-red-600">({items.length})</span>
-        </span>
-        <span className="text-sm font-semibold text-red-900 tabular-nums">
-          {totalUYU > 0 && money(totalUYU, 'UYU')}
-          {totalUYU > 0 && totalUSD > 0 && ' + '}
-          {totalUSD > 0 && money(totalUSD, 'USD')}
-        </span>
-      </div>
-      <div className="divide-y divide-red-100">
-        {items.map(({ v, dias }) => {
-          const cli = v.cliente_id ? clientePorId.get(v.cliente_id) : null
-          const esUSD = v.moneda === 'USD' && v.cotizacion && Number(v.cotizacion) > 0
-          const mnd: 'UYU' | 'USD' = esUSD ? 'USD' : 'UYU'
-          const monto = esUSD ? Number(v.total) / Number(v.cotizacion) : Number(v.total)
-          return (
-            <div
-              key={v.id}
-              className="flex items-center gap-3 px-4 py-2.5 hover:bg-red-50 cursor-pointer"
-              onClick={() => onClic(v)}
-            >
-              <span className={`text-[11px] font-bold tabular-nums rounded-full px-2 py-0.5 shrink-0 ${chipDias(dias)}`}>
-                {dias}d
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-medium text-oliva-900 truncate">
-                  {cli?.nombre ?? <span className="italic text-oliva-500">sin cliente</span>}
-                </div>
-                <div className="text-[11px] text-oliva-500">
-                  #{v.id} · {v.fecha} · {socioPorId.get(v.socio_id)?.nombre ?? ''}
-                </div>
-              </div>
-              <span className="text-sm font-semibold text-oliva-900 tabular-nums shrink-0">{money(monto, mnd)}</span>
-              <button
-                type="button"
-                className="shrink-0 text-xs rounded-lg bg-green-600 hover:bg-green-700 text-white px-2.5 py-1.5 font-medium"
-                title="Enviar recordatorio de cobro por WhatsApp"
-                onClick={(e) => recordar(v, e)}
-              >
-                Recordar
-              </button>
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
 }
 
 function VentaDetalleDialog({
