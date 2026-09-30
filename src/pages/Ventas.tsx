@@ -1418,7 +1418,7 @@ async function guardar(e: React.FormEvent) {
             {!promocion && (
               <label className="flex items-center gap-2 cursor-pointer">
                 <input id="cf" type="checkbox" checked={conFactura} onChange={(e) => setConFactura(e.target.checked)} className="h-4 w-4 accent-oliva-700" />
-                <span className="text-sm text-oliva-800">🧾 Con factura <span className="text-xs text-oliva-600">(agrega 10% IVA)</span></span>
+                <span className="text-sm text-oliva-800">🧾 Con factura <span className="text-xs text-oliva-600">(agrega IVA según producto)</span></span>
               </label>
             )}
             <label className="flex items-center gap-2 cursor-pointer">
@@ -2042,7 +2042,7 @@ function VentaDetalleDialog({
     partes.push(`*Pedido #${venta!.id}* · ${venta!.fecha}`)
     partes.push(items_str)
     if (venta!.envio) partes.push(`🛵 Envío: ${money(conv(venta!.costo_envio), mnd)}`)
-    if (venta!.con_factura) partes.push(`IVA (10%): ${money(conv(venta!.iva), mnd)}`)
+    if (venta!.con_factura) partes.push(`IVA: ${money(conv(venta!.iva), mnd)}`)
     partes.push(`*Total: ${money(conv(venta!.total), mnd)}*`)
     if (venta!.horario_entrega) partes.push(`🕐 ${venta!.horario_entrega}`)
     // Datos bancarios: prioriza la cuenta destino asignada a la venta, si no cae al fallback por socio+factura+moneda
