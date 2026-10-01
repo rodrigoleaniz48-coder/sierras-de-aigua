@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { Dialog } from '../components/Dialog'
@@ -61,6 +61,77 @@ function labelCortoCategoria(nombre: string): string {
     return resto.charAt(0).toUpperCase() + resto.slice(1)
   }
   return nombre
+}
+
+// Desplegable propio de categorías: reemplaza al <select> nativo (que en mobile
+// mezcla optgroups y opciones de forma incontrolable). Grupos como subtítulos
+// claros y opciones con buen área de toque.
+function CategoriaSelect({ value, onChange, categorias, incluirTodas, disabled }: {
+  value: string
+  onChange: (slug: string) => void
+  categorias: Categoria[]
+  incluirTodas?: boolean
+  disabled?: boolean
+}) {
+  const [abierto, setAbierto] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function onDoc(e: MouseEvent) { if (!ref.current?.contains(e.target as Node)) setAbierto(false) }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [])
+
+  const catMap = useMemo(() => new Map(categorias.map(c => [c.slug, c])), [categorias])
+  const sinGrupo = categorias.filter(c => !SLUGS_AGRUPADOS.has(c.slug))
+  const etiquetaSel = value === 'todas' ? 'Todas' : (catMap.get(value)?.nombre ?? value ?? '— elegir —')
+
+  function elegir(slug: string) { onChange(slug); setAbierto(false) }
+
+  const opCls = (activo: boolean) =>
+    `block w-full text-left px-3 py-2.5 text-sm hover:bg-oliva-50 ${activo ? 'bg-oliva-100 text-oliva-900 font-medium' : 'text-oliva-800'}`
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setAbierto(v => !v)}
+        className="input w-full flex items-center justify-between gap-2 text-left disabled:opacity-60"
+      >
+        <span className="truncate">{etiquetaSel}</span>
+        <span className={`text-oliva-400 shrink-0 transition-transform ${abierto ? 'rotate-180' : ''}`}>▾</span>
+      </button>
+      {abierto && !disabled && (
+        <div className="absolute z-30 mt-1 left-0 right-0 max-h-[55vh] overflow-y-auto rounded-lg border border-oliva-200 bg-white shadow-lg">
+          {incluirTodas && (
+            <button type="button" className={opCls(value === 'todas') + ' border-b border-oliva-100'} onMouseDown={(e) => { e.preventDefault(); elegir('todas') }}>
+              Todas
+            </button>
+          )}
+          {GRUPOS_GASTO.map(([label, slugs]) => {
+            const items = slugs.map(s => catMap.get(s)).filter(Boolean) as Categoria[]
+            if (items.length === 0) return null
+            return (
+              <div key={label}>
+                <div className="px-3 pt-2.5 pb-1 text-[10px] font-bold uppercase tracking-widest text-oliva-500 bg-oliva-50 border-y border-oliva-100">{label}</div>
+                {items.map(c => (
+                  <button key={c.slug} type="button" className={opCls(value === c.slug)} onMouseDown={(e) => { e.preventDefault(); elegir(c.slug) }}>
+                    {labelCortoCategoria(c.nombre)}
+                  </button>
+                ))}
+              </div>
+            )
+          })}
+          {sinGrupo.length > 0 && sinGrupo.map(c => (
+            <button key={c.slug} type="button" className={opCls(value === c.slug)} onMouseDown={(e) => { e.preventDefault(); elegir(c.slug) }}>
+              {c.nombre}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 function formatMonto(monto: number, moneda: 'UYU' | 'USD'): string {
@@ -225,21 +296,7 @@ export function Gastos() {
         </div>
         <div>
           <label className="label">Categoría</label>
-          <select className="input" value={filtroCategoria} onChange={(e) => setFiltroCategoria(e.target.value)}>
-            <option value="todas">Todas</option>
-            {(() => {
-              const catMap = new Map(categorias.map(c => [c.slug, c]))
-              return GRUPOS_GASTO.map(([label, slugs]) => {
-                const items = slugs.map(s => catMap.get(s)).filter(Boolean) as typeof categorias
-                if (items.length === 0) return null
-                return (
-                  <optgroup key={label} label={label}>
-                    {items.map(c => <option key={c.slug} value={c.slug}>{labelCortoCategoria(c.nombre)}</option>)}
-                  </optgroup>
-                )
-              })
-            })()}
-          </select>
+          <CategoriaSelect value={filtroCategoria} onChange={setFiltroCategoria} categorias={categorias} incluirTodas />
         </div>
         {veTodos && (
           <div>
@@ -626,35 +683,15 @@ function GastoDialog({
           </div>
           <div>
             <label className="label">{tipo === 'adelanto' ? 'Origen del efectivo' : 'Categoría'}</label>
-            <select className="input" value={categoria} onChange={(e) => setCategoria(e.target.value)} disabled={soloLectura}>
-              {tipo === 'adelanto' ? (
-                <>
-                  <option value="aceite_efectivo">Aceite efectivo</option>
-                  <option value="otras_ventas_efectivo">Otras ventas en efectivo</option>
-                  <option value="otros">Otros</option>
-                </>
-              ) : (
-                <>
-                  {catsDialog.length === 0 && <option value={categoria}>{categoria || '—'}</option>}
-                  {(() => {
-                    const catMap = new Map(catsDialog.map(c => [c.slug, c]))
-                    return GRUPOS_GASTO.map(([label, slugs]) => {
-                      const items = slugs.map(s => catMap.get(s)).filter(Boolean) as Categoria[]
-                      if (items.length === 0) return null
-                      return (
-                        <optgroup key={label} label={label}>
-                          {items.map(c => <option key={c.slug} value={c.slug}>{labelCortoCategoria(c.nombre)}</option>)}
-                        </optgroup>
-                      )
-                    })
-                  })()}
-                  {/* Categorías sin grupo asignado */}
-                  {catsDialog.filter(c => !SLUGS_AGRUPADOS.has(c.slug)).map(c => (
-                    <option key={c.slug} value={c.slug}>{c.nombre}</option>
-                  ))}
-                </>
-              )}
-            </select>
+            {tipo === 'adelanto' ? (
+              <select className="input" value={categoria} onChange={(e) => setCategoria(e.target.value)} disabled={soloLectura}>
+                <option value="aceite_efectivo">Aceite efectivo</option>
+                <option value="otras_ventas_efectivo">Otras ventas en efectivo</option>
+                <option value="otros">Otros</option>
+              </select>
+            ) : (
+              <CategoriaSelect value={categoria} onChange={setCategoria} categorias={catsDialog} disabled={soloLectura} />
+            )}
           </div>
         </div>
         <div className="grid grid-cols-3 gap-3">
