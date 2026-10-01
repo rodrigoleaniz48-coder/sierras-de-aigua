@@ -34,6 +34,35 @@ interface Categoria { id: number; slug: string; nombre: string; activo: boolean;
 
 const METODOS = ['efectivo', 'transferencia', 'tarjeta', 'debito_automatico'] as const
 
+// Agrupación de categorías de gasto para los selectores (optgroups).
+const GRUPOS_GASTO: [string, string[]][] = [
+  ['Olivos', ['olivos_poda', 'olivos_cultivos']],
+  ['Almazara', ['olivos_procesamiento', 'almazara_-_productos_jabon_miel_etc', 'almazara_-_gastos_y_mo_habilitacion_arre']],
+  ['Ovinos', ['ovinos', 'ovinos_-_general_mo_sanidad_etc', 'ovinos_-_compra_animales']],
+  ['Campo', ['forestacion']],
+  ['Inversiones', ['olivos_inversion', 'inversion_-_almazara', 'inersion_-_casas', 'inversion_-_mejoras_fijas_alambrados_etc', 'inversion_-_maquinaria']],
+  ['Operativo', ['vehiculos', 'maquinaria', 'herramientas_menores', 'administracion', 'impuestos_aportes', 'reformas_obra', 'capacitaciones']],
+  ['Comercial', ['promociones_comerciales']],
+  ['Otros', ['varios']],
+]
+const SLUGS_AGRUPADOS = new Set(GRUPOS_GASTO.flatMap(([, slugs]) => slugs))
+
+// Etiqueta corta para el <option>: quita el prefijo redundante del grupo
+// (Olivos/Almazara/Ovinos) y abrevia "Inversión" a "Inv.", para que en el
+// select nativo de mobile las opciones sean cortas y no se mezclen con el
+// subtítulo del grupo.
+function labelCortoCategoria(nombre: string): string {
+  const i = nombre.indexOf(' - ')
+  if (i === -1) return nombre
+  const prefijo = nombre.slice(0, i)
+  const resto = nombre.slice(i + 3)
+  if (prefijo === 'Inversión') return 'Inv. ' + resto
+  if (prefijo === 'Olivos' || prefijo === 'Almazara' || prefijo === 'Ovinos') {
+    return resto.charAt(0).toUpperCase() + resto.slice(1)
+  }
+  return nombre
+}
+
 function formatMonto(monto: number, moneda: 'UYU' | 'USD'): string {
   if (moneda === 'USD') return 'U$S ' + Number(monto).toLocaleString('es-UY', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
   return money(monto)
@@ -199,23 +228,13 @@ export function Gastos() {
           <select className="input" value={filtroCategoria} onChange={(e) => setFiltroCategoria(e.target.value)}>
             <option value="todas">Todas</option>
             {(() => {
-              const grupos: [string, string[]][] = [
-                ['Olivos', ['olivos_poda', 'olivos_cultivos']],
-                ['Almazara', ['olivos_procesamiento', 'almazara_-_productos_jabon_miel_etc', 'almazara_-_gastos_y_mo_habilitacion_arre']],
-                ['Ovinos', ['ovinos', 'ovinos_-_general_mo_sanidad_etc', 'ovinos_-_compra_animales']],
-                ['Campo', ['forestacion']],
-                ['Inversiones', ['olivos_inversion', 'inversion_-_almazara', 'inersion_-_casas', 'inversion_-_mejoras_fijas_alambrados_etc', 'inversion_-_maquinaria']],
-                ['Operativo', ['vehiculos', 'maquinaria', 'herramientas_menores', 'administracion', 'impuestos_aportes', 'reformas_obra', 'capacitaciones']],
-                ['Comercial', ['promociones_comerciales']],
-                ['Otros', ['varios']],
-              ]
               const catMap = new Map(categorias.map(c => [c.slug, c]))
-              return grupos.map(([label, slugs]) => {
+              return GRUPOS_GASTO.map(([label, slugs]) => {
                 const items = slugs.map(s => catMap.get(s)).filter(Boolean) as typeof categorias
                 if (items.length === 0) return null
                 return (
                   <optgroup key={label} label={label}>
-                    {items.map(c => <option key={c.slug} value={c.slug}>{c.nombre}</option>)}
+                    {items.map(c => <option key={c.slug} value={c.slug}>{labelCortoCategoria(c.nombre)}</option>)}
                   </optgroup>
                 )
               })
@@ -618,29 +637,19 @@ function GastoDialog({
                 <>
                   {catsDialog.length === 0 && <option value={categoria}>{categoria || '—'}</option>}
                   {(() => {
-                    const grupos: [string, string[]][] = [
-                      ['Olivos', ['olivos_poda', 'olivos_cultivos']],
-                      ['Almazara', ['olivos_procesamiento', 'almazara_-_productos_jabon_miel_etc', 'almazara_-_gastos_y_mo_habilitacion_arre']],
-                      ['Ovinos', ['ovinos', 'ovinos_-_general_mo_sanidad_etc', 'ovinos_-_compra_animales']],
-                      ['Campo', ['forestacion']],
-                      ['Inversiones', ['olivos_inversion', 'inversion_-_almazara', 'inersion_-_casas', 'inversion_-_mejoras_fijas_alambrados_etc', 'inversion_-_maquinaria']],
-                      ['Operativo', ['vehiculos', 'maquinaria', 'herramientas_menores', 'administracion', 'impuestos_aportes', 'reformas_obra', 'capacitaciones']],
-                      ['Comercial', ['promociones_comerciales']],
-                      ['Otros', ['varios']],
-                    ]
                     const catMap = new Map(catsDialog.map(c => [c.slug, c]))
-                    return grupos.map(([label, slugs]) => {
+                    return GRUPOS_GASTO.map(([label, slugs]) => {
                       const items = slugs.map(s => catMap.get(s)).filter(Boolean) as Categoria[]
                       if (items.length === 0) return null
                       return (
                         <optgroup key={label} label={label}>
-                          {items.map(c => <option key={c.slug} value={c.slug}>{c.nombre}</option>)}
+                          {items.map(c => <option key={c.slug} value={c.slug}>{labelCortoCategoria(c.nombre)}</option>)}
                         </optgroup>
                       )
                     })
                   })()}
                   {/* Categorías sin grupo asignado */}
-                  {catsDialog.filter(c => !['olivos_poda','olivos_cultivos','olivos_procesamiento','almazara_-_productos_jabon_miel_etc','almazara_-_gastos_y_mo_habilitacion_arre','ovinos','ovinos_-_general_mo_sanidad_etc','ovinos_-_compra_animales','forestacion','olivos_inversion','inversion_-_almazara','inersion_-_casas','inversion_-_mejoras_fijas_alambrados_etc','inversion_-_maquinaria','vehiculos','maquinaria','herramientas_menores','administracion','impuestos_aportes','reformas_obra','capacitaciones','promociones_comerciales','varios'].includes(c.slug)).map(c => (
+                  {catsDialog.filter(c => !SLUGS_AGRUPADOS.has(c.slug)).map(c => (
                     <option key={c.slug} value={c.slug}>{c.nombre}</option>
                   ))}
                 </>
