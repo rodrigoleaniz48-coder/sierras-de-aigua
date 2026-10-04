@@ -4,6 +4,7 @@ import { useAuth } from '../lib/auth'
 import { Dialog } from '../components/Dialog'
 import { EditorCategoriasDialog } from '../components/EditorCategoriasDialog'
 import { money } from '../lib/format'
+import { fetchCotizacionBCU } from '../lib/bcu'
 
 function esAdminGastos(nombre: string | null | undefined): boolean {
   const n = (nombre ?? '').toLowerCase()
@@ -152,6 +153,11 @@ export function Gastos() {
   const setNuevo = (v: boolean) => { setNuevoRaw(v); guardarFlag('dialog:nuevo-gasto', v) }
   const [editando, setEditando] = useState<Gasto | null>(null)
   const [editorCat, setEditorCat] = useState(false)
+  const [cotBcu, setCotBcu] = useState<number | null>(null)
+  const [cotBcuFecha, setCotBcuFecha] = useState<string | null>(null)
+  useEffect(() => {
+    fetchCotizacionBCU().then((r) => { if (r) { setCotBcu(r.cotizacion); setCotBcuFecha(r.fecha) } })
+  }, [])
 
   // Filtros
   const hoy = new Date()
@@ -330,7 +336,7 @@ export function Gastos() {
           <div className="text-xs uppercase tracking-widest text-oliva-700 font-bold mb-2">
             🧾 Cuenta con la empresa · {c.nombre}{esYo && ' (vos)'}
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-sm">
             <div>
               <div className="text-[11px] uppercase tracking-wide text-oliva-600">A favor {yoOSocio} (reembolsables)</div>
               <div className="tabular-nums font-semibold text-green-700 mt-0.5">
@@ -354,6 +360,23 @@ export function Gastos() {
                 {c.netoUSD !== 0 && <div className={c.netoUSD >= 0 ? 'text-green-800' : 'text-red-800'}>{c.netoUSD >= 0 ? '+' : '−'} U$S {Number(Math.abs(c.netoUSD)).toLocaleString('es-UY')}</div>}
                 {c.netoUYU === 0 && c.netoUSD === 0 && <div className="text-oliva-500 text-base">Cero (todo saldado)</div>}
               </div>
+            </div>
+            <div className="sm:border-l border-oliva-200 sm:pl-4">
+              <div className="text-[11px] uppercase tracking-wide text-oliva-600 font-bold">Total en pesos (BCU)</div>
+              <div className="tabular-nums font-bold text-lg mt-0.5">
+                {(c.netoUSD === 0 || cotBcu) ? (() => {
+                  const totalFinal = Math.round(c.netoUYU + (cotBcu ? c.netoUSD * cotBcu : 0))
+                  if (totalFinal === 0) return <div className="text-oliva-500 text-base">Cero (todo saldado)</div>
+                  return <div className={totalFinal >= 0 ? 'text-green-800' : 'text-red-800'}>{totalFinal >= 0 ? '+' : '−'} {money(Math.abs(totalFinal))}</div>
+                })() : (
+                  <div className="text-oliva-400 text-base">esperando cotización…</div>
+                )}
+              </div>
+              {c.netoUSD !== 0 && cotBcu && (
+                <div className="text-[10px] text-oliva-500 mt-0.5">
+                  incluye U$S {Number(Math.abs(c.netoUSD)).toLocaleString('es-UY')} × {cotBcu}{cotBcuFecha ? ` (${cotBcuFecha})` : ''}
+                </div>
+              )}
             </div>
           </div>
 
