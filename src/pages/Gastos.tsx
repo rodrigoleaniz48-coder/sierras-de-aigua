@@ -4,7 +4,7 @@ import { useAuth } from '../lib/auth'
 import { Dialog } from '../components/Dialog'
 import { EditorCategoriasDialog } from '../components/EditorCategoriasDialog'
 import { money } from '../lib/format'
-import { fetchCotizacionBCU } from '../lib/bcu'
+import { fetchCotizacionBilleteMes } from '../lib/bcu'
 
 function esAdminGastos(nombre: string | null | undefined): boolean {
   const n = (nombre ?? '').toLowerCase()
@@ -153,26 +153,6 @@ export function Gastos() {
   const setNuevo = (v: boolean) => { setNuevoRaw(v); guardarFlag('dialog:nuevo-gasto', v) }
   const [editando, setEditando] = useState<Gasto | null>(null)
   const [editorCat, setEditorCat] = useState(false)
-  // Cotización USD para el "Total en pesos": autocompleta con el BCU cuando responde,
-  // recuerda la última usada y permite ingresarla a mano si el BCU no está disponible.
-  const [cotBcuFecha, setCotBcuFecha] = useState<string | null>(null)
-  const [cotInput, setCotInput] = useState<string>('')
-  const cotTocada = useRef(false)
-  useEffect(() => {
-    try { const v = localStorage.getItem('gastos:cot-usd'); if (v) setCotInput(v) } catch { /* nada */ }
-    fetchCotizacionBCU().then((r) => {
-      if (r && !cotTocada.current) {
-        setCotInput(String(r.cotizacion)); setCotBcuFecha(r.fecha)
-        try { localStorage.setItem('gastos:cot-usd', String(r.cotizacion)) } catch { /* nada */ }
-      }
-    })
-  }, [])
-  function cambiarCot(v: string) {
-    cotTocada.current = true
-    setCotInput(v); setCotBcuFecha(null)
-    try { localStorage.setItem('gastos:cot-usd', v) } catch { /* nada */ }
-  }
-  const cotUsada = Number(cotInput) > 0 ? Number(cotInput) : null
 
   // Filtros
   const hoy = new Date()
@@ -214,6 +194,26 @@ export function Gastos() {
   const ultimoDia = new Date(Number(anio), Number(mes), 0).getDate()
   const hasta = `${anio}-${mes}-${String(ultimoDia).padStart(2, '0')}`
 
+  // Cotización del "Total en pesos": promedio del dólar billete del BCU para el mes seleccionado.
+  // Automática y fija (no editable). Se cachea por mes en el dispositivo.
+  const [cotMes, setCotMes] = useState<number | null>(null)
+  const [cotMesDias, setCotMesDias] = useState<number>(0)
+  useEffect(() => {
+    const clave = `${anio}-${mes}`
+    try {
+      const c = localStorage.getItem('bcu:billete-mes:' + clave)
+      if (c) { const o = JSON.parse(c); setCotMes(Number(o.cotizacion) || null); setCotMesDias(Number(o.dias) || 0) }
+      else { setCotMes(null); setCotMesDias(0) }
+    } catch { setCotMes(null); setCotMesDias(0) }
+    fetchCotizacionBilleteMes(clave).then((r) => {
+      if (r && r.cotizacion > 0) {
+        setCotMes(r.cotizacion); setCotMesDias(r.dias)
+        try { localStorage.setItem('bcu:billete-mes:' + clave, JSON.stringify({ cotizacion: r.cotizacion, dias: r.dias })) } catch { /* nada */ }
+      }
+    })
+  }, [anio, mes])
+  const cotUsada = cotMes
+
   const filtrados = useMemo(() => {
     return gastos.filter((g) => {
       if (g.fecha < desde || g.fecha > hasta) return false
@@ -249,15 +249,18 @@ export function Gastos() {
     const reembUSD = gs.filter((g) => g.moneda === 'USD' && g.reembolsable && !g.reembolsado).reduce((s, g) => s + Number(g.monto), 0)
     const adelUYU  = gs.filter((g) => g.moneda === 'UYU' && g.es_adelanto).reduce((s, g) => s + Number(g.monto), 0)
     const adelUSD  = gs.filter((g) => g.moneda === 'USD' && g.es_adelanto).reduce((s, g) => s + Number(g.monto), 0)
+    // Ya reembolsado este mes (reembolsables marcados como pagados)
+    const pagUYU = gs.filter((g) => g.moneda === 'UYU' && g.reembolsable && g.reembolsado).reduce((s, g) => s + Number(g.monto), 0)
+    const pagUSD = gs.filter((g) => g.moneda === 'USD' && g.reembolsable && g.reembolsado).reduce((s, g) => s + Number(g.monto), 0)
     const pendIds = gs.filter((g) => g.reembolsable && !g.reembolsado).map((g) => g.id)
     return {
       sid,
       nombre: socioPorId.get(sid)?.nombre ?? 'vos',
-      reembUYU, reembUSD, adelUYU, adelUSD,
+      reembUYU, reembUSD, adelUYU, adelUSD, pagUYU, pagUSD,
       netoUYU: reembUYU - adelUYU,
       netoUSD: reembUSD - adelUSD,
       pendIds,
-      tieneAlgo: reembUYU + reembUSD + adelUYU + adelUSD > 0,
+      tieneAlgo: reembUYU + reembUSD + adelUYU + adelUSD + pagUYU + pagUSD > 0,
     }
   }
   const cuentasSocio = sociosCuenta.map(cuentaDe).filter((c) => c.tieneAlgo)
@@ -338,18 +341,18 @@ export function Gastos() {
         <Kpi titulo="A reembolsar U$S" valor={'U$S ' + Number(reembPendUSD).toLocaleString('es-UY')} tono="aceite" />
       </div>
 
-      {/* Cotización USD usada para el "Total en pesos" (autocompleta del BCU, editable) */}
+      {/* Cotización USD del "Total en pesos": promedio del dólar billete del mes (BCU), fija */}
       {cuentasSocio.length > 0 && (
         <div className="flex items-center gap-2 flex-wrap text-sm">
-          <span className="text-[11px] uppercase tracking-wide text-oliva-600 font-semibold">Cotización USD para el total</span>
-          <input
-            type="number" min="0" step="0.01"
-            className="input w-24 tabular-nums"
-            value={cotInput}
-            onChange={(e) => cambiarCot(e.target.value)}
-            placeholder="BCU"
-          />
-          <span className="text-[11px] text-oliva-500">{cotBcuFecha ? `BCU del ${cotBcuFecha}` : 'editable — BCU no disponible ahora'}</span>
+          <span className="text-[11px] uppercase tracking-wide text-oliva-600 font-semibold">Cotización USD · billete promedio del mes (BCU)</span>
+          {cotMes ? (
+            <>
+              <span className="tabular-nums font-semibold text-oliva-900">$ {cotMes}</span>
+              {cotMesDias > 0 && <span className="text-[11px] text-oliva-500">({cotMesDias} días promediados)</span>}
+            </>
+          ) : (
+            <span className="text-[11px] text-amber-700">esperando cotización del BCU…</span>
+          )}
         </div>
       )}
 
@@ -399,16 +402,32 @@ export function Gastos() {
                   if (totalFinal === 0) return <div className="text-oliva-500 text-base">Cero (todo saldado)</div>
                   return <div className={totalFinal >= 0 ? 'text-green-800' : 'text-red-800'}>{totalFinal >= 0 ? '+' : '−'} {money(Math.abs(totalFinal))}</div>
                 })() : (
-                  <div className="text-oliva-400 text-base">ingresá la cotización ↓</div>
+                  <div className="text-oliva-400 text-base">esperando cotización…</div>
                 )}
               </div>
               {c.netoUSD !== 0 && cotUsada && (
                 <div className="text-[10px] text-oliva-500 mt-0.5">
-                  incluye U$S {Number(Math.abs(c.netoUSD)).toLocaleString('es-UY')} × {cotUsada}{cotBcuFecha ? ` · BCU ${cotBcuFecha}` : ''}
+                  incluye U$S {Number(Math.abs(c.netoUSD)).toLocaleString('es-UY')} × {cotUsada}
                 </div>
               )}
             </div>
           </div>
+
+          {(c.pagUYU > 0 || c.pagUSD > 0) && (
+            <div className="mt-3 pt-3 border-t border-oliva-200 flex items-baseline justify-between gap-2 flex-wrap">
+              <span className="text-[11px] uppercase tracking-wide text-oliva-600 font-semibold">✓ Reembolsado este mes</span>
+              <span className="tabular-nums font-semibold text-oliva-900">
+                {(() => {
+                  const totalPag = Math.round(c.pagUYU + (cotUsada ? c.pagUSD * cotUsada : 0))
+                  const txt = money(totalPag)
+                  const detalle = c.pagUSD > 0
+                    ? ` (${money(c.pagUYU)}${c.pagUYU > 0 ? ' + ' : ''}U$S ${Number(c.pagUSD).toLocaleString('es-UY')}${cotUsada ? ` × ${cotUsada}` : ''})`
+                    : ''
+                  return <>{txt}<span className="text-[11px] font-normal text-oliva-500">{detalle}</span></>
+                })()}
+              </span>
+            </div>
+          )}
 
           {pendCant > 0 && (
             <div className="mt-3 pt-3 border-t border-oliva-200">
