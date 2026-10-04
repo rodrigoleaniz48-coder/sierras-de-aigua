@@ -153,11 +153,26 @@ export function Gastos() {
   const setNuevo = (v: boolean) => { setNuevoRaw(v); guardarFlag('dialog:nuevo-gasto', v) }
   const [editando, setEditando] = useState<Gasto | null>(null)
   const [editorCat, setEditorCat] = useState(false)
-  const [cotBcu, setCotBcu] = useState<number | null>(null)
+  // Cotización USD para el "Total en pesos": autocompleta con el BCU cuando responde,
+  // recuerda la última usada y permite ingresarla a mano si el BCU no está disponible.
   const [cotBcuFecha, setCotBcuFecha] = useState<string | null>(null)
+  const [cotInput, setCotInput] = useState<string>('')
+  const cotTocada = useRef(false)
   useEffect(() => {
-    fetchCotizacionBCU().then((r) => { if (r) { setCotBcu(r.cotizacion); setCotBcuFecha(r.fecha) } })
+    try { const v = localStorage.getItem('gastos:cot-usd'); if (v) setCotInput(v) } catch { /* nada */ }
+    fetchCotizacionBCU().then((r) => {
+      if (r && !cotTocada.current) {
+        setCotInput(String(r.cotizacion)); setCotBcuFecha(r.fecha)
+        try { localStorage.setItem('gastos:cot-usd', String(r.cotizacion)) } catch { /* nada */ }
+      }
+    })
   }, [])
+  function cambiarCot(v: string) {
+    cotTocada.current = true
+    setCotInput(v); setCotBcuFecha(null)
+    try { localStorage.setItem('gastos:cot-usd', v) } catch { /* nada */ }
+  }
+  const cotUsada = Number(cotInput) > 0 ? Number(cotInput) : null
 
   // Filtros
   const hoy = new Date()
@@ -323,6 +338,21 @@ export function Gastos() {
         <Kpi titulo="A reembolsar U$S" valor={'U$S ' + Number(reembPendUSD).toLocaleString('es-UY')} tono="aceite" />
       </div>
 
+      {/* Cotización USD usada para el "Total en pesos" (autocompleta del BCU, editable) */}
+      {cuentasSocio.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap text-sm">
+          <span className="text-[11px] uppercase tracking-wide text-oliva-600 font-semibold">Cotización USD para el total</span>
+          <input
+            type="number" min="0" step="0.01"
+            className="input w-24 tabular-nums"
+            value={cotInput}
+            onChange={(e) => cambiarCot(e.target.value)}
+            placeholder="BCU"
+          />
+          <span className="text-[11px] text-oliva-500">{cotBcuFecha ? `BCU del ${cotBcuFecha}` : 'editable — BCU no disponible ahora'}</span>
+        </div>
+      )}
+
       {/* Cuenta por socio (reembolsables vs adelantos) — una card por socio con movimientos */}
       {cuentasSocio.map((c) => {
         const esYo = c.sid === soyYo
@@ -364,17 +394,17 @@ export function Gastos() {
             <div className="sm:border-l border-oliva-200 sm:pl-4">
               <div className="text-[11px] uppercase tracking-wide text-oliva-600 font-bold">Total en pesos (BCU)</div>
               <div className="tabular-nums font-bold text-lg mt-0.5">
-                {(c.netoUSD === 0 || cotBcu) ? (() => {
-                  const totalFinal = Math.round(c.netoUYU + (cotBcu ? c.netoUSD * cotBcu : 0))
+                {(c.netoUSD === 0 || cotUsada) ? (() => {
+                  const totalFinal = Math.round(c.netoUYU + (cotUsada ? c.netoUSD * cotUsada : 0))
                   if (totalFinal === 0) return <div className="text-oliva-500 text-base">Cero (todo saldado)</div>
                   return <div className={totalFinal >= 0 ? 'text-green-800' : 'text-red-800'}>{totalFinal >= 0 ? '+' : '−'} {money(Math.abs(totalFinal))}</div>
                 })() : (
-                  <div className="text-oliva-400 text-base">esperando cotización…</div>
+                  <div className="text-oliva-400 text-base">ingresá la cotización ↓</div>
                 )}
               </div>
-              {c.netoUSD !== 0 && cotBcu && (
+              {c.netoUSD !== 0 && cotUsada && (
                 <div className="text-[10px] text-oliva-500 mt-0.5">
-                  incluye U$S {Number(Math.abs(c.netoUSD)).toLocaleString('es-UY')} × {cotBcu}{cotBcuFecha ? ` (${cotBcuFecha})` : ''}
+                  incluye U$S {Number(Math.abs(c.netoUSD)).toLocaleString('es-UY')} × {cotUsada}{cotBcuFecha ? ` · BCU ${cotBcuFecha}` : ''}
                 </div>
               )}
             </div>
