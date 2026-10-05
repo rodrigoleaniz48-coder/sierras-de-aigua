@@ -388,6 +388,11 @@ export function Gastos() {
             </div>
             <div className="sm:border-l border-oliva-200 sm:pl-4">
               <div className="text-[11px] uppercase tracking-wide text-oliva-600 font-bold">Ajuste a {esYo ? 'cobrar del' : 'sumar al'} sueldo</div>
+              {(c.reembUYU > 0 || c.reembUSD > 0) ? (
+                <div className="text-[10px] text-amber-700">incluye reembolsos pendientes</div>
+              ) : (c.pagUYU > 0 || c.pagUSD > 0) ? (
+                <div className="text-[10px] text-oliva-500">reembolsos ya pagados · solo adelantos</div>
+              ) : null}
               <div className="tabular-nums font-bold text-oliva-900 text-lg mt-0.5">
                 {c.netoUYU !== 0 && <div className={c.netoUYU >= 0 ? 'text-green-800' : 'text-red-800'}>{c.netoUYU >= 0 ? '+' : '−'} {money(Math.abs(c.netoUYU))}</div>}
                 {c.netoUSD !== 0 && <div className={c.netoUSD >= 0 ? 'text-green-800' : 'text-red-800'}>{c.netoUSD >= 0 ? '+' : '−'} U$S {Number(Math.abs(c.netoUSD)).toLocaleString('es-UY')}</div>}
