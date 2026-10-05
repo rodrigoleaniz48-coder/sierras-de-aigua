@@ -233,6 +233,31 @@ create trigger trg_borrar_gastos_venta_cancelada
   after update of estado on public.ventas
   for each row execute function public.fn_borrar_gastos_venta_cancelada();
 
+-- fecha_entrega: dia en que la venta se marco entregada. El plazo de cobro
+-- (contador de dias + recordatorio en Pendientes) se cuenta desde aca, no
+-- desde la fecha de carga. Se mantiene sincronizada por trigger.
+alter table public.ventas add column if not exists fecha_entrega date;
+
+create or replace function public.fn_sync_fecha_entrega() returns trigger
+language plpgsql as $$
+begin
+  if not new.entregado then
+    new.fecha_entrega := null;                 -- se desmarca entrega -> sin fecha
+  elsif new.fecha_entrega is null then
+    if tg_op = 'INSERT' then
+      new.fecha_entrega := new.fecha;          -- nace ya entregada: la entrega es la fecha de la venta
+    else
+      new.fecha_entrega := current_date;       -- se marca entregada despues: el dia real del cambio
+    end if;
+  end if;                                       -- ya entregada con fecha: se respeta
+  return new;
+end $$;
+
+drop trigger if exists trg_sync_fecha_entrega on public.ventas;
+create trigger trg_sync_fecha_entrega
+  before insert or update on public.ventas
+  for each row execute function public.fn_sync_fecha_entrega();
+
 -- =========================================================================
 -- 7. Gastos
 -- =========================================================================

@@ -28,6 +28,7 @@ interface Venta {
   envio: boolean; costo_envio: number; horario_entrega: string | null
   ubicacion_id: number
   entregado: boolean; cobrado: boolean
+  fecha_entrega?: string | null
   notas: string | null; creado_en: string
   moneda?: 'UYU' | 'USD' | null
   cotizacion?: number | null
@@ -518,7 +519,8 @@ function TablaVentas({
                     <div className="flex items-center justify-center gap-1.5 flex-wrap">
                       <span className="text-[11px] uppercase tracking-wide rounded-full px-2 py-[1px] bg-red-100 text-red-800">⚠ sin cobrar</span>
                       {(() => {
-                        const dias = Math.floor((Date.now() - new Date(v.fecha + 'T00:00:00').getTime()) / 86400000)
+                        if (!v.fecha_entrega) return null
+                        const dias = Math.floor((Date.now() - new Date(v.fecha_entrega + 'T00:00:00').getTime()) / 86400000)
                         return dias > 0 ? <span className="text-[10px] text-oliva-500 tabular-nums">{dias}d</span> : null
                       })()}
                       {onRecordarCobro && v.entregado && (
