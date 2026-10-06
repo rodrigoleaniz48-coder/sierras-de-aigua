@@ -76,7 +76,7 @@ export function BottomNav({ onAbrirMas }: { onAbrirMas: () => void }) {
                         className={`h-14 w-14 rounded-full flex items-center justify-center shadow-lg border-4 border-white transition ${
                           isActive
                             ? 'bg-aceite-500 text-white ring-2 ring-aceite-500/40'
-                            : 'bg-oliva-800 text-white hover:bg-oliva-900'
+                            : 'bg-oliva-800 text-oliva-50 hover:bg-oliva-900'
                         }`}
                       >
                         {IconVentasBig}

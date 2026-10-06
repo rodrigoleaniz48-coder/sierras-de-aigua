@@ -266,9 +266,9 @@ export function EnviarWhatsAppDialog({
           {totalPendientes > 0 && <span className="rounded-full bg-amber-100 text-amber-900 px-2 py-1"><b>{totalPendientes}</b> pendientes</span>}
           {totalSinTel > 0 && <span className="rounded-full bg-red-100 text-red-800 px-2 py-1"><b>{totalSinTel}</b> sin teléfono</span>}
           <div className="ml-auto flex gap-1">
-            <button type="button" className={`text-xs px-2 py-1 rounded ${filtro === 'todos' ? 'bg-oliva-800 text-white' : 'bg-white border border-oliva-200 text-oliva-700'}`} onClick={() => setFiltro('todos')}>Todos</button>
-            <button type="button" className={`text-xs px-2 py-1 rounded ${filtro === 'pendientes' ? 'bg-oliva-800 text-white' : 'bg-white border border-oliva-200 text-oliva-700'}`} onClick={() => setFiltro('pendientes')}>Pendientes</button>
-            <button type="button" className={`text-xs px-2 py-1 rounded ${filtro === 'sin-tel' ? 'bg-oliva-800 text-white' : 'bg-white border border-oliva-200 text-oliva-700'}`} onClick={() => setFiltro('sin-tel')}>Sin tel.</button>
+            <button type="button" className={`text-xs px-2 py-1 rounded ${filtro === 'todos' ? 'bg-oliva-800 text-oliva-50' : 'bg-white border border-oliva-200 text-oliva-700'}`} onClick={() => setFiltro('todos')}>Todos</button>
+            <button type="button" className={`text-xs px-2 py-1 rounded ${filtro === 'pendientes' ? 'bg-oliva-800 text-oliva-50' : 'bg-white border border-oliva-200 text-oliva-700'}`} onClick={() => setFiltro('pendientes')}>Pendientes</button>
+            <button type="button" className={`text-xs px-2 py-1 rounded ${filtro === 'sin-tel' ? 'bg-oliva-800 text-oliva-50' : 'bg-white border border-oliva-200 text-oliva-700'}`} onClick={() => setFiltro('sin-tel')}>Sin tel.</button>
           </div>
         </div>
 

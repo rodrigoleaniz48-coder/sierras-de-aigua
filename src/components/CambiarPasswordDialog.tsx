@@ -87,7 +87,7 @@ export function CambiarPasswordDialog({ abierto, onClose }: Props) {
           </button>
           {!ok && (
             <button
-              className="rounded-md bg-oliva-700 px-3 py-2 text-sm text-white hover:bg-oliva-800 disabled:opacity-50"
+              className="rounded-md bg-oliva-700 px-3 py-2 text-sm text-oliva-50 hover:bg-oliva-800 disabled:opacity-50"
               onClick={guardar}
               disabled={guardando}
             >

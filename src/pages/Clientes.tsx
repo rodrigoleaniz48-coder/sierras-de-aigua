@@ -339,7 +339,7 @@ export function Clientes() {
           style={{ bottom: 'calc(76px + env(safe-area-inset-bottom, 0px))' }}
         >
           <div className="mx-auto max-w-2xl px-3">
-            <div className="pointer-events-auto rounded-2xl bg-oliva-900 text-white shadow-2xl flex items-center gap-2 px-3 py-2">
+            <div className="pointer-events-auto rounded-2xl bg-oliva-900 text-oliva-50 shadow-2xl flex items-center gap-2 px-3 py-2">
               <span className="text-sm">
                 <b>{seleccion.size}</b> seleccionado{seleccion.size === 1 ? '' : 's'}
               </span>

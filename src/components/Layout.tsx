@@ -2,6 +2,7 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useAuth } from '../lib/auth'
 import type { Rol } from '../lib/types'
+import { useTema, type Tema } from '../lib/tema'
 import { rangoSemanal, reporteVisto } from '../lib/reporte'
 import { CambiarPasswordDialog } from './CambiarPasswordDialog'
 import { BottomNav } from './BottomNav'
@@ -50,8 +51,44 @@ function Ico({ children }: { children: ReactNode }) {
   )
 }
 
+const TEMA_ICONS: Record<Tema, ReactNode> = {
+  claro: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></>,
+  sistema: <><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /></>,
+  oscuro: <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />,
+}
+
+function TemaToggle({ tema, setTema }: { tema: Tema; setTema: (t: Tema) => void }) {
+  const opts: { v: Tema; label: string }[] = [
+    { v: 'claro', label: 'Claro' },
+    { v: 'sistema', label: 'Auto' },
+    { v: 'oscuro', label: 'Oscuro' },
+  ]
+  return (
+    <div className="flex items-center gap-1 rounded-lg bg-oliva-100 p-1">
+      {opts.map((o) => (
+        <button
+          key={o.v}
+          type="button"
+          onClick={() => setTema(o.v)}
+          aria-pressed={tema === o.v}
+          title={`Tema ${o.label.toLowerCase()}`}
+          className={`flex-1 flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-semibold transition ${
+            tema === o.v ? 'bg-oliva-800 text-oliva-50 shadow-sm' : 'text-oliva-600 hover:bg-oliva-200/70'
+          }`}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            {TEMA_ICONS[o.v]}
+          </svg>
+          <span>{o.label}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
 export function Layout() {
   const { perfil, signOut } = useAuth()
+  const { tema, setTema } = useTema()
   const [openSidebar, setOpenSidebar] = useState(false) // sidebar desktop toggle (no se usa hoy en desktop, y en mobile ya no)
   const [masOpen, setMasOpen] = useState(false)
   const [cambiarPass, setCambiarPass] = useState(false)
@@ -91,7 +128,7 @@ export function Layout() {
         <button
           onClick={() => setMasOpen(true)}
           aria-label="Mi cuenta"
-          className="h-9 w-9 rounded-full bg-oliva-800 text-white flex items-center justify-center font-bold text-sm"
+          className="h-9 w-9 rounded-full bg-oliva-800 text-oliva-50 flex items-center justify-center font-bold text-sm"
         >
           {iniciales}
         </button>
@@ -141,6 +178,10 @@ export function Layout() {
           )}
         </nav>
 
+        <div className="hidden lg:block px-3 pb-2">
+          <TemaToggle tema={tema} setTema={setTema} />
+        </div>
+
         <div className="hidden lg:flex items-center gap-2.5 p-3 border-t border-oliva-100">
           <div className="h-8 w-8 rounded-full bg-oliva-800 text-oliva-50 flex items-center justify-center font-bold text-xs shrink-0">
             {iniciales}
@@ -181,7 +222,7 @@ export function Layout() {
           >
             <div className="flex items-center justify-between px-4 py-3 border-b border-oliva-100 sticky top-0 bg-white">
               <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-full bg-oliva-800 text-white flex items-center justify-center font-bold text-sm">
+                <div className="h-10 w-10 rounded-full bg-oliva-800 text-oliva-50 flex items-center justify-center font-bold text-sm">
                   {iniciales}
                 </div>
                 <div>
@@ -208,6 +249,10 @@ export function Layout() {
               )}
 
               <div>
+                <div className="text-[10px] font-bold uppercase tracking-widest text-oliva-500 px-2.5 pb-1.5">Tema</div>
+                <div className="px-2.5 pb-3">
+                  <TemaToggle tema={tema} setTema={setTema} />
+                </div>
                 <div className="text-[10px] font-bold uppercase tracking-widest text-oliva-500 px-2.5 pb-1.5">Cuenta</div>
                 <button
                   className="w-full flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium text-oliva-700 hover:bg-oliva-100/70"

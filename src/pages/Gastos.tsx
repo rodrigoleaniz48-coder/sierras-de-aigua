@@ -454,7 +454,7 @@ export function Gastos() {
                   </div>
                   <div className="flex justify-end gap-2">
                     <button type="button" className="btn-secondary text-xs" onClick={() => setConfirmMarcarSocio(null)} disabled={marcando}>Cancelar</button>
-                    <button type="button" className="text-xs px-3 py-2 rounded-lg bg-oliva-800 text-white hover:bg-oliva-900 disabled:opacity-50" onClick={() => marcarReembolsadosDe(c.sid, c.pendIds)} disabled={marcando}>
+                    <button type="button" className="text-xs px-3 py-2 rounded-lg bg-oliva-800 text-oliva-50 hover:bg-oliva-900 disabled:opacity-50" onClick={() => marcarReembolsadosDe(c.sid, c.pendIds)} disabled={marcando}>
                       {marcando ? 'Marcando…' : 'Sí, marcar todos'}
                     </button>
                   </div>

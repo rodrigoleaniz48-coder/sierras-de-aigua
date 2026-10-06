@@ -390,7 +390,7 @@ function SelectorPeriodo({ desde, hasta, onCambio }: {
 
   const chip = (activo: boolean) =>
     `text-xs px-3 py-1.5 rounded-full font-semibold transition ${
-      activo ? 'bg-oliva-800 text-white' : 'bg-white ring-1 ring-oliva-200 text-oliva-700 hover:ring-oliva-400'
+      activo ? 'bg-oliva-800 text-oliva-50' : 'bg-white ring-1 ring-oliva-200 text-oliva-700 hover:ring-oliva-400'
     }`
 
   // Genera lista de meses hacia atrás (últimos 24 meses) para el select específico
@@ -2231,7 +2231,7 @@ function VentaDetalleDialog({
                 type="button"
                 onClick={confirmarVenta}
                 disabled={guardando}
-                className="text-sm px-3 py-2 rounded-lg bg-oliva-700 text-white hover:bg-oliva-800 disabled:opacity-50"
+                className="text-sm px-3 py-2 rounded-lg bg-oliva-700 text-oliva-50 hover:bg-oliva-800 disabled:opacity-50"
                 title="Convierte la venta potencial en venta real: descuenta stock y la incluye en reportes"
               >
                 {guardando ? 'Confirmando…' : '✓ Confirmar venta'}

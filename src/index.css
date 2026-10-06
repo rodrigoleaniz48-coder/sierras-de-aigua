@@ -4,6 +4,36 @@
 
 :root {
   color-scheme: light;
+  /* Rampa oliva (modo claro) — valores RGB para usar con rgb(var(--x) / alpha). */
+  --oliva-50:  245 246 244;
+  --oliva-100: 236 239 233;
+  --oliva-200: 223 228 220;
+  --oliva-300: 192 200 187;
+  --oliva-400: 148 160 136;
+  --oliva-500: 125 134 122;
+  --oliva-600: 90 106 82;
+  --oliva-700: 75 84 67;
+  --oliva-800: 61 74 55;
+  --oliva-900: 28 34 26;
+  /* Superficies (tarjetas, inputs, barras). En claro son blancas. */
+  --surface: 255 255 255;
+}
+
+:root.dark {
+  color-scheme: dark;
+  /* Rampa invertida y ajustada: 50 = fondo oscuro, 900 = texto casi blanco. */
+  --oliva-50:  20 24 18;
+  --oliva-100: 29 34 26;
+  --oliva-200: 41 47 37;
+  --oliva-300: 60 68 54;
+  --oliva-400: 110 121 102;
+  --oliva-500: 142 152 134;
+  --oliva-600: 170 180 160;
+  --oliva-700: 198 206 190;
+  --oliva-800: 223 228 216;
+  --oliva-900: 240 243 235;
+  /* Superficie apenas mas clara que el fondo, para separar tarjetas. */
+  --surface: 31 36 28;
 }
 
 html, body, #root {
@@ -15,6 +45,9 @@ body {
   font-family: Manrope, ui-sans-serif, system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   font-feature-settings: 'ss01', 'cv11';
 }
+
+/* Las superficies blancas (tarjetas, barras, hojas, inputs sueltos) siguen el token. */
+:root.dark .bg-white { background-color: rgb(var(--surface)); }
 
 /* Botones básicos reutilizables */
 @layer components {
@@ -50,3 +83,9 @@ body {
   .tag-neg { @apply bg-red-100 text-red-800; }
   .tag-neutral { @apply bg-oliva-100 text-oliva-700; }
 }
+
+/* Componentes que llevan fondo blanco via @apply: en oscuro siguen el token. */
+:root.dark .btn-secondary,
+:root.dark .input,
+:root.dark .card,
+:root.dark .panel { background-color: rgb(var(--surface)); }

@@ -7,6 +7,17 @@
     <meta name="theme-color" content="#829378" />
     <meta name="description" content="Gestion interna Sierras de Aigua — stock, ventas, clientes." />
 
+    <!-- Tema claro/oscuro: aplicar antes del render para evitar parpadeo -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem('tema') || 'sistema';
+          var dark = t === 'oscuro' || (t === 'sistema' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          if (dark) document.documentElement.classList.add('dark');
+        } catch (e) {}
+      })();
+    </script>
+
     <!-- PWA: instalable como app en Android/iOS -->
     <link rel="manifest" href="/sierras-de-aigua/manifest.webmanifest" />
 

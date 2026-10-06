@@ -28,7 +28,7 @@ export function Login() {
   }
 
   return (
-    <div className="min-h-screen grid place-items-center bg-gradient-to-br from-oliva-50 via-white to-tierra-100 p-4">
+    <div className="min-h-screen grid place-items-center bg-gradient-to-br from-oliva-50 via-white to-tierra-100 dark:from-oliva-50 dark:via-oliva-100 dark:to-oliva-200 p-4">
       <div className="w-full max-w-xl">
         <div className="text-center mb-6">
           <img src={import.meta.env.BASE_URL + 'logo-compact.png'} alt="Sierras de Aiguá" className="mx-auto h-32 sm:h-40 w-auto max-w-full" />

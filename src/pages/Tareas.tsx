@@ -457,7 +457,7 @@ function EquipoView({ tareas, perfiles, perfilPorId, soyYo, resumenMes, cargando
                   onClick={() => togglePersona(g.persona.id)}
                   className="w-full flex items-center gap-3 p-3 text-left hover:bg-oliva-50/40 rounded-t-lg"
                 >
-                  <div className="h-8 w-8 rounded-full bg-oliva-800 text-white flex items-center justify-center font-bold text-xs shrink-0">
+                  <div className="h-8 w-8 rounded-full bg-oliva-800 text-oliva-50 flex items-center justify-center font-bold text-xs shrink-0">
                     {g.persona.nombre.charAt(0)}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -673,7 +673,7 @@ function RegistrarHechaDialog({ abierto, soyYo, onCerrar, onOk }: {
                   type="button"
                   onClick={() => setJornales(o.valor)}
                   className={`rounded-md px-2 py-3 text-sm font-semibold transition text-center
-                    ${activo ? 'bg-oliva-800 text-white ring-2 ring-oliva-800' : 'bg-white ring-1 ring-oliva-200 text-oliva-700 hover:ring-oliva-400'}`}
+                    ${activo ? 'bg-oliva-800 text-oliva-50 ring-2 ring-oliva-800' : 'bg-white ring-1 ring-oliva-200 text-oliva-700 hover:ring-oliva-400'}`}
                 >
                   <div>{o.label}</div>
                   <div className={`text-[10px] font-normal mt-0.5 ${activo ? 'text-oliva-100' : 'text-oliva-500'}`}>{o.hint}</div>

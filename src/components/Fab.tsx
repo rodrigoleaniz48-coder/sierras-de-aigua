@@ -43,7 +43,7 @@ export function Fab() {
       type="button"
       onClick={click}
       aria-label={accion.label}
-      className={`lg:hidden fixed right-4 z-40 h-14 w-14 rounded-full bg-oliva-800 text-white shadow-lg flex items-center justify-center hover:bg-oliva-900 active:scale-95 transition-all duration-200 ease-out ${
+      className={`lg:hidden fixed right-4 z-40 h-14 w-14 rounded-full bg-oliva-800 text-oliva-50 shadow-lg flex items-center justify-center hover:bg-oliva-900 active:scale-95 transition-all duration-200 ease-out ${
         oculto ? 'translate-y-24 opacity-0 pointer-events-none' : 'translate-y-0 opacity-100'
       }`}
       style={{ bottom: 'calc(72px + env(safe-area-inset-bottom, 0px))' }}

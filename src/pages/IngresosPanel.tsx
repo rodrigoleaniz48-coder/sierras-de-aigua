@@ -321,7 +321,7 @@ function IngresoDialog({ abierto, editar, categorias, socios, cuentas, soyYo, on
                   type="button"
                   onClick={() => setMoneda(m)}
                   className={`flex-1 py-2 rounded-md text-sm font-semibold transition ${
-                    moneda === m ? 'bg-oliva-800 text-white' : 'bg-white ring-1 ring-oliva-200 text-oliva-700 hover:ring-oliva-400'
+                    moneda === m ? 'bg-oliva-800 text-oliva-50' : 'bg-white ring-1 ring-oliva-200 text-oliva-700 hover:ring-oliva-400'
                   }`}
                 >
                   {m === 'UYU' ? '$ pesos' : 'U$S dólares'}
