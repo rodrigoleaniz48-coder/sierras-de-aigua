@@ -751,6 +751,8 @@ function Conciliacion() {
   const [cargando, setCargando] = useState(true)
   const [cargarAbierto, setCargarAbierto] = useState(false)
   const [registrar, setRegistrar] = useState<MovBancario | null>(null)
+  const [conciliarCon, setConciliarCon] = useState<MovBancario | null>(null)
+  const [verResumen, setVerResumen] = useState(false)
 
   const desde = `${anio}-${mes}-01`
   const ult = new Date(Number(anio), Number(mes), 0).getDate()
@@ -813,10 +815,17 @@ function Conciliacion() {
           matched++
         }
       } else if (m.credito > 0) {
-        const cand = ventas.find((v) => Math.abs(Number(v.total) - monto) < 0.01 && Math.abs(new Date(v.fecha).getTime() - fechaM) / 86400000 <= 5)
-        if (cand) {
-          await supabase.from('movimientos_bancarios').update({ conciliado_venta_id: cand.id }).eq('id', m.id)
+        // Credito bancario → buscar primero una venta; si no, un ingreso registrado.
+        const venta = ventas.find((v) => Math.abs(Number(v.total) - monto) < 0.01 && Math.abs(new Date(v.fecha).getTime() - fechaM) / 86400000 <= 5)
+        if (venta) {
+          await supabase.from('movimientos_bancarios').update({ conciliado_venta_id: venta.id }).eq('id', m.id)
           matched++
+        } else {
+          const ing = ingresos.find((i) => i.moneda === cuenta?.moneda && Math.abs(Number(i.monto) - monto) < 0.01 && Math.abs(new Date(i.fecha).getTime() - fechaM) / 86400000 <= 5)
+          if (ing) {
+            await supabase.from('movimientos_bancarios').update({ conciliado_ingreso_id: ing.id }).eq('id', m.id)
+            matched++
+          }
         }
       }
     }
@@ -830,6 +839,11 @@ function Conciliacion() {
   const estaConciliado = (m: MovBancario) => m.conciliado_gasto_id || m.conciliado_venta_id || m.conciliado_ingreso_id || m.es_transferencia_interna
   const conciliados = movs.filter(estaConciliado)
   const pendientes = movs.filter((m) => !estaConciliado(m))
+
+  // Para el resumen del mes: que ventas/ingresos/gastos ya estan enlazados a un movimiento del banco.
+  const ventasConc = useMemo(() => new Set(movs.map((m) => m.conciliado_venta_id).filter(Boolean) as number[]), [movs])
+  const ingresosConc = useMemo(() => new Set(movs.map((m) => m.conciliado_ingreso_id).filter(Boolean) as number[]), [movs])
+  const gastosConc = useMemo(() => new Set(movs.map((m) => m.conciliado_gasto_id).filter(Boolean) as number[]), [movs])
 
   async function toggleTransferencia(m: MovBancario) {
     await supabase.from('movimientos_bancarios').update({
@@ -944,7 +958,8 @@ function Conciliacion() {
                       {conciliado || m.es_transferencia_interna ? (
                         <button className="text-xs text-oliva-700 underline" onClick={() => desconciliar(m)}>Desconciliar</button>
                       ) : (
-                        <div className="flex gap-2 justify-end">
+                        <div className="flex gap-2 justify-end flex-wrap">
+                          <button className="text-xs text-oliva-700 underline" onClick={() => setConciliarCon(m)}>Conciliar con…</button>
                           <button
                             className="text-xs text-green-700 underline"
                             onClick={() => setRegistrar(m)}
@@ -963,11 +978,74 @@ function Conciliacion() {
         </div>
       )}
 
+      {/* Resumen del mes: todas las ventas, ingresos y egresos con su estado de conciliacion */}
+      <div className="card p-0 overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setVerResumen((v) => !v)}
+          className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-oliva-50/60"
+        >
+          <span className="text-sm font-semibold text-oliva-900">
+            📊 Resumen del mes · ventas, ingresos y egresos
+          </span>
+          <span className="text-xs text-oliva-600">
+            {ventas.length + ingresos.length + gastos.length} registros · {verResumen ? 'ocultar' : 'ver'}
+          </span>
+        </button>
+        {verResumen && (
+          <div className="border-t border-oliva-100 p-3 grid grid-cols-1 lg:grid-cols-3 gap-3">
+            <ResumenLista
+              titulo="Ventas"
+              filas={ventas.map((v) => ({
+                id: v.id,
+                fecha: v.fecha,
+                monto: Number(v.total),
+                moneda: 'UYU',
+                etiqueta: `#${v.id}${v.cliente_id ? ` · ${clientePorId.get(v.cliente_id)?.nombre ?? ''}` : ''}`,
+                conc: ventasConc.has(v.id),
+              }))}
+            />
+            <ResumenLista
+              titulo="Ingresos"
+              filas={ingresos.map((i) => ({
+                id: i.id,
+                fecha: i.fecha,
+                monto: Number(i.monto),
+                moneda: i.moneda,
+                etiqueta: i.descripcion ?? 'Ingreso',
+                conc: ingresosConc.has(i.id),
+              }))}
+            />
+            <ResumenLista
+              titulo="Egresos"
+              filas={gastos.map((g) => ({
+                id: g.id,
+                fecha: g.fecha,
+                monto: Number(g.monto),
+                moneda: g.moneda,
+                etiqueta: g.descripcion ?? g.categoria,
+                conc: gastosConc.has(g.id),
+              }))}
+            />
+          </div>
+        )}
+      </div>
+
       <CargarMovimientosDialog
         abierto={cargarAbierto}
         cuenta={cuenta ?? null}
         onCerrar={() => setCargarAbierto(false)}
         onOk={() => { setCargarAbierto(false); cargar() }}
+      />
+
+      <ConciliarConExistenteDialog
+        mov={conciliarCon}
+        ventas={ventas}
+        ingresos={ingresos}
+        gastos={gastos}
+        clientePorId={clientePorId}
+        onCerrar={() => setConciliarCon(null)}
+        onOk={() => { setConciliarCon(null); cargar() }}
       />
 
       <RegistrarMovimientoDialog
@@ -1092,6 +1170,123 @@ function RegistrarMovimientoDialog({
           <button className="btn-primary" onClick={guardar} disabled={guardando}>
             {guardando ? 'Guardando…' : (esEgreso ? 'Registrar egreso' : 'Registrar ingreso')}
           </button>
+        </div>
+      </div>
+    </Dialog>
+  )
+}
+
+// Lista compacta de un tipo de registro (ventas/ingresos/egresos) con su chip de conciliacion.
+interface FilaResumen { id: number; fecha: string; monto: number; moneda: string; etiqueta: string; conc: boolean }
+function ResumenLista({ titulo, filas }: { titulo: string; filas: FilaResumen[] }) {
+  const conc = filas.filter((f) => f.conc).length
+  return (
+    <div className="rounded-lg border border-oliva-100 overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-2 bg-oliva-50 border-b border-oliva-100">
+        <span className="text-xs font-semibold uppercase tracking-wide text-oliva-700">{titulo}</span>
+        <span className="text-[11px] text-oliva-600">{conc}/{filas.length} conc.</span>
+      </div>
+      {filas.length === 0 ? (
+        <div className="px-3 py-3 text-xs text-oliva-500">Sin registros.</div>
+      ) : (
+        <div className="max-h-72 overflow-y-auto divide-y divide-oliva-100/70">
+          {filas.map((f) => (
+            <div key={f.id} className="flex items-center gap-2 px-3 py-1.5 text-xs">
+              <span title={f.conc ? 'Conciliado' : 'No conciliado'} className="shrink-0">{f.conc ? '✅' : '🔴'}</span>
+              <span className="tabular-nums text-oliva-500 shrink-0">{f.fecha.slice(5)}</span>
+              <span className="flex-1 truncate text-oliva-800">{f.etiqueta}</span>
+              <span className="tabular-nums text-oliva-900 shrink-0">{money(f.monto, f.moneda === 'USD' ? 'USD' : 'UYU')}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Conciliar manualmente un movimiento pendiente con un registro ya existente
+// (venta/ingreso para creditos; gasto para debitos). Para casos confusos.
+interface Candidato { tipo: 'venta' | 'ingreso' | 'gasto'; id: number; fecha: string; monto: number; moneda: string; etiqueta: string }
+function ConciliarConExistenteDialog({
+  mov, ventas, ingresos, gastos, clientePorId, onCerrar, onOk,
+}: {
+  mov: MovBancario | null
+  ventas: Venta[]
+  ingresos: Ingreso[]
+  gastos: Gasto[]
+  clientePorId: Map<number, Cliente>
+  onCerrar: () => void
+  onOk: () => void
+}) {
+  const [guardando, setGuardando] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  if (!mov) return null
+  const esEgreso = Number(mov.debito) > 0
+  const movMonto = Math.abs(Number(mov.debito) > 0 ? mov.debito : mov.credito)
+  const fechaM = new Date(mov.fecha).getTime()
+
+  const candidatos: Candidato[] = esEgreso
+    ? gastos.map((g) => ({ tipo: 'gasto', id: g.id, fecha: g.fecha, monto: Number(g.monto), moneda: g.moneda, etiqueta: g.descripcion ?? g.categoria }))
+    : [
+        ...ventas.map((v) => ({ tipo: 'venta' as const, id: v.id, fecha: v.fecha, monto: Number(v.total), moneda: 'UYU', etiqueta: `Venta #${v.id}${v.cliente_id ? ` · ${clientePorId.get(v.cliente_id)?.nombre ?? ''}` : ''}` })),
+        ...ingresos.map((i) => ({ tipo: 'ingreso' as const, id: i.id, fecha: i.fecha, monto: Number(i.monto), moneda: i.moneda, etiqueta: i.descripcion ?? 'Ingreso' })),
+      ]
+
+  // Ordenar por cercania de monto y luego de fecha.
+  candidatos.sort((a, b) => {
+    const da = Math.abs(a.monto - movMonto), db = Math.abs(b.monto - movMonto)
+    if (da !== db) return da - db
+    return Math.abs(new Date(a.fecha).getTime() - fechaM) - Math.abs(new Date(b.fecha).getTime() - fechaM)
+  })
+
+  async function enlazar(c: Candidato) {
+    setGuardando(true); setError(null)
+    const patch =
+      c.tipo === 'venta' ? { conciliado_venta_id: c.id, conciliado_gasto_id: null, conciliado_ingreso_id: null, es_transferencia_interna: false }
+      : c.tipo === 'ingreso' ? { conciliado_ingreso_id: c.id, conciliado_venta_id: null, conciliado_gasto_id: null, es_transferencia_interna: false }
+      : { conciliado_gasto_id: c.id, conciliado_venta_id: null, conciliado_ingreso_id: null, es_transferencia_interna: false }
+    const { error: e } = await supabase.from('movimientos_bancarios').update(patch).eq('id', mov!.id)
+    setGuardando(false)
+    if (e) { setError(e.message); return }
+    onOk()
+  }
+
+  return (
+    <Dialog abierto={mov !== null} onCerrar={onCerrar} titulo="Conciliar con un registro existente" ancho="md">
+      <div className="space-y-3">
+        <div className="text-sm text-oliva-700">
+          Movimiento: <b>{mov.fecha}</b> · {mov.descripcion}{mov.asunto ? ` · ${mov.asunto}` : ''} ·{' '}
+          <b className={esEgreso ? 'text-red-700' : 'text-green-700'}>{money(movMonto)}</b>
+        </div>
+        <p className="text-xs text-oliva-600">
+          Elegí el {esEgreso ? 'gasto' : 'venta o ingreso'} que corresponde a este movimiento. Los más parecidos (por monto y fecha) aparecen primero.
+        </p>
+        {error && <div className="text-sm text-red-700">{error}</div>}
+        <div className="max-h-[50vh] overflow-y-auto rounded-lg border border-oliva-100 divide-y divide-oliva-100/70">
+          {candidatos.length === 0 ? (
+            <div className="px-3 py-4 text-sm text-oliva-500">No hay {esEgreso ? 'gastos' : 'ventas ni ingresos'} en el período para enlazar.</div>
+          ) : candidatos.map((c) => {
+            const exacto = Math.abs(c.monto - movMonto) < 0.01
+            return (
+              <button
+                key={`${c.tipo}-${c.id}`}
+                type="button"
+                disabled={guardando}
+                onClick={() => enlazar(c)}
+                className={`w-full flex items-center gap-2 px-3 py-2 text-left text-sm hover:bg-oliva-50 ${exacto ? 'bg-green-50/60' : ''}`}
+              >
+                <span className="text-[10px] uppercase tracking-wide rounded-full px-2 py-[1px] bg-oliva-100 text-oliva-700 shrink-0">{c.tipo}</span>
+                <span className="tabular-nums text-oliva-500 shrink-0">{c.fecha.slice(5)}</span>
+                <span className="flex-1 truncate text-oliva-800">{c.etiqueta}</span>
+                {exacto && <span className="text-[10px] text-green-700 shrink-0">monto exacto</span>}
+                <span className="tabular-nums text-oliva-900 shrink-0">{money(c.monto, c.moneda === 'USD' ? 'USD' : 'UYU')}</span>
+              </button>
+            )
+          })}
+        </div>
+        <div className="flex justify-end">
+          <button className="btn-secondary" onClick={onCerrar}>Cerrar</button>
         </div>
       </div>
     </Dialog>
