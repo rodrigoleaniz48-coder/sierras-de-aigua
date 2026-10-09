@@ -757,6 +757,10 @@ function Conciliacion() {
   const desde = `${anio}-${mes}-01`
   const ult = new Date(Number(anio), Number(mes), 0).getDate()
   const hasta = `${anio}-${mes}-${String(ult).padStart(2, '0')}`
+  // Para conciliar cobros que llegan meses despues de la venta (p.ej. venta de
+  // agosto cobrada en setiembre), los candidatos se cargan desde 2 meses antes.
+  const dA = new Date(Number(anio), Number(mes) - 1 - 2, 1)
+  const desdeAmplio = `${dA.getFullYear()}-${String(dA.getMonth() + 1).padStart(2, '0')}-01`
 
   useEffect(() => {
     supabase.from('cuentas_bancarias').select('*').eq('activo', true).order('id').then(({ data }) => {
@@ -778,9 +782,9 @@ function Conciliacion() {
     setCargando(true)
     const [mb, v, g, ing, cl] = await Promise.all([
       supabase.from('movimientos_bancarios').select('*').eq('cuenta_id', Number(cuentaId)).gte('fecha', desde).lte('fecha', hasta).order('fecha'),
-      supabase.from('ventas').select('id,fecha,total,con_factura,ubicacion_id,cliente_id').gte('fecha', desde).lte('fecha', hasta).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
-      supabase.from('gastos').select('id,fecha,monto,moneda,descripcion,categoria,socio_id').gte('fecha', desde).lte('fecha', hasta).eq('es_adelanto', false),
-      supabase.from('ingresos').select('id,fecha,monto,moneda,descripcion,categoria_id').gte('fecha', desde).lte('fecha', hasta),
+      supabase.from('ventas').select('id,fecha,total,con_factura,ubicacion_id,cliente_id').gte('fecha', desdeAmplio).lte('fecha', hasta).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
+      supabase.from('gastos').select('id,fecha,monto,moneda,descripcion,categoria,socio_id').gte('fecha', desdeAmplio).lte('fecha', hasta).eq('es_adelanto', false),
+      supabase.from('ingresos').select('id,fecha,monto,moneda,descripcion,categoria_id').gte('fecha', desdeAmplio).lte('fecha', hasta),
       supabase.from('clientes').select('id,nombre'),
     ])
     setMovs((mb.data as MovBancario[]) ?? [])
@@ -844,6 +848,10 @@ function Conciliacion() {
   const ventasConc = useMemo(() => new Set(movs.map((m) => m.conciliado_venta_id).filter(Boolean) as number[]), [movs])
   const ingresosConc = useMemo(() => new Set(movs.map((m) => m.conciliado_ingreso_id).filter(Boolean) as number[]), [movs])
   const gastosConc = useMemo(() => new Set(movs.map((m) => m.conciliado_gasto_id).filter(Boolean) as number[]), [movs])
+  // El resumen muestra solo los registros del mes (los candidatos incluyen meses previos).
+  const ventasMes = ventas.filter((v) => v.fecha >= desde)
+  const ingresosMes = ingresos.filter((i) => i.fecha >= desde)
+  const gastosMes = gastos.filter((g) => g.fecha >= desde)
 
   async function toggleTransferencia(m: MovBancario) {
     await supabase.from('movimientos_bancarios').update({
@@ -989,14 +997,14 @@ function Conciliacion() {
             📊 Resumen del mes · ventas, ingresos y egresos
           </span>
           <span className="text-xs text-oliva-600">
-            {ventas.length + ingresos.length + gastos.length} registros · {verResumen ? 'ocultar' : 'ver'}
+            {ventasMes.length + ingresosMes.length + gastosMes.length} registros · {verResumen ? 'ocultar' : 'ver'}
           </span>
         </button>
         {verResumen && (
           <div className="border-t border-oliva-100 p-3 grid grid-cols-1 lg:grid-cols-3 gap-3">
             <ResumenLista
               titulo="Ventas"
-              filas={ventas.map((v) => ({
+              filas={ventasMes.map((v) => ({
                 id: v.id,
                 fecha: v.fecha,
                 monto: Number(v.total),
@@ -1007,7 +1015,7 @@ function Conciliacion() {
             />
             <ResumenLista
               titulo="Ingresos"
-              filas={ingresos.map((i) => ({
+              filas={ingresosMes.map((i) => ({
                 id: i.id,
                 fecha: i.fecha,
                 monto: Number(i.monto),
@@ -1018,7 +1026,7 @@ function Conciliacion() {
             />
             <ResumenLista
               titulo="Egresos"
-              filas={gastos.map((g) => ({
+              filas={gastosMes.map((g) => ({
                 id: g.id,
                 fecha: g.fecha,
                 monto: Number(g.monto),
