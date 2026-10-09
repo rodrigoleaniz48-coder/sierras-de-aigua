@@ -1220,15 +1220,23 @@ async function guardar(e: React.FormEvent) {
     // Cobro en efectivo → adelanto del socio (idempotente). Si no es efectivo/cobrado, limpia uno previo.
     let adelantoPend: AdelantoInfo | null = null
     if (cobrado && formaPago === 'efectivo' && !aConfirmar && !promocion) {
-      if (!(await existeAdelantoDeVenta(ventaId))) {
-        const esUSD = monedaVenta === 'USD' && cotVenta > 0
-        const monto = esUSD ? totalUyu / cotVenta : totalUyu
+      const esUSD = monedaVenta === 'USD' && cotVenta > 0
+      const montoAdel = Math.round((esUSD ? totalUyu / cotVenta : totalUyu) * 100) / 100
+      const monedaAdel: 'UYU' | 'USD' = esUSD ? 'USD' : 'UYU'
+      if (await existeAdelantoDeVenta(ventaId)) {
+        // Ya estaba confirmado: al editar la venta, sincronizar monto y moneda del adelanto.
+        // Se respetan socio, origen y notas que el socio eligió al confirmarlo.
+        await supabase.from('gastos')
+          .update({ monto: montoAdel, moneda: monedaAdel, actualizado_en: new Date().toISOString() })
+          .eq('es_adelanto', true)
+          .ilike('descripcion', `Venta #${ventaId} %`)
+      } else {
         const origen = await origenEfectivoDeVenta(ventaId)
         const cli = clienteId ? clientes.find((c) => c.id === Number(clienteId)) : null
         adelantoPend = {
           ventaId, socioId,
-          monto: Math.round(monto * 100) / 100,
-          moneda: esUSD ? 'USD' : 'UYU',
+          monto: montoAdel,
+          moneda: monedaAdel,
           clienteNombre: cli?.nombre ?? null,
           fecha: fechaCobroSync ?? fecha,
           origen,
