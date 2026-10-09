@@ -61,7 +61,7 @@ interface Ingreso { id: number; fecha: string; monto: number; moneda: string; de
 interface Pago { id: number; cliente_id: number | null; fecha: string; monto: number; moneda: string; medio_pago: string | null; nota: string | null }
 interface CategoriaGasto { id: number; slug: string; nombre: string }
 interface CategoriaIngreso { id: number; nombre: string }
-interface Cliente { id: number; nombre: string; tipo?: string }
+interface Cliente { id: number; nombre: string; tipo?: string; saldo_inicial?: number; saldo_inicial_fecha?: string | null }
 
 export function Contabilidad() {
   const { perfil } = useAuth()
@@ -562,6 +562,8 @@ function EstadoResultados() {
   const [ventas, setVentas] = useState<VentaMon[]>([])
   const [ingresos, setIngresos] = useState<IngresoMan[]>([])
   const [gastos, setGastos] = useState<Gasto[]>([])
+  const [ccIds, setCcIds] = useState<Set<number>>(new Set())
+  const [pagos, setPagos] = useState<{ cliente_id: number | null; monto: number; moneda: string }[]>([])
   const [cargando, setCargando] = useState(true)
 
   const desde = `${anio}-${mes}-01`
@@ -576,10 +578,15 @@ function EstadoResultados() {
       supabase.from('ventas').select('id,fecha,total,con_factura,ubicacion_id,cliente_id,moneda,cotizacion').gte('fecha_cobro', desde).lte('fecha_cobro', hasta).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
       supabase.from('gastos').select('id,fecha,monto,moneda,descripcion,categoria,socio_id').gte('fecha', desde).lte('fecha', hasta).eq('es_adelanto', false),
       supabase.from('ingresos').select('id,fecha,monto,moneda,categoria_id,socio_id').gte('fecha', desde).lte('fecha', hasta),
-    ]).then(([v, g, i]) => {
+      // Clientes de cuenta corriente: su ingreso se reconoce por el PAGO a cuenta, no por la venta.
+      supabase.from('clientes').select('id').in('tipo', ['distribuidor', 'mayorista']),
+      supabase.from('pagos').select('cliente_id,monto,moneda').gte('fecha', desde).lte('fecha', hasta),
+    ]).then(([v, g, i, cc, p]) => {
       setVentas((v.data as VentaMon[]) ?? [])
       setGastos((g.data as Gasto[]) ?? [])
       setIngresos((i.data as IngresoMan[]) ?? [])
+      setCcIds(new Set(((cc.data as { id: number }[]) ?? []).map((c) => c.id)))
+      setPagos((p.data as { cliente_id: number | null; monto: number; moneda: string }[]) ?? [])
       setCargando(false)
     })
   }, [desde, hasta])
@@ -588,15 +595,23 @@ function EstadoResultados() {
   const ventaEsUSD = (v: VentaMon) => (v.moneda ?? 'UYU') === 'USD' && !!v.cotizacion && Number(v.cotizacion) > 0
   const ventaUSD = (v: VentaMon) => Number(v.total) / Number(v.cotizacion)
 
-  // Ingresos (ventas + ingresos manuales) por moneda
-  const ventasUYU = ventas.filter((v) => !ventaEsUSD(v)).reduce((s, v) => s + Number(v.total), 0)
-  const ventasUSD = ventas.filter((v) => ventaEsUSD(v)).reduce((s, v) => s + ventaUSD(v), 0)
+  // Para distribuidores/mayoristas el ingreso NO cuenta por la venta (se cuenta por el pago a
+  // cuenta), asi que se excluyen sus ventas y en su lugar se suman los pagos recibidos en el mes.
+  const esCC = (v: VentaMon) => !!v.cliente_id && ccIds.has(v.cliente_id)
+  const ventasRev = ventas.filter((v) => !esCC(v))
+  const pagosCC = pagos.filter((p) => p.cliente_id && ccIds.has(p.cliente_id))
+  const pagosCCUYU = pagosCC.filter((p) => p.moneda !== 'USD').reduce((s, p) => s + Number(p.monto), 0)
+  const pagosCCUSD = pagosCC.filter((p) => p.moneda === 'USD').reduce((s, p) => s + Number(p.monto), 0)
+
+  // Ingresos (ventas minoristas + pagos a cuenta de distribuidores + ingresos manuales) por moneda
+  const ventasUYU = ventasRev.filter((v) => !ventaEsUSD(v)).reduce((s, v) => s + Number(v.total), 0)
+  const ventasUSD = ventasRev.filter((v) => ventaEsUSD(v)).reduce((s, v) => s + ventaUSD(v), 0)
   const ingresosManUYU = ingresos.filter((i) => i.moneda === 'UYU').reduce((s, i) => s + Number(i.monto), 0)
   const ingresosManUSD = ingresos.filter((i) => i.moneda === 'USD').reduce((s, i) => s + Number(i.monto), 0)
-  const totalIngresosUYU = ventasUYU + ingresosManUYU
-  const totalIngresosUSD = ventasUSD + ingresosManUSD
+  const totalIngresosUYU = ventasUYU + ingresosManUYU + pagosCCUYU
+  const totalIngresosUSD = ventasUSD + ingresosManUSD + pagosCCUSD
 
-  const ventasConFactura = ventas.reduce((s, v) => s + (v.con_factura ? Number(v.total) : 0), 0)
+  const ventasConFactura = ventasRev.reduce((s, v) => s + (v.con_factura ? Number(v.total) : 0), 0)
 
   // Egresos por moneda
   const gastosUYU = gastos.filter((g) => g.moneda === 'UYU').reduce((s, g) => s + Number(g.monto), 0)
@@ -649,7 +664,8 @@ function EstadoResultados() {
               <div className="text-xs uppercase tracking-wide text-oliva-600">Ingresos del mes (pesos)</div>
               <div className="text-3xl font-semibold text-oliva-900 tabular-nums">{money(totalIngresosUYU, 'UYU')}</div>
               <div className="text-xs text-oliva-600 space-y-0.5">
-                <div>Ventas: <b className="tabular-nums">{money(ventasUYU, 'UYU')}</b> ({ventas.filter((v) => !ventaEsUSD(v)).length} vta.)</div>
+                <div>Ventas: <b className="tabular-nums">{money(ventasUYU, 'UYU')}</b> ({ventasRev.filter((v) => !ventaEsUSD(v)).length} vta.)</div>
+                {pagosCCUYU > 0 && <div>Cobros a cuenta (distrib.): <b className="tabular-nums">{money(pagosCCUYU, 'UYU')}</b></div>}
                 <div>Otros ingresos: <b className="tabular-nums">{money(ingresosManUYU, 'UYU')}</b></div>
                 <div className="text-oliva-500">{money(ventasConFactura, 'UYU')} con factura</div>
               </div>
@@ -675,7 +691,8 @@ function EstadoResultados() {
                 <div className="text-xs uppercase tracking-wide text-oliva-600">Ingresos del mes (dólares)</div>
                 <div className="text-3xl font-semibold text-oliva-900 tabular-nums">{money(totalIngresosUSD, 'USD')}</div>
                 <div className="text-xs text-oliva-600 space-y-0.5">
-                  <div>Ventas: <b className="tabular-nums">{money(ventasUSD, 'USD')}</b> ({ventas.filter((v) => ventaEsUSD(v)).length} vta.)</div>
+                  <div>Ventas: <b className="tabular-nums">{money(ventasUSD, 'USD')}</b> ({ventasRev.filter((v) => ventaEsUSD(v)).length} vta.)</div>
+                  {pagosCCUSD > 0 && <div>Cobros a cuenta (distrib.): <b className="tabular-nums">{money(pagosCCUSD, 'USD')}</b></div>}
                   <div>Otros ingresos: <b className="tabular-nums">{money(ingresosManUSD, 'USD')}</b></div>
                 </div>
               </div>
@@ -1444,44 +1461,52 @@ function CuentasCorrientes() {
   const [pagos, setPagos] = useState<Pago[]>([])
   const [cargando, setCargando] = useState(true)
   const [sel, setSel] = useState<number | null>(null)
+  const [editSaldo, setEditSaldo] = useState<Cliente | null>(null)
 
-  useEffect(() => {
-    (async () => {
-      setCargando(true)
-      const { data: cl } = await supabase.from('clientes').select('id,nombre,tipo').in('tipo', ['distribuidor', 'mayorista']).order('nombre')
-      const arr = (cl as Cliente[]) ?? []
-      setClientes(arr)
-      const ids = arr.map((c) => c.id)
-      if (ids.length > 0) {
-        const [v, p] = await Promise.all([
-          supabase.from('ventas').select('id,fecha,total,con_factura,ubicacion_id,cliente_id').in('cliente_id', ids).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
-          supabase.from('pagos').select('id,cliente_id,fecha,monto,moneda,medio_pago,nota').in('cliente_id', ids),
-        ])
-        setVentas((v.data as Venta[]) ?? [])
-        setPagos((p.data as Pago[]) ?? [])
-      } else {
-        setVentas([]); setPagos([])
-      }
-      setCargando(false)
-    })()
-  }, [])
+  async function cargar() {
+    setCargando(true)
+    const { data: cl } = await supabase.from('clientes').select('id,nombre,tipo,saldo_inicial,saldo_inicial_fecha').in('tipo', ['distribuidor', 'mayorista']).order('nombre')
+    const arr = (cl as Cliente[]) ?? []
+    setClientes(arr)
+    const ids = arr.map((c) => c.id)
+    if (ids.length > 0) {
+      const [v, p] = await Promise.all([
+        supabase.from('ventas').select('id,fecha,total,con_factura,ubicacion_id,cliente_id').in('cliente_id', ids).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
+        supabase.from('pagos').select('id,cliente_id,fecha,monto,moneda,medio_pago,nota').in('cliente_id', ids),
+      ])
+      setVentas((v.data as Venta[]) ?? [])
+      setPagos((p.data as Pago[]) ?? [])
+    } else { setVentas([]); setPagos([]) }
+    setCargando(false)
+  }
+  useEffect(() => { cargar() }, [])
+
+  const cliById = useMemo(() => new Map(clientes.map((c) => [c.id, c])), [clientes])
+  // Solo cuentan los movimientos POSTERIORES a la fecha del saldo inicial (ese saldo ya resume lo previo).
+  const despuesDeCorte = (c: Cliente | undefined, fecha: string) => !c?.saldo_inicial_fecha || fecha > c.saldo_inicial_fecha
 
   const porCliente = useMemo(() => {
-    const m = new Map<number, { debe: number; haber: number; haberUSD: number }>()
-    for (const c of clientes) m.set(c.id, { debe: 0, haber: 0, haberUSD: 0 })
-    for (const v of ventas) { if (v.cliente_id && m.has(v.cliente_id)) m.get(v.cliente_id)!.debe += Number(v.total) }
+    const m = new Map<number, { inicial: number; ventasPost: number; pagosPost: number; pagosPostUSD: number }>()
+    for (const c of clientes) m.set(c.id, { inicial: Number(c.saldo_inicial ?? 0), ventasPost: 0, pagosPost: 0, pagosPostUSD: 0 })
+    for (const v of ventas) {
+      if (!v.cliente_id || !m.has(v.cliente_id)) continue
+      if (despuesDeCorte(cliById.get(v.cliente_id), v.fecha)) m.get(v.cliente_id)!.ventasPost += Number(v.total)
+    }
     for (const p of pagos) {
       if (!p.cliente_id || !m.has(p.cliente_id)) continue
-      if (p.moneda === 'USD') m.get(p.cliente_id)!.haberUSD += Number(p.monto)
-      else m.get(p.cliente_id)!.haber += Number(p.monto)
+      if (!despuesDeCorte(cliById.get(p.cliente_id), p.fecha)) continue
+      if (p.moneda === 'USD') m.get(p.cliente_id)!.pagosPostUSD += Number(p.monto)
+      else m.get(p.cliente_id)!.pagosPost += Number(p.monto)
     }
     return m
-  }, [clientes, ventas, pagos])
+  }, [clientes, ventas, pagos, cliById])
 
   const filas = clientes
-    .map((c) => ({ c, ...(porCliente.get(c.id) ?? { debe: 0, haber: 0, haberUSD: 0 }) }))
-    .map((f) => ({ ...f, saldo: f.debe - f.haber }))
-    .filter((f) => f.debe > 0 || f.haber > 0 || f.haberUSD > 0)
+    .map((c) => {
+      const d = porCliente.get(c.id) ?? { inicial: 0, ventasPost: 0, pagosPost: 0, pagosPostUSD: 0 }
+      return { c, ...d, saldo: d.inicial + d.ventasPost - d.pagosPost }
+    })
+    .filter((f) => f.inicial !== 0 || f.ventasPost > 0 || f.pagosPost > 0 || f.pagosPostUSD > 0)
     .sort((a, b) => b.saldo - a.saldo)
 
   const totalPorCobrar = filas.reduce((s, f) => s + Math.max(0, f.saldo), 0)
@@ -1489,11 +1514,17 @@ function CuentasCorrientes() {
 
   const selData = sel ? filas.find((f) => f.c.id === sel) : null
   const ledger = useMemo(() => {
-    if (!sel) return [] as { fecha: string; tipo: 'venta' | 'pago'; detalle: string; debe: number; haber: number; moneda: string }[]
-    const vs = ventas.filter((v) => v.cliente_id === sel).map((v) => ({ fecha: v.fecha, tipo: 'venta' as const, detalle: `Venta #${v.id}`, debe: Number(v.total), haber: 0, moneda: 'UYU' }))
-    const ps = pagos.filter((p) => p.cliente_id === sel).map((p) => ({ fecha: p.fecha, tipo: 'pago' as const, detalle: p.nota ?? 'Pago a cuenta', debe: 0, haber: Number(p.monto), moneda: p.moneda }))
-    return [...vs, ...ps].sort((a, b) => a.fecha.localeCompare(b.fecha))
-  }, [sel, ventas, pagos])
+    type L = { fecha: string; tipo: 'inicial' | 'venta' | 'pago'; detalle: string; debe: number; haber: number; moneda: string }
+    if (!sel) return [] as L[]
+    const c = cliById.get(sel)
+    const rows: L[] = []
+    if (c && (Number(c.saldo_inicial ?? 0) !== 0 || c.saldo_inicial_fecha)) {
+      rows.push({ fecha: c.saldo_inicial_fecha ?? '', tipo: 'inicial', detalle: `Saldo inicial${c.saldo_inicial_fecha ? ` al ${c.saldo_inicial_fecha}` : ''}`, debe: Number(c.saldo_inicial ?? 0), haber: 0, moneda: 'UYU' })
+    }
+    ventas.filter((v) => v.cliente_id === sel && despuesDeCorte(c, v.fecha)).forEach((v) => rows.push({ fecha: v.fecha, tipo: 'venta', detalle: `Venta #${v.id}`, debe: Number(v.total), haber: 0, moneda: 'UYU' }))
+    pagos.filter((p) => p.cliente_id === sel && despuesDeCorte(c, p.fecha)).forEach((p) => rows.push({ fecha: p.fecha, tipo: 'pago', detalle: p.nota ?? 'Pago a cuenta', debe: 0, haber: Number(p.monto), moneda: p.moneda }))
+    return rows.sort((a, b) => (a.tipo === 'inicial' ? -1 : b.tipo === 'inicial' ? 1 : a.fecha.localeCompare(b.fecha)))
+  }, [sel, ventas, pagos, cliById])
 
   if (cargando) return <div className="card p-6 text-sm text-oliva-700">Cargando…</div>
 
@@ -1505,7 +1536,7 @@ function CuentasCorrientes() {
         <Kpi titulo="Saldo a favor de clientes" valor={money(totalAFavor)} />
       </div>
       <p className="text-xs text-oliva-600">
-        Saldo = ventas acumuladas − pagos a cuenta. Positivo (rojo) = el cliente debe. Los pagos se registran desde la conciliación bancaria (“Cobro a cuenta”).
+        Saldo = saldo inicial + ventas − pagos a cuenta. Positivo (rojo) = el cliente debe. Los pagos se registran desde la conciliación bancaria (“Cobro a cuenta”). Para empezar, cargá el saldo inicial que cada cliente debe hoy (botón en el detalle).
       </p>
 
       {filas.length === 0 ? (
@@ -1528,10 +1559,11 @@ function CuentasCorrientes() {
                   <td className="py-2 px-3 text-oliva-900">
                     {f.c.nombre}
                     <span className="text-[10px] uppercase tracking-wide text-aceite-600 ml-1.5">{f.c.tipo}</span>
+                    {f.inicial !== 0 && <span className="block text-[10px] text-oliva-500">inicial {money(f.inicial)}{f.c.saldo_inicial_fecha ? ` (${f.c.saldo_inicial_fecha})` : ''}</span>}
                   </td>
-                  <td className="py-2 px-3 text-right tabular-nums text-oliva-700">{money(f.debe)}</td>
+                  <td className="py-2 px-3 text-right tabular-nums text-oliva-700">{money(f.ventasPost)}</td>
                   <td className="py-2 px-3 text-right tabular-nums text-oliva-700">
-                    {money(f.haber)}{f.haberUSD > 0 ? ` + ${money(f.haberUSD, 'USD')}` : ''}
+                    {money(f.pagosPost)}{f.pagosPostUSD > 0 ? ` + ${money(f.pagosPostUSD, 'USD')}` : ''}
                   </td>
                   <td className={`py-2 px-3 text-right tabular-nums font-semibold ${f.saldo > 0.01 ? 'text-red-700' : f.saldo < -0.01 ? 'text-green-700' : 'text-oliva-500'}`}>{money(f.saldo)}</td>
                   <td className="py-2 px-3 text-right">
@@ -1546,9 +1578,12 @@ function CuentasCorrientes() {
 
       {selData && (
         <div className="card p-0 overflow-hidden">
-          <div className="px-4 py-3 border-b border-oliva-100 bg-oliva-50 flex items-center justify-between">
-            <span className="text-sm font-semibold text-oliva-900">Estado de cuenta · {selData.c.nombre}</span>
-            <span className={`text-sm font-semibold tabular-nums ${selData.saldo > 0.01 ? 'text-red-700' : 'text-green-700'}`}>Saldo {money(selData.saldo)}{selData.haberUSD > 0 ? ` · ${money(selData.haberUSD, 'USD')} USD a favor` : ''}</span>
+          <div className="px-4 py-3 border-b border-oliva-100 bg-oliva-50 flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-semibold text-oliva-900">Estado de cuenta · {selData.c.nombre}</span>
+              <button className="text-xs text-oliva-700 underline" onClick={() => setEditSaldo(selData.c)}>Editar saldo inicial</button>
+            </div>
+            <span className={`text-sm font-semibold tabular-nums ${selData.saldo > 0.01 ? 'text-red-700' : 'text-green-700'}`}>Saldo {money(selData.saldo)}{selData.pagosPostUSD > 0 ? ` · ${money(selData.pagosPostUSD, 'USD')} USD a favor` : ''}</span>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm min-w-[520px]">
@@ -1569,7 +1604,7 @@ function CuentasCorrientes() {
                     return (
                       <tr key={i} className="border-b border-oliva-100/70 last:border-0">
                         <td className="py-1.5 px-3 tabular-nums text-oliva-600 whitespace-nowrap">{l.fecha}</td>
-                        <td className="py-1.5 px-3 text-oliva-800">{l.tipo === 'pago' ? '💵 ' : '🧾 '}{l.detalle}{l.moneda === 'USD' ? ' (USD)' : ''}</td>
+                        <td className="py-1.5 px-3 text-oliva-800">{l.tipo === 'pago' ? '💵 ' : l.tipo === 'inicial' ? '⚖️ ' : '🧾 '}{l.detalle}{l.moneda === 'USD' ? ' (USD)' : ''}</td>
                         <td className="py-1.5 px-3 text-right tabular-nums text-oliva-700">{l.debe > 0 ? money(l.debe) : ''}</td>
                         <td className="py-1.5 px-3 text-right tabular-nums text-green-700">{l.haber > 0 ? money(l.haber, l.moneda === 'USD' ? 'USD' : 'UYU') : ''}</td>
                         <td className="py-1.5 px-3 text-right tabular-nums font-medium text-oliva-900">{l.moneda !== 'USD' ? money(run) : '—'}</td>
@@ -1582,7 +1617,62 @@ function CuentasCorrientes() {
           </div>
         </div>
       )}
+
+      <SaldoInicialDialog cliente={editSaldo} onCerrar={() => setEditSaldo(null)} onOk={() => { setEditSaldo(null); cargar() }} />
     </div>
+  )
+}
+
+// Editar el saldo inicial (deuda a una fecha de corte) de un cliente de cuenta corriente.
+function SaldoInicialDialog({ cliente, onCerrar, onOk }: { cliente: Cliente | null; onCerrar: () => void; onOk: () => void }) {
+  const [monto, setMonto] = useState('')
+  const [fecha, setFecha] = useState('')
+  const [guardando, setGuardando] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!cliente) return
+    setMonto(String(Number(cliente.saldo_inicial ?? 0)))
+    setFecha(cliente.saldo_inicial_fecha ?? new Date().toISOString().slice(0, 10))
+    setError(null)
+  }, [cliente])
+
+  async function guardar() {
+    if (!cliente) return
+    setGuardando(true); setError(null)
+    const { error: e } = await supabase.from('clientes').update({
+      saldo_inicial: Number(monto) || 0,
+      saldo_inicial_fecha: fecha || null,
+    }).eq('id', cliente.id)
+    setGuardando(false)
+    if (e) { setError(e.message); return }
+    onOk()
+  }
+
+  if (!cliente) return null
+  return (
+    <Dialog abierto={cliente !== null} onCerrar={onCerrar} titulo={`Saldo inicial · ${cliente.nombre}`} ancho="sm">
+      <div className="space-y-4">
+        <p className="text-xs text-oliva-600">
+          Lo que el cliente <b>debe a la fecha de corte</b> (resume todo lo anterior). Desde esa fecha en adelante, el saldo se ajusta con las ventas y los pagos a cuenta. Positivo = debe; negativo = tiene saldo a favor.
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="label">Saldo inicial (UYU)</label>
+            <input type="number" className="input tabular-nums" step="0.01" value={monto} onChange={(e) => setMonto(e.target.value)} />
+          </div>
+          <div>
+            <label className="label">Fecha de corte</label>
+            <input type="date" className="input" value={fecha} onChange={(e) => setFecha(e.target.value)} />
+          </div>
+        </div>
+        {error && <div className="text-sm text-red-700">{error}</div>}
+        <div className="flex justify-end gap-2 pt-1">
+          <button className="btn-secondary" onClick={onCerrar}>Cancelar</button>
+          <button className="btn-primary" onClick={guardar} disabled={guardando}>{guardando ? 'Guardando…' : 'Guardar'}</button>
+        </div>
+      </div>
+    </Dialog>
   )
 }
 
