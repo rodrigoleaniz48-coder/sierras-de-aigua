@@ -73,17 +73,28 @@ export function Dashboard() {
 
     Promise.all([
       // Ventas del mes (para KPI de facturado) — excluye potenciales
-      supabase.from('ventas').select('id, total, entregado, cobrado').gte('fecha', mesInicio).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
+      supabase.from('ventas').select('id, total, entregado, cobrado, cliente_id').gte('fecha', mesInicio).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
       // Total del mes anterior
-      supabase.from('ventas').select('total').gte('fecha', mesAntInicio).lte('fecha', mesAntFin).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
+      supabase.from('ventas').select('total, cliente_id').gte('fecha', mesAntInicio).lte('fecha', mesAntFin).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
       // Items del mes con producto y presentación, para calcular litros de aceite (envasado + granel)
       supabase.from('items_venta').select('unidades, presentacion:presentaciones(volumen_ml, producto:productos(nombre, categoria)), venta:ventas!inner(fecha, estado, a_confirmar)').gte('venta.fecha', mesInicio).neq('venta.estado', 'cancelado').eq('venta.a_confirmar', false),
       // Pendientes de entrega/cobro (todas las fechas, no filtrar por mes: siguen pendientes despues del cierre)
       supabase.from('ventas').select('id, total, entregado, cobrado, promocion_comercial').eq('socio_id', soyYo).neq('estado', 'cancelado').eq('a_confirmar', false).or('entregado.eq.false,cobrado.eq.false'),
+      // Distribuidores/mayoristas: su ingreso cuenta por el PAGO a cuenta, no por la venta.
+      supabase.from('clientes').select('id').in('tipo', ['distribuidor', 'mayorista']),
+      supabase.from('pagos').select('fecha,monto,moneda,cliente_id').gte('fecha', mesAntInicio),
+      import('../lib/bcu').then(m => m.fetchCotizacionBCU()),
     ])
-      .then(([vRes, vAntRes, iRes, pendRes]) => {
+      .then(([vRes, vAntRes, iRes, pendRes, ccRes, pagRes, cotBcu]) => {
+        const ccSet = new Set(((ccRes.data ?? []) as { id: number }[]).map((c) => c.id))
+        const tc = cotBcu?.cotizacion ?? 42
+        const pagoPesos = (p: { monto: number; moneda: string }) => (p.moneda === 'USD' ? Number(p.monto) * tc : Number(p.monto))
+        const pagosCC = ((pagRes.data ?? []) as { fecha: string; monto: number; moneda: string; cliente_id: number | null }[]).filter((p) => p.cliente_id && ccSet.has(p.cliente_id))
+        // Ventas del mes = ventas directas (no distribuidores) + cobros a cuenta de distribuidores del mes.
         const ventasMes = vRes.data ?? []
-        const totalMes = ventasMes.reduce((s, v) => s + Number(v.total ?? 0), 0)
+        const ventasDirectasMes = ventasMes.filter((v) => !(v.cliente_id && ccSet.has(v.cliente_id)))
+        const pagosCCMesList = pagosCC.filter((p) => p.fecha >= mesInicio)
+        const totalMes = ventasDirectasMes.reduce((s, v) => s + Number(v.total ?? 0), 0) + pagosCCMesList.reduce((s, p) => s + pagoPesos(p), 0)
         // Pendientes: TODAS las ventas no-canceladas no-entregadas o no-cobradas (independiente del mes)
         // Las promos no tienen cobro; solo cuentan si falta entregar.
         const pendientes = pendRes.data ?? []
@@ -96,7 +107,9 @@ export function Dashboard() {
         // Union: una venta puede estar pendiente por ambos motivos, pero se cuenta 1 sola vez
         const pendTotal = realmentePendientes.length
 
-        const totalMesAnterior = (vAntRes.data ?? []).reduce((s, v) => s + Number(v.total ?? 0), 0)
+        const ventasDirectasAnt = (vAntRes.data ?? []).filter((v) => !(v.cliente_id && ccSet.has(v.cliente_id)))
+        const pagosCCAnt = pagosCC.filter((p) => p.fecha >= mesAntInicio && p.fecha <= mesAntFin).reduce((s, p) => s + pagoPesos(p), 0)
+        const totalMesAnterior = ventasDirectasAnt.reduce((s, v) => s + Number(v.total ?? 0), 0) + pagosCCAnt
 
         let litros = 0
         for (const it of (iRes.data as any[]) ?? []) {
@@ -109,7 +122,7 @@ export function Dashboard() {
         }
 
         setR({
-          totalMes, cantVentasMes: ventasMes.length,
+          totalMes, cantVentasMes: ventasDirectasMes.length + pagosCCMesList.length,
           totalMesAnterior, litrosAceiteMes: litros,
           pendEntrega, pendCobro, pendCobroMonto, pendTotal,
         })
@@ -121,18 +134,29 @@ export function Dashboard() {
     const ahora = new Date()
     const desde = new Date(ahora.getFullYear(), ahora.getMonth() - 5, 1).toISOString().slice(0, 10)
     Promise.all([
-      supabase.from('ventas').select('fecha_cobro,total').gte('fecha_cobro', desde).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
+      supabase.from('ventas').select('fecha_cobro,total,cliente_id').gte('fecha_cobro', desde).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
       supabase.from('gastos').select('fecha,monto,moneda').gte('fecha', desde).eq('es_adelanto', false),
       supabase.from('ingresos').select('fecha,monto,moneda').gte('fecha', desde),
+      // Distribuidores/mayoristas: su ingreso se reconoce por el PAGO a cuenta, no por la venta.
+      supabase.from('clientes').select('id').in('tipo', ['distribuidor', 'mayorista']),
+      supabase.from('pagos').select('fecha,monto,moneda,cliente_id').gte('fecha', desde),
       import('../lib/bcu').then(m => m.fetchCotizacionBCU()),
-    ]).then(([vR, gR, iR, cotBcu]) => {
+    ]).then(([vR, gR, iR, ccR, pR, cotBcu]) => {
       const tc = cotBcu?.cotizacion ?? 42
+      const ccSet = new Set(((ccR.data ?? []) as { id: number }[]).map((c) => c.id))
       const ingPorMes = new Map<string, number>()
       const egPorMes = new Map<string, number>()
-      for (const v of (vR.data ?? []) as { fecha_cobro: string; total: number }[]) {
+      for (const v of (vR.data ?? []) as { fecha_cobro: string; total: number; cliente_id: number | null }[]) {
         if (!v.fecha_cobro) continue
+        if (v.cliente_id && ccSet.has(v.cliente_id)) continue // distribuidor: cuenta por el pago
         const k = v.fecha_cobro.slice(0, 7)
         ingPorMes.set(k, (ingPorMes.get(k) ?? 0) + Number(v.total))
+      }
+      for (const p of (pR.data ?? []) as { fecha: string; monto: number; moneda: string; cliente_id: number | null }[]) {
+        if (!(p.cliente_id && ccSet.has(p.cliente_id))) continue
+        const k = p.fecha.slice(0, 7)
+        const monto = p.moneda === 'USD' ? Number(p.monto) * tc : Number(p.monto)
+        ingPorMes.set(k, (ingPorMes.get(k) ?? 0) + monto)
       }
       for (const i of (iR.data ?? []) as { fecha: string; monto: number; moneda: string }[]) {
         const k = i.fecha.slice(0, 7)
