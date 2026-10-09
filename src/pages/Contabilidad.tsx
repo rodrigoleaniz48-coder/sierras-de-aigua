@@ -6,6 +6,7 @@ import { useAuth } from '../lib/auth'
 import { Dialog } from '../components/Dialog'
 import { money } from '../lib/format'
 import { parsearExtractoBROU } from '../lib/parserBROU'
+import { parsearExcelBanco, type ResultadoParseo } from '../lib/parserExcelBanco'
 import { ConectarGmailCard } from '../components/ConectarGmailCard'
 import {
   intercambiarCodigoGmail,
@@ -961,18 +962,34 @@ function CargarMovimientosDialog({
   onCerrar: () => void
   onOk: () => void
 }) {
+  const [modo, setModo] = useState<'excel' | 'texto'>('excel')
   const [texto, setTexto] = useState('')
-  const [preview, setPreview] = useState<ReturnType<typeof parsearExtractoBROU> | null>(null)
+  const [preview, setPreview] = useState<ResultadoParseo | null>(null)
   const [importando, setImportando] = useState(false)
+  const [analizando, setAnalizando] = useState(false)
+  const [archivoNombre, setArchivoNombre] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!abierto) { setTexto(''); setPreview(null); setError(null) }
+    if (!abierto) { setModo('excel'); setTexto(''); setPreview(null); setError(null); setArchivoNombre(null) }
   }, [abierto])
 
   function analizar() {
     setPreview(parsearExtractoBROU(texto))
     setError(null)
+  }
+
+  async function analizarArchivo(file: File) {
+    setAnalizando(true); setError(null); setPreview(null); setArchivoNombre(file.name)
+    try {
+      const buf = await file.arrayBuffer()
+      const res = await parsearExcelBanco(buf)
+      setPreview(res)
+    } catch (e) {
+      setError(`No se pudo leer el archivo: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setAnalizando(false)
+    }
   }
 
   async function importar() {
@@ -1002,21 +1019,55 @@ function CargarMovimientosDialog({
   return (
     <Dialog abierto={abierto} onCerrar={onCerrar} titulo={`Cargar movimientos · ${cuenta?.nombre ?? ''}`} ancho="lg">
       <div className="space-y-4">
-        <p className="text-xs text-oliva-600">
-          Pegá el texto del extracto BROU (podés copiar desde el PDF o desde el Excel exportado). El parser detecta las líneas por fecha DD/MM/YYYY y extrae los montos automáticamente. Al importar no se duplican los que ya estén cargados.
-        </p>
-        <div>
-          <label className="label">Texto del extracto</label>
-          <textarea
-            className="input font-mono text-xs min-h-[220px]"
-            value={texto}
-            onChange={(e) => setTexto(e.target.value)}
-            placeholder="Copiá y pegá acá el detalle de movimientos del extracto BROU"
-          />
+        <div className="flex gap-1 rounded-lg bg-oliva-100 p-1 w-fit">
+          {([['excel', '📄 Subir Excel'], ['texto', '📋 Pegar texto']] as const).map(([v, label]) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => { setModo(v); setPreview(null); setError(null) }}
+              className={`text-xs font-semibold rounded-md px-3 py-1.5 transition ${modo === v ? 'bg-oliva-800 text-oliva-50 shadow-sm' : 'text-oliva-600 hover:bg-oliva-200/70'}`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
-        <div className="flex justify-end gap-2">
-          <button className="btn-secondary" onClick={analizar} disabled={!texto.trim()}>Analizar</button>
-        </div>
+
+        {modo === 'excel' ? (
+          <div className="space-y-2">
+            <p className="text-xs text-oliva-600">
+              Subí el extracto exportado del homebanking en Excel (.xlsx o .xls). Detecta las columnas automáticamente (Fecha, Débito/Crédito o Importe). Al importar no se duplican los que ya estén cargados, y después podés usar <b>Conciliar automático</b> para contrastarlos con ingresos y egresos.
+            </p>
+            <label className="card border-dashed border-2 border-oliva-200 bg-oliva-50/40 p-5 flex flex-col items-center justify-center gap-1 cursor-pointer hover:bg-oliva-50 transition">
+              <span className="text-2xl">📄</span>
+              <span className="text-sm font-medium text-oliva-800">{archivoNombre ?? 'Elegí un archivo Excel'}</span>
+              <span className="text-[11px] text-oliva-500">{analizando ? 'Analizando…' : 'Clic para seleccionar (.xlsx / .xls)'}</span>
+              <input
+                type="file"
+                accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+                className="hidden"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) analizarArchivo(f); e.target.value = '' }}
+              />
+            </label>
+          </div>
+        ) : (
+          <>
+            <p className="text-xs text-oliva-600">
+              Pegá el texto del extracto BROU (podés copiar desde el PDF o desde el Excel exportado). El parser detecta las líneas por fecha DD/MM/YYYY y extrae los montos automáticamente. Al importar no se duplican los que ya estén cargados.
+            </p>
+            <div>
+              <label className="label">Texto del extracto</label>
+              <textarea
+                className="input font-mono text-xs min-h-[220px]"
+                value={texto}
+                onChange={(e) => setTexto(e.target.value)}
+                placeholder="Copiá y pegá acá el detalle de movimientos del extracto BROU"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <button className="btn-secondary" onClick={analizar} disabled={!texto.trim()}>Analizar</button>
+            </div>
+          </>
+        )}
 
         {preview && (
           <div className="rounded-xl border border-oliva-100 p-3 bg-oliva-50/60 space-y-2">

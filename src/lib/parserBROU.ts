@@ -33,6 +33,12 @@ function fechaISO(dd: string, mm: string, yyyy: string): string {
   return `${yyyy}-${mm}-${dd}`
 }
 
+// Hash de dedupe compartido: lo usa tambien el parser de Excel para que un
+// mismo movimiento importado por texto o por archivo no se duplique.
+export function hashMovimiento(fecha: string, doc: string | null, debito: number, credito: number): string {
+  return hash(fecha, doc, debito, credito)
+}
+
 function hash(fecha: string, doc: string | null, debito: number, credito: number): string {
   const key = `${fecha}|${doc ?? ''}|${debito}|${credito}`
   // Simple 32-bit hash (no crypto needed, solo para dedupe)
