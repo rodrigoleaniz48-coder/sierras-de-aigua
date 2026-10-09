@@ -55,13 +55,13 @@ interface MovBancario {
   nota: string | null
   hash_unico: string
 }
-interface Venta { id: number; fecha: string; total: number; con_factura: boolean; ubicacion_id: number; cliente_id: number | null }
+interface Venta { id: number; fecha: string; total: number; con_factura: boolean; ubicacion_id: number; cliente_id: number | null; moneda?: string | null; cotizacion?: number | null }
 interface Gasto { id: number; fecha: string; monto: number; moneda: 'UYU' | 'USD'; descripcion: string | null; categoria: string; socio_id: string }
 interface Ingreso { id: number; fecha: string; monto: number; moneda: string; descripcion: string | null; categoria_id: number | null }
 interface Pago { id: number; cliente_id: number | null; fecha: string; monto: number; moneda: string; medio_pago: string | null; nota: string | null }
 interface CategoriaGasto { id: number; slug: string; nombre: string }
 interface CategoriaIngreso { id: number; nombre: string }
-interface Cliente { id: number; nombre: string; tipo?: string; saldo_inicial?: number; saldo_inicial_fecha?: string | null }
+interface Cliente { id: number; nombre: string; tipo?: string; saldo_inicial?: number; saldo_inicial_usd?: number; saldo_inicial_fecha?: string | null }
 
 export function Contabilidad() {
   const { perfil } = useAuth()
@@ -1465,13 +1465,13 @@ function CuentasCorrientes() {
 
   async function cargar() {
     setCargando(true)
-    const { data: cl } = await supabase.from('clientes').select('id,nombre,tipo,saldo_inicial,saldo_inicial_fecha').in('tipo', ['distribuidor', 'mayorista']).order('nombre')
+    const { data: cl } = await supabase.from('clientes').select('id,nombre,tipo,saldo_inicial,saldo_inicial_usd,saldo_inicial_fecha').in('tipo', ['distribuidor', 'mayorista']).order('nombre')
     const arr = (cl as Cliente[]) ?? []
     setClientes(arr)
     const ids = arr.map((c) => c.id)
     if (ids.length > 0) {
       const [v, p] = await Promise.all([
-        supabase.from('ventas').select('id,fecha,total,con_factura,ubicacion_id,cliente_id').in('cliente_id', ids).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
+        supabase.from('ventas').select('id,fecha,total,con_factura,ubicacion_id,cliente_id,moneda,cotizacion').in('cliente_id', ids).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
         supabase.from('pagos').select('id,cliente_id,fecha,monto,moneda,medio_pago,nota').in('cliente_id', ids),
       ])
       setVentas((v.data as Venta[]) ?? [])
@@ -1484,33 +1484,40 @@ function CuentasCorrientes() {
   const cliById = useMemo(() => new Map(clientes.map((c) => [c.id, c])), [clientes])
   // Solo cuentan los movimientos POSTERIORES a la fecha del saldo inicial (ese saldo ya resume lo previo).
   const despuesDeCorte = (c: Cliente | undefined, fecha: string) => !c?.saldo_inicial_fecha || fecha > c.saldo_inicial_fecha
+  // La venta en USD guarda total en pesos + cotizacion; el monto original en USD = total/cotizacion.
+  const ventaEsUSD = (v: Venta) => (v.moneda ?? 'UYU') === 'USD' && !!v.cotizacion && Number(v.cotizacion) > 0
+  const ventaMonto = (v: Venta) => (ventaEsUSD(v) ? Number(v.total) / Number(v.cotizacion) : Number(v.total))
 
+  type Acum = { iniUYU: number; iniUSD: number; vUYU: number; vUSD: number; pUYU: number; pUSD: number }
   const porCliente = useMemo(() => {
-    const m = new Map<number, { inicial: number; ventasPost: number; pagosPost: number; pagosPostUSD: number }>()
-    for (const c of clientes) m.set(c.id, { inicial: Number(c.saldo_inicial ?? 0), ventasPost: 0, pagosPost: 0, pagosPostUSD: 0 })
+    const m = new Map<number, Acum>()
+    for (const c of clientes) m.set(c.id, { iniUYU: Number(c.saldo_inicial ?? 0), iniUSD: Number(c.saldo_inicial_usd ?? 0), vUYU: 0, vUSD: 0, pUYU: 0, pUSD: 0 })
     for (const v of ventas) {
       if (!v.cliente_id || !m.has(v.cliente_id)) continue
-      if (despuesDeCorte(cliById.get(v.cliente_id), v.fecha)) m.get(v.cliente_id)!.ventasPost += Number(v.total)
+      if (!despuesDeCorte(cliById.get(v.cliente_id), v.fecha)) continue
+      const a = m.get(v.cliente_id)!
+      if (ventaEsUSD(v)) a.vUSD += ventaMonto(v); else a.vUYU += Number(v.total)
     }
     for (const p of pagos) {
       if (!p.cliente_id || !m.has(p.cliente_id)) continue
       if (!despuesDeCorte(cliById.get(p.cliente_id), p.fecha)) continue
-      if (p.moneda === 'USD') m.get(p.cliente_id)!.pagosPostUSD += Number(p.monto)
-      else m.get(p.cliente_id)!.pagosPost += Number(p.monto)
+      const a = m.get(p.cliente_id)!
+      if (p.moneda === 'USD') a.pUSD += Number(p.monto); else a.pUYU += Number(p.monto)
     }
     return m
   }, [clientes, ventas, pagos, cliById])
 
   const filas = clientes
     .map((c) => {
-      const d = porCliente.get(c.id) ?? { inicial: 0, ventasPost: 0, pagosPost: 0, pagosPostUSD: 0 }
-      return { c, ...d, saldo: d.inicial + d.ventasPost - d.pagosPost }
+      const a = porCliente.get(c.id) ?? { iniUYU: 0, iniUSD: 0, vUYU: 0, vUSD: 0, pUYU: 0, pUSD: 0 }
+      return { c, ...a, saldoUYU: a.iniUYU + a.vUYU - a.pUYU, saldoUSD: a.iniUSD + a.vUSD - a.pUSD }
     })
-    .filter((f) => f.inicial !== 0 || f.ventasPost > 0 || f.pagosPost > 0 || f.pagosPostUSD > 0)
-    .sort((a, b) => b.saldo - a.saldo)
+    .filter((f) => Math.abs(f.saldoUYU) > 0.01 || Math.abs(f.saldoUSD) > 0.01 || f.vUYU > 0 || f.vUSD > 0 || f.pUYU > 0 || f.pUSD > 0)
+    .sort((a, b) => (b.saldoUYU + b.saldoUSD * 40) - (a.saldoUYU + a.saldoUSD * 40))
 
-  const totalPorCobrar = filas.reduce((s, f) => s + Math.max(0, f.saldo), 0)
-  const totalAFavor = filas.reduce((s, f) => s + Math.max(0, -f.saldo), 0)
+  const totalCobrarUYU = filas.reduce((s, f) => s + Math.max(0, f.saldoUYU), 0)
+  const totalCobrarUSD = filas.reduce((s, f) => s + Math.max(0, f.saldoUSD), 0)
+  const hayUSD = filas.some((f) => Math.abs(f.saldoUSD) > 0.01 || f.vUSD > 0 || f.pUSD > 0)
 
   const selData = sel ? filas.find((f) => f.c.id === sel) : null
   const ledger = useMemo(() => {
@@ -1518,10 +1525,9 @@ function CuentasCorrientes() {
     if (!sel) return [] as L[]
     const c = cliById.get(sel)
     const rows: L[] = []
-    if (c && (Number(c.saldo_inicial ?? 0) !== 0 || c.saldo_inicial_fecha)) {
-      rows.push({ fecha: c.saldo_inicial_fecha ?? '', tipo: 'inicial', detalle: `Saldo inicial${c.saldo_inicial_fecha ? ` al ${c.saldo_inicial_fecha}` : ''}`, debe: Number(c.saldo_inicial ?? 0), haber: 0, moneda: 'UYU' })
-    }
-    ventas.filter((v) => v.cliente_id === sel && despuesDeCorte(c, v.fecha)).forEach((v) => rows.push({ fecha: v.fecha, tipo: 'venta', detalle: `Venta #${v.id}`, debe: Number(v.total), haber: 0, moneda: 'UYU' }))
+    if (c && Number(c.saldo_inicial ?? 0) !== 0) rows.push({ fecha: c.saldo_inicial_fecha ?? '', tipo: 'inicial', detalle: `Saldo inicial${c.saldo_inicial_fecha ? ` al ${c.saldo_inicial_fecha}` : ''}`, debe: Number(c.saldo_inicial ?? 0), haber: 0, moneda: 'UYU' })
+    if (c && Number(c.saldo_inicial_usd ?? 0) !== 0) rows.push({ fecha: c.saldo_inicial_fecha ?? '', tipo: 'inicial', detalle: `Saldo inicial USD${c.saldo_inicial_fecha ? ` al ${c.saldo_inicial_fecha}` : ''}`, debe: Number(c.saldo_inicial_usd ?? 0), haber: 0, moneda: 'USD' })
+    ventas.filter((v) => v.cliente_id === sel && despuesDeCorte(c, v.fecha)).forEach((v) => rows.push({ fecha: v.fecha, tipo: 'venta', detalle: `Venta #${v.id}`, debe: ventaMonto(v), haber: 0, moneda: ventaEsUSD(v) ? 'USD' : 'UYU' }))
     pagos.filter((p) => p.cliente_id === sel && despuesDeCorte(c, p.fecha)).forEach((p) => rows.push({ fecha: p.fecha, tipo: 'pago', detalle: p.nota ?? 'Pago a cuenta', debe: 0, haber: Number(p.monto), moneda: p.moneda }))
     return rows.sort((a, b) => (a.tipo === 'inicial' ? -1 : b.tipo === 'inicial' ? 1 : a.fecha.localeCompare(b.fecha)))
   }, [sel, ventas, pagos, cliById])
@@ -1532,8 +1538,8 @@ function CuentasCorrientes() {
     <div className="space-y-4">
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         <Kpi titulo="Clientes con cuenta" valor={String(filas.length)} />
-        <Kpi titulo="Total por cobrar" valor={money(totalPorCobrar)} tono={totalPorCobrar > 0 ? 'aceite' : undefined} />
-        <Kpi titulo="Saldo a favor de clientes" valor={money(totalAFavor)} />
+        <Kpi titulo="Total por cobrar (pesos)" valor={money(totalCobrarUYU)} tono={totalCobrarUYU > 0 ? 'aceite' : undefined} />
+        {hayUSD && <Kpi titulo="Total por cobrar (USD)" valor={money(totalCobrarUSD, 'USD')} tono={totalCobrarUSD > 0 ? 'aceite' : undefined} />}
       </div>
       <p className="text-xs text-oliva-600">
         Saldo = saldo inicial + ventas − pagos a cuenta. Positivo (rojo) = el cliente debe. Los pagos se registran desde la conciliación bancaria (“Cobro a cuenta”). Para empezar, cargá el saldo inicial que cada cliente debe hoy (botón en el detalle).
@@ -1543,13 +1549,12 @@ function CuentasCorrientes() {
         <div className="card p-6 text-sm text-oliva-700">No hay distribuidores o mayoristas con movimientos.</div>
       ) : (
         <div className="card p-0 overflow-x-auto">
-          <table className="w-full text-sm min-w-[560px]">
+          <table className="w-full text-sm min-w-[520px]">
             <thead>
               <tr className="text-left text-xs uppercase tracking-wide text-oliva-600 border-b border-oliva-100 bg-oliva-50">
                 <th className="py-2 px-3">Cliente</th>
-                <th className="py-2 px-3 text-right">Ventas</th>
-                <th className="py-2 px-3 text-right">Pagos</th>
-                <th className="py-2 px-3 text-right">Saldo</th>
+                <th className="py-2 px-3 text-right">Saldo (pesos)</th>
+                {hayUSD && <th className="py-2 px-3 text-right">Saldo (USD)</th>}
                 <th className="py-2 px-3"></th>
               </tr>
             </thead>
@@ -1559,13 +1564,10 @@ function CuentasCorrientes() {
                   <td className="py-2 px-3 text-oliva-900">
                     {f.c.nombre}
                     <span className="text-[10px] uppercase tracking-wide text-aceite-600 ml-1.5">{f.c.tipo}</span>
-                    {f.inicial !== 0 && <span className="block text-[10px] text-oliva-500">inicial {money(f.inicial)}{f.c.saldo_inicial_fecha ? ` (${f.c.saldo_inicial_fecha})` : ''}</span>}
+                    {(f.iniUYU !== 0 || f.iniUSD !== 0) && <span className="block text-[10px] text-oliva-500">inicial {money(f.iniUYU)}{f.iniUSD !== 0 ? ` · ${money(f.iniUSD, 'USD')}` : ''}{f.c.saldo_inicial_fecha ? ` (${f.c.saldo_inicial_fecha})` : ''}</span>}
                   </td>
-                  <td className="py-2 px-3 text-right tabular-nums text-oliva-700">{money(f.ventasPost)}</td>
-                  <td className="py-2 px-3 text-right tabular-nums text-oliva-700">
-                    {money(f.pagosPost)}{f.pagosPostUSD > 0 ? ` + ${money(f.pagosPostUSD, 'USD')}` : ''}
-                  </td>
-                  <td className={`py-2 px-3 text-right tabular-nums font-semibold ${f.saldo > 0.01 ? 'text-red-700' : f.saldo < -0.01 ? 'text-green-700' : 'text-oliva-500'}`}>{money(f.saldo)}</td>
+                  <td className={`py-2 px-3 text-right tabular-nums font-semibold ${f.saldoUYU > 0.01 ? 'text-red-700' : f.saldoUYU < -0.01 ? 'text-green-700' : 'text-oliva-500'}`}>{money(f.saldoUYU)}</td>
+                  {hayUSD && <td className={`py-2 px-3 text-right tabular-nums font-semibold ${f.saldoUSD > 0.01 ? 'text-red-700' : f.saldoUSD < -0.01 ? 'text-green-700' : 'text-oliva-400'}`}>{Math.abs(f.saldoUSD) > 0.01 ? money(f.saldoUSD, 'USD') : '—'}</td>}
                   <td className="py-2 px-3 text-right">
                     <button className="text-xs text-oliva-700 underline" onClick={() => setSel(sel === f.c.id ? null : f.c.id)}>{sel === f.c.id ? 'ocultar' : 'ver'}</button>
                   </td>
@@ -1583,7 +1585,10 @@ function CuentasCorrientes() {
               <span className="text-sm font-semibold text-oliva-900">Estado de cuenta · {selData.c.nombre}</span>
               <button className="text-xs text-oliva-700 underline" onClick={() => setEditSaldo(selData.c)}>Editar saldo inicial</button>
             </div>
-            <span className={`text-sm font-semibold tabular-nums ${selData.saldo > 0.01 ? 'text-red-700' : 'text-green-700'}`}>Saldo {money(selData.saldo)}{selData.pagosPostUSD > 0 ? ` · ${money(selData.pagosPostUSD, 'USD')} USD a favor` : ''}</span>
+            <span className="text-sm font-semibold tabular-nums">
+              <span className={selData.saldoUYU > 0.01 ? 'text-red-700' : selData.saldoUYU < -0.01 ? 'text-green-700' : 'text-oliva-500'}>Saldo {money(selData.saldoUYU)}</span>
+              {Math.abs(selData.saldoUSD) > 0.01 && <span className={`ml-2 ${selData.saldoUSD > 0.01 ? 'text-red-700' : 'text-green-700'}`}>· {money(selData.saldoUSD, 'USD')}</span>}
+            </span>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm min-w-[520px]">
@@ -1598,16 +1603,17 @@ function CuentasCorrientes() {
               </thead>
               <tbody>
                 {(() => {
-                  let run = 0
+                  let runUYU = 0, runUSD = 0
                   return ledger.map((l, i) => {
-                    if (l.moneda !== 'USD') run += l.debe - l.haber
+                    const esUSD = l.moneda === 'USD'
+                    if (esUSD) runUSD += l.debe - l.haber; else runUYU += l.debe - l.haber
                     return (
                       <tr key={i} className="border-b border-oliva-100/70 last:border-0">
                         <td className="py-1.5 px-3 tabular-nums text-oliva-600 whitespace-nowrap">{l.fecha}</td>
-                        <td className="py-1.5 px-3 text-oliva-800">{l.tipo === 'pago' ? '💵 ' : l.tipo === 'inicial' ? '⚖️ ' : '🧾 '}{l.detalle}{l.moneda === 'USD' ? ' (USD)' : ''}</td>
-                        <td className="py-1.5 px-3 text-right tabular-nums text-oliva-700">{l.debe > 0 ? money(l.debe) : ''}</td>
-                        <td className="py-1.5 px-3 text-right tabular-nums text-green-700">{l.haber > 0 ? money(l.haber, l.moneda === 'USD' ? 'USD' : 'UYU') : ''}</td>
-                        <td className="py-1.5 px-3 text-right tabular-nums font-medium text-oliva-900">{l.moneda !== 'USD' ? money(run) : '—'}</td>
+                        <td className="py-1.5 px-3 text-oliva-800">{l.tipo === 'pago' ? '💵 ' : l.tipo === 'inicial' ? '⚖️ ' : '🧾 '}{l.detalle}{esUSD ? ' (USD)' : ''}</td>
+                        <td className="py-1.5 px-3 text-right tabular-nums text-oliva-700">{l.debe > 0 ? money(l.debe, esUSD ? 'USD' : 'UYU') : ''}</td>
+                        <td className="py-1.5 px-3 text-right tabular-nums text-green-700">{l.haber > 0 ? money(l.haber, esUSD ? 'USD' : 'UYU') : ''}</td>
+                        <td className="py-1.5 px-3 text-right tabular-nums font-medium text-oliva-900">{money(esUSD ? runUSD : runUYU, esUSD ? 'USD' : 'UYU')}</td>
                       </tr>
                     )
                   })
@@ -1626,6 +1632,7 @@ function CuentasCorrientes() {
 // Editar el saldo inicial (deuda a una fecha de corte) de un cliente de cuenta corriente.
 function SaldoInicialDialog({ cliente, onCerrar, onOk }: { cliente: Cliente | null; onCerrar: () => void; onOk: () => void }) {
   const [monto, setMonto] = useState('')
+  const [montoUsd, setMontoUsd] = useState('')
   const [fecha, setFecha] = useState('')
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -1633,6 +1640,7 @@ function SaldoInicialDialog({ cliente, onCerrar, onOk }: { cliente: Cliente | nu
   useEffect(() => {
     if (!cliente) return
     setMonto(String(Number(cliente.saldo_inicial ?? 0)))
+    setMontoUsd(String(Number(cliente.saldo_inicial_usd ?? 0)))
     setFecha(cliente.saldo_inicial_fecha ?? new Date().toISOString().slice(0, 10))
     setError(null)
   }, [cliente])
@@ -1642,6 +1650,7 @@ function SaldoInicialDialog({ cliente, onCerrar, onOk }: { cliente: Cliente | nu
     setGuardando(true); setError(null)
     const { error: e } = await supabase.from('clientes').update({
       saldo_inicial: Number(monto) || 0,
+      saldo_inicial_usd: Number(montoUsd) || 0,
       saldo_inicial_fecha: fecha || null,
     }).eq('id', cliente.id)
     setGuardando(false)
@@ -1654,14 +1663,18 @@ function SaldoInicialDialog({ cliente, onCerrar, onOk }: { cliente: Cliente | nu
     <Dialog abierto={cliente !== null} onCerrar={onCerrar} titulo={`Saldo inicial · ${cliente.nombre}`} ancho="sm">
       <div className="space-y-4">
         <p className="text-xs text-oliva-600">
-          Lo que el cliente <b>debe a la fecha de corte</b> (resume todo lo anterior). Desde esa fecha en adelante, el saldo se ajusta con las ventas y los pagos a cuenta. Positivo = debe; negativo = tiene saldo a favor.
+          Lo que el cliente <b>debe a la fecha de corte</b> (resume todo lo anterior). Desde esa fecha en adelante, el saldo se ajusta con las ventas y los pagos a cuenta. Positivo = debe; negativo = tiene saldo a favor. Cargá lo que deba en cada moneda.
         </p>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="label">Saldo inicial (UYU)</label>
+            <label className="label">Saldo inicial (pesos)</label>
             <input type="number" className="input tabular-nums" step="0.01" value={monto} onChange={(e) => setMonto(e.target.value)} />
           </div>
           <div>
+            <label className="label">Saldo inicial (USD)</label>
+            <input type="number" className="input tabular-nums" step="0.01" value={montoUsd} onChange={(e) => setMontoUsd(e.target.value)} />
+          </div>
+          <div className="col-span-2">
             <label className="label">Fecha de corte</label>
             <input type="date" className="input" value={fecha} onChange={(e) => setFecha(e.target.value)} />
           </div>
