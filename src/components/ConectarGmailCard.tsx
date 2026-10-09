@@ -114,9 +114,14 @@ export function ConectarGmailCard({ recargar }: { recargar?: boolean }) {
         </div>
       )}
       {cuenta.estado === 'error_token' && (
-        <div className="text-xs text-red-700 bg-red-50 rounded px-3 py-2">
-          Error de autenticacion: {cuenta.error_detalle ?? 'Token expirado'}. Desconecta y volve a
-          conectar.
+        <div className="text-xs text-red-700 bg-red-50 rounded px-3 py-2 space-y-2">
+          <div>
+            Error de autenticacion: {cuenta.error_detalle ?? 'Token expirado'}. Reconecta la cuenta
+            para seguir sincronizando.
+          </div>
+          <button className="btn-primary py-1.5 text-xs" onClick={handleConectar} disabled={conectando}>
+            {conectando ? 'Abriendo Google…' : 'Reconectar cuenta'}
+          </button>
         </div>
       )}
       {error && (

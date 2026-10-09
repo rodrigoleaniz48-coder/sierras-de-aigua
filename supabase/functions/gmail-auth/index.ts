@@ -99,8 +99,9 @@ Deno.serve(async (req) => {
       .limit(1)
     if (existing && existing.length > 0) return json({ error: 'Ya hay una cuenta conectada' }, 400)
 
-    // Limpiar intentos previos incompletos
-    await admin.from('cuentas_correo').delete().eq('estado', 'pendiente_oauth')
+    // Limpiar intentos previos incompletos y cuentas rotas (token caducado/revocado),
+    // asi una reconexion deja una sola cuenta limpia.
+    await admin.from('cuentas_correo').delete().in('estado', ['pendiente_oauth', 'error_token'])
 
     const state = Array.from(crypto.getRandomValues(new Uint8Array(32)), (b) =>
       b.toString(16).padStart(2, '0'),
@@ -197,12 +198,13 @@ Deno.serve(async (req) => {
     const user = await requireAdmin(req)
     if (!user) return json({ error: 'No autorizado' }, 403)
 
+    // Permite desconectar tanto una cuenta activa como una con token caducado/revocado.
     const { data: cuenta } = await admin
       .from('cuentas_correo')
       .select('id, refresh_token_enc')
-      .eq('estado', 'activa')
+      .in('estado', ['activa', 'error_token'])
       .limit(1)
-      .single()
+      .maybeSingle()
     if (!cuenta) return json({ error: 'No hay cuenta conectada' }, 400)
 
     // Revocar en Google (best-effort)
