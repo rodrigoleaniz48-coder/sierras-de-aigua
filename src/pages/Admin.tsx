@@ -3,7 +3,8 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { Dialog } from '../components/Dialog'
 import { money } from '../lib/format'
-import { descargarBackupExcel } from '../lib/backupExcel'
+import { descargarBackupExcel, BACKUP_DATASETS, type BackupDataset } from '../lib/backupExcel'
+import { RevisionDatosDialog } from '../components/RevisionDatosDialog'
 
 interface Producto {
   id: number
@@ -56,7 +57,8 @@ export function Admin() {
   const [nuevaPresProd, setNuevaPresProd] = useState<number | null>(null)
   const [editandoPres, setEditandoPres] = useState<Presentacion | null>(null)
   const [editorListas, setEditorListas] = useState(false)
-  const [descargando, setDescargando] = useState(false)
+  const [backupAbierto, setBackupAbierto] = useState(false)
+  const [revisionAbierto, setRevisionAbierto] = useState(false)
   const [configAceiteAbierto, setConfigAceiteAbierto] = useState(false)
   // Cotización BCU cargada una sola vez, usada para convertir costos USD → UYU al calcular márgenes
   const [cotBcu, setCotBcu] = useState<number>(40)
@@ -70,20 +72,6 @@ export function Admin() {
     })()
   }, [])
 
-  useEffect(() => {
-    if (!descargando) return
-    let cancel = false
-    ;(async () => {
-      try {
-        await descargarBackupExcel()
-      } catch (e) {
-        alert('Error generando backup: ' + (e as Error).message)
-      } finally {
-        if (!cancel) setDescargando(false)
-      }
-    })()
-    return () => { cancel = true }
-  }, [descargando])
 
   async function cargar() {
     setCargando(true)
@@ -199,10 +187,15 @@ export function Admin() {
               <button
                 type="button"
                 className="text-xs font-semibold text-oliva-700 hover:text-oliva-900 hover:bg-oliva-100 rounded-md px-2.5 py-1.5 transition"
-                onClick={() => setDescargando(true)}
-                disabled={descargando}
+                onClick={() => setBackupAbierto(true)}
                 title="Descargar backup en Excel"
-              >{descargando ? '⏳' : '📥'} Backup</button>
+              >📥 Backup</button>
+              <button
+                type="button"
+                className="text-xs font-semibold text-oliva-700 hover:text-oliva-900 hover:bg-oliva-100 rounded-md px-2.5 py-1.5 transition"
+                onClick={() => setRevisionAbierto(true)}
+                title="Chequeo de consistencia de datos"
+              >🔎 Revisión de datos</button>
               <button
                 type="button"
                 className="text-xs font-semibold text-oliva-700 hover:text-oliva-900 hover:bg-oliva-100 rounded-md px-2.5 py-1.5 transition"
@@ -358,7 +351,80 @@ export function Admin() {
       <PresentacionDialog abierto={nuevaPresProd !== null} productoId={nuevaPresProd} onCerrar={() => setNuevaPresProd(null)} onOk={() => { setNuevaPresProd(null); cargar() }} />
       <PresentacionDialog abierto={editandoPres !== null} productoId={editandoPres?.producto_id ?? null} editar={editandoPres} onCerrar={() => setEditandoPres(null)} onOk={() => { setEditandoPres(null); cargar() }} />
       <EditorListasDialog abierto={editorListas} onCerrar={() => setEditorListas(false)} onOk={() => { setEditorListas(false); cargar() }} listas={listas} listaItems={listaItems} presentaciones={presentaciones} productos={productos} />
+      <BackupDialog abierto={backupAbierto} onCerrar={() => setBackupAbierto(false)} />
+      <RevisionDatosDialog abierto={revisionAbierto} onCerrar={() => setRevisionAbierto(false)} />
     </div>
+  )
+}
+
+// Descarga del backup Excel: elegir qué datos incluir. Lo transaccional sale por
+// pestañas por mes; clientes/cuentas/stock/tareas como foto actual.
+function BackupDialog({ abierto, onCerrar }: { abierto: boolean; onCerrar: () => void }) {
+  const [sel, setSel] = useState<Set<BackupDataset>>(() => new Set(BACKUP_DATASETS.map((d) => d.key)))
+  const [descargando, setDescargando] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  function toggle(k: BackupDataset) {
+    setSel((prev) => { const s = new Set(prev); if (s.has(k)) s.delete(k); else s.add(k); return s })
+  }
+
+  async function bajar() {
+    if (sel.size === 0) { setError('Elegí al menos un dato.'); return }
+    setDescargando(true); setError(null)
+    try {
+      await descargarBackupExcel(sel)
+      onCerrar()
+    } catch (e) {
+      setError('Error generando el backup: ' + (e as Error).message)
+    } finally {
+      setDescargando(false)
+    }
+  }
+
+  const porMes = BACKUP_DATASETS.filter((d) => d.grupo === 'mes')
+  const foto = BACKUP_DATASETS.filter((d) => d.grupo === 'foto')
+
+  return (
+    <Dialog abierto={abierto} onCerrar={onCerrar} titulo="Descargar backup (Excel)" ancho="sm">
+      <div className="space-y-4">
+        <p className="text-xs text-oliva-600">
+          Elegí qué incluir. Lo transaccional sale en <b>una pestaña por mes</b> (ventas, gastos, ingresos, pagos y movimientos juntos por mes). El resto va como foto actual.
+        </p>
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-widest text-oliva-500 mb-1.5">Por mes</div>
+          <div className="space-y-1.5">
+            {porMes.map((d) => (
+              <label key={d.key} className="flex items-center gap-2 text-sm text-oliva-800 cursor-pointer">
+                <input type="checkbox" className="h-4 w-4 accent-oliva-700" checked={sel.has(d.key)} onChange={() => toggle(d.key)} />
+                {d.label}
+              </label>
+            ))}
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-widest text-oliva-500 mb-1.5">Foto actual</div>
+          <div className="space-y-1.5">
+            {foto.map((d) => (
+              <label key={d.key} className="flex items-center gap-2 text-sm text-oliva-800 cursor-pointer">
+                <input type="checkbox" className="h-4 w-4 accent-oliva-700" checked={sel.has(d.key)} onChange={() => toggle(d.key)} />
+                {d.label}
+              </label>
+            ))}
+          </div>
+        </div>
+        {error && <div className="text-sm text-red-700">{error}</div>}
+        <div className="flex justify-between items-center pt-1">
+          <div className="flex gap-2 text-xs">
+            <button className="text-oliva-600 underline" onClick={() => setSel(new Set(BACKUP_DATASETS.map((d) => d.key)))}>Todos</button>
+            <button className="text-oliva-600 underline" onClick={() => setSel(new Set())}>Ninguno</button>
+          </div>
+          <div className="flex gap-2">
+            <button className="btn-secondary" onClick={onCerrar}>Cancelar</button>
+            <button className="btn-primary" onClick={bajar} disabled={descargando}>{descargando ? 'Generando…' : '📥 Descargar'}</button>
+          </div>
+        </div>
+      </div>
+    </Dialog>
   )
 }
 
