@@ -23,7 +23,7 @@ import {
   type EstadoManual,
 } from '../lib/obligaciones'
 
-type Tab = 'resultados' | 'conciliacion' | 'mail'
+type Tab = 'resultados' | 'conciliacion' | 'ctacte' | 'mail'
 
 interface Cuenta {
   id: number
@@ -49,6 +49,7 @@ interface MovBancario {
   conciliado_gasto_id: number | null
   conciliado_venta_id: number | null
   conciliado_ingreso_id: number | null
+  conciliado_pago_id: number | null
   categoria_manual: string | null
   es_transferencia_interna: boolean
   nota: string | null
@@ -57,9 +58,10 @@ interface MovBancario {
 interface Venta { id: number; fecha: string; total: number; con_factura: boolean; ubicacion_id: number; cliente_id: number | null }
 interface Gasto { id: number; fecha: string; monto: number; moneda: 'UYU' | 'USD'; descripcion: string | null; categoria: string; socio_id: string }
 interface Ingreso { id: number; fecha: string; monto: number; moneda: string; descripcion: string | null; categoria_id: number | null }
+interface Pago { id: number; cliente_id: number | null; fecha: string; monto: number; moneda: string; medio_pago: string | null; nota: string | null }
 interface CategoriaGasto { id: number; slug: string; nombre: string }
 interface CategoriaIngreso { id: number; nombre: string }
-interface Cliente { id: number; nombre: string }
+interface Cliente { id: number; nombre: string; tipo?: string }
 
 export function Contabilidad() {
   const { perfil } = useAuth()
@@ -67,7 +69,7 @@ export function Contabilidad() {
   const [tab, setTabState] = useState<Tab>(() => {
     try {
       const s = sessionStorage.getItem('contabilidad_tab')
-      if (s === 'resultados' || s === 'conciliacion' || s === 'mail') return s
+      if (s === 'resultados' || s === 'conciliacion' || s === 'ctacte' || s === 'mail') return s
     } catch { /* ignore */ }
     return 'resultados'
   })
@@ -116,7 +118,7 @@ export function Contabilidad() {
       </div>
 
       <div className="flex gap-1 border-b border-oliva-100 overflow-x-auto">
-        {(['resultados', 'conciliacion', 'mail'] as Tab[]).map((t) => (
+        {(['resultados', 'conciliacion', 'ctacte', 'mail'] as Tab[]).map((t) => (
           <button
             key={t}
             className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition ${
@@ -124,13 +126,14 @@ export function Contabilidad() {
             }`}
             onClick={() => setTab(t)}
           >
-            {t === 'resultados' ? 'Estado de resultados' : t === 'conciliacion' ? 'Conciliación bancaria' : 'Mail'}
+            {t === 'resultados' ? 'Estado de resultados' : t === 'conciliacion' ? 'Conciliación bancaria' : t === 'ctacte' ? 'Cuentas corrientes' : 'Mail'}
           </button>
         ))}
       </div>
 
       {tab === 'resultados' && <EstadoResultados />}
       {tab === 'conciliacion' && <Conciliacion />}
+      {tab === 'ctacte' && <CuentasCorrientes />}
       {tab === 'mail' && <Obligaciones gmailMsg={gmailMsg} />}
     </div>
   )
@@ -745,6 +748,7 @@ function Conciliacion() {
   const [ventas, setVentas] = useState<Venta[]>([])
   const [gastos, setGastos] = useState<Gasto[]>([])
   const [ingresos, setIngresos] = useState<Ingreso[]>([])
+  const [pagos, setPagos] = useState<Pago[]>([])
   const [catGasto, setCatGasto] = useState<CategoriaGasto[]>([])
   const [catIngreso, setCatIngreso] = useState<CategoriaIngreso[]>([])
   const [clientes, setClientes] = useState<Cliente[]>([])
@@ -752,6 +756,7 @@ function Conciliacion() {
   const [cargarAbierto, setCargarAbierto] = useState(false)
   const [registrar, setRegistrar] = useState<MovBancario | null>(null)
   const [conciliarCon, setConciliarCon] = useState<MovBancario | null>(null)
+  const [cobroCuenta, setCobroCuenta] = useState<MovBancario | null>(null)
   const [verResumen, setVerResumen] = useState(false)
 
   const desde = `${anio}-${mes}-01`
@@ -780,17 +785,19 @@ function Conciliacion() {
   async function cargar() {
     if (!cuentaId) return
     setCargando(true)
-    const [mb, v, g, ing, cl] = await Promise.all([
+    const [mb, v, g, ing, pg, cl] = await Promise.all([
       supabase.from('movimientos_bancarios').select('*').eq('cuenta_id', Number(cuentaId)).gte('fecha', desde).lte('fecha', hasta).order('fecha'),
       supabase.from('ventas').select('id,fecha,total,con_factura,ubicacion_id,cliente_id').gte('fecha', desdeAmplio).lte('fecha', hasta).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
       supabase.from('gastos').select('id,fecha,monto,moneda,descripcion,categoria,socio_id').gte('fecha', desdeAmplio).lte('fecha', hasta).eq('es_adelanto', false),
       supabase.from('ingresos').select('id,fecha,monto,moneda,descripcion,categoria_id').gte('fecha', desdeAmplio).lte('fecha', hasta),
-      supabase.from('clientes').select('id,nombre'),
+      supabase.from('pagos').select('id,cliente_id,fecha,monto,moneda,medio_pago,nota').gte('fecha', desdeAmplio).lte('fecha', hasta),
+      supabase.from('clientes').select('id,nombre,tipo'),
     ])
     setMovs((mb.data as MovBancario[]) ?? [])
     setVentas((v.data as Venta[]) ?? [])
     setGastos((g.data as Gasto[]) ?? [])
     setIngresos((ing.data as Ingreso[]) ?? [])
+    setPagos((pg.data as Pago[]) ?? [])
     setClientes((cl.data as Cliente[]) ?? [])
     setCargando(false)
   }
@@ -803,7 +810,7 @@ function Conciliacion() {
   async function autoConciliar() {
     let matched = 0
     for (const m of movs) {
-      if (m.conciliado_gasto_id || m.conciliado_venta_id || m.conciliado_ingreso_id || m.es_transferencia_interna) continue
+      if (m.conciliado_gasto_id || m.conciliado_venta_id || m.conciliado_ingreso_id || m.conciliado_pago_id || m.es_transferencia_interna) continue
       const monto = Math.abs(Number(m.monto))
       const fechaM = new Date(m.fecha).getTime()
       if (m.debito > 0) {
@@ -840,9 +847,10 @@ function Conciliacion() {
   // Estadísticas
   const totalDebitos = movs.reduce((s, m) => s + Number(m.debito), 0)
   const totalCreditos = movs.reduce((s, m) => s + Number(m.credito), 0)
-  const estaConciliado = (m: MovBancario) => m.conciliado_gasto_id || m.conciliado_venta_id || m.conciliado_ingreso_id || m.es_transferencia_interna
+  const estaConciliado = (m: MovBancario) => m.conciliado_gasto_id || m.conciliado_venta_id || m.conciliado_ingreso_id || m.conciliado_pago_id || m.es_transferencia_interna
   const conciliados = movs.filter(estaConciliado)
   const pendientes = movs.filter((m) => !estaConciliado(m))
+  const pagoPorId = useMemo(() => new Map(pagos.map((p) => [p.id, p])), [pagos])
 
   // Para el resumen del mes: que ventas/ingresos/gastos ya estan enlazados a un movimiento del banco.
   const ventasConc = useMemo(() => new Set(movs.map((m) => m.conciliado_venta_id).filter(Boolean) as number[]), [movs])
@@ -856,14 +864,14 @@ function Conciliacion() {
   async function toggleTransferencia(m: MovBancario) {
     await supabase.from('movimientos_bancarios').update({
       es_transferencia_interna: !m.es_transferencia_interna,
-      conciliado_gasto_id: null, conciliado_venta_id: null, conciliado_ingreso_id: null,
+      conciliado_gasto_id: null, conciliado_venta_id: null, conciliado_ingreso_id: null, conciliado_pago_id: null,
     }).eq('id', m.id)
     cargar()
   }
 
   async function desconciliar(m: MovBancario) {
     await supabase.from('movimientos_bancarios').update({
-      conciliado_gasto_id: null, conciliado_venta_id: null, conciliado_ingreso_id: null, es_transferencia_interna: false,
+      conciliado_gasto_id: null, conciliado_venta_id: null, conciliado_ingreso_id: null, conciliado_pago_id: null, es_transferencia_interna: false,
     }).eq('id', m.id)
     cargar()
   }
@@ -938,10 +946,11 @@ function Conciliacion() {
             </thead>
             <tbody>
               {movs.map((m) => {
-                const conciliado = m.conciliado_gasto_id || m.conciliado_venta_id || m.conciliado_ingreso_id
+                const conciliado = m.conciliado_gasto_id || m.conciliado_venta_id || m.conciliado_ingreso_id || m.conciliado_pago_id
                 const g = m.conciliado_gasto_id ? gastos.find((x) => x.id === m.conciliado_gasto_id) : null
                 const v = m.conciliado_venta_id ? ventas.find((x) => x.id === m.conciliado_venta_id) : null
                 const ing = m.conciliado_ingreso_id ? ingresos.find((x) => x.id === m.conciliado_ingreso_id) : null
+                const pg = m.conciliado_pago_id ? pagoPorId.get(m.conciliado_pago_id) : null
                 return (
                   <tr key={m.id} className={`border-b border-oliva-100/70 last:border-0 ${m.es_transferencia_interna ? 'bg-blue-50/40' : conciliado ? 'bg-oliva-50/40' : ''}`}>
                     <td className="py-2 px-3 tabular-nums text-oliva-700 whitespace-nowrap">{m.fecha}</td>
@@ -958,6 +967,8 @@ function Conciliacion() {
                         <span className="text-oliva-800">✅ Venta #{v.id} {v.cliente_id ? `· ${clientePorId.get(v.cliente_id)?.nombre ?? ''}` : ''}</span>
                       ) : ing ? (
                         <span className="text-oliva-800">✅ Ingreso: {ing.descripcion ?? 'registrado'}</span>
+                      ) : pg ? (
+                        <span className="text-oliva-800">✅ Cobro a cuenta: {pg.cliente_id ? (clientePorId.get(pg.cliente_id)?.nombre ?? '') : ''}</span>
                       ) : (
                         <span className="text-red-700">🔴 sin conciliar</span>
                       )}
@@ -968,6 +979,9 @@ function Conciliacion() {
                       ) : (
                         <div className="flex gap-2 justify-end flex-wrap">
                           <button className="text-xs text-oliva-700 underline" onClick={() => setConciliarCon(m)}>Conciliar con…</button>
+                          {Number(m.credito) > 0 && (
+                            <button className="text-xs text-aceite-600 underline" onClick={() => setCobroCuenta(m)}>Cobro a cuenta…</button>
+                          )}
                           <button
                             className="text-xs text-green-700 underline"
                             onClick={() => setRegistrar(m)}
@@ -1054,6 +1068,14 @@ function Conciliacion() {
         clientePorId={clientePorId}
         onCerrar={() => setConciliarCon(null)}
         onOk={() => { setConciliarCon(null); cargar() }}
+      />
+
+      <CobroACuentaDialog
+        mov={cobroCuenta}
+        cuenta={cuenta ?? null}
+        clientes={clientes}
+        onCerrar={() => setCobroCuenta(null)}
+        onOk={() => { setCobroCuenta(null); cargar() }}
       />
 
       <RegistrarMovimientoDialog
@@ -1298,6 +1320,269 @@ function ConciliarConExistenteDialog({
         </div>
       </div>
     </Dialog>
+  )
+}
+
+// Registrar un credito del banco como "cobro a cuenta" de un cliente (pago
+// contra su cuenta corriente), sin ligarlo a una venta puntual. Para
+// distribuidores/mayoristas que liquidan montos que no coinciden con una venta.
+function CobroACuentaDialog({
+  mov, cuenta, clientes, onCerrar, onOk,
+}: {
+  mov: MovBancario | null
+  cuenta: Cuenta | null
+  clientes: Cliente[]
+  onCerrar: () => void
+  onOk: () => void
+}) {
+  const { perfil } = useAuth()
+  const [busca, setBusca] = useState('')
+  const [clienteId, setClienteId] = useState<number | null>(null)
+  const [monto, setMonto] = useState('')
+  const [nota, setNota] = useState('')
+  const [guardando, setGuardando] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!mov) return
+    setMonto(String(Number(mov.credito)))
+    setBusca(''); setClienteId(null); setNota(''); setError(null)
+  }, [mov])
+
+  const prioridad = (t?: string) => (t === 'distribuidor' ? 0 : t === 'mayorista' ? 1 : 2)
+  const sugeridos = useMemo(() => {
+    const q = busca.trim().toLowerCase()
+    return [...clientes]
+      .filter((c) => !q || c.nombre.toLowerCase().includes(q))
+      .sort((a, b) => prioridad(a.tipo) - prioridad(b.tipo) || a.nombre.localeCompare(b.nombre))
+      .slice(0, 30)
+  }, [clientes, busca])
+
+  const clienteSel = clientes.find((c) => c.id === clienteId) ?? null
+
+  async function guardar() {
+    if (!mov || !cuenta || !perfil) return
+    if (!clienteId) { setError('Elegí el cliente.'); return }
+    const m = Number(monto)
+    if (!(m > 0)) { setError('El monto debe ser mayor a cero.'); return }
+    setGuardando(true); setError(null)
+    const { data, error: e } = await supabase.from('pagos').insert({
+      cliente_id: clienteId,
+      fecha: mov.fecha,
+      monto: m,
+      moneda: cuenta.moneda,
+      medio_pago: 'transferencia',
+      cuenta_id: cuenta.id,
+      nota: nota.trim() || (mov.asunto ?? null),
+      socio_id: perfil.id,
+      actualizado_en: new Date().toISOString(),
+    }).select('id').single()
+    if (e || !data) { setGuardando(false); setError(e?.message ?? 'No se pudo guardar'); return }
+    await supabase.from('movimientos_bancarios').update({ conciliado_pago_id: data.id }).eq('id', mov.id)
+    setGuardando(false)
+    onOk()
+  }
+
+  if (!mov) return null
+
+  return (
+    <Dialog abierto={mov !== null} onCerrar={onCerrar} titulo="Cobro a cuenta de cliente" ancho="sm">
+      <div className="space-y-4">
+        <p className="text-xs text-oliva-600">
+          Registra este crédito como un <b>pago a cuenta</b> del cliente (se descuenta de su saldo), sin ligarlo a una venta puntual. Queda conciliado.
+        </p>
+        <div className="text-xs text-oliva-700">
+          {mov.fecha} · {mov.descripcion}{mov.asunto ? ` · ${mov.asunto}` : ''} · <b className="text-green-700">{money(Number(mov.credito))}</b>
+        </div>
+        <div>
+          <label className="label">Cliente</label>
+          {clienteSel ? (
+            <div className="flex items-center justify-between rounded-md border border-oliva-200 px-3 py-2 text-sm">
+              <span className="text-oliva-900">{clienteSel.nombre}{clienteSel.tipo ? ` · ${clienteSel.tipo}` : ''}</span>
+              <button className="text-xs text-oliva-600 underline" onClick={() => setClienteId(null)}>cambiar</button>
+            </div>
+          ) : (
+            <>
+              <input className="input" placeholder="Buscar cliente…" value={busca} onChange={(e) => setBusca(e.target.value)} autoFocus />
+              <div className="mt-1 max-h-44 overflow-y-auto rounded-md border border-oliva-100 divide-y divide-oliva-100/70">
+                {sugeridos.map((c) => (
+                  <button key={c.id} type="button" className="w-full text-left px-3 py-1.5 text-sm hover:bg-oliva-50 flex items-center justify-between" onClick={() => setClienteId(c.id)}>
+                    <span className="text-oliva-800 truncate">{c.nombre}</span>
+                    {c.tipo && c.tipo !== 'minorista' && <span className="text-[10px] uppercase tracking-wide text-aceite-600 shrink-0 ml-2">{c.tipo}</span>}
+                  </button>
+                ))}
+                {sugeridos.length === 0 && <div className="px-3 py-2 text-xs text-oliva-500">Sin resultados.</div>}
+              </div>
+            </>
+          )}
+        </div>
+        <div>
+          <label className="label">Monto ({cuenta?.moneda ?? 'UYU'})</label>
+          <input type="number" className="input tabular-nums" min="0" step="0.01" value={monto} onChange={(e) => setMonto(e.target.value)} />
+        </div>
+        <div>
+          <label className="label">Nota (opcional)</label>
+          <input className="input" value={nota} onChange={(e) => setNota(e.target.value)} placeholder={mov.asunto ?? 'Pago a cuenta'} />
+        </div>
+        {error && <div className="text-sm text-red-700">{error}</div>}
+        <div className="flex justify-end gap-2 pt-1">
+          <button className="btn-secondary" onClick={onCerrar}>Cancelar</button>
+          <button className="btn-primary" onClick={guardar} disabled={guardando}>{guardando ? 'Guardando…' : 'Registrar cobro'}</button>
+        </div>
+      </div>
+    </Dialog>
+  )
+}
+
+// ============================================================
+// Cuentas corrientes (distribuidores / mayoristas)
+// Saldo por cliente = ventas (debe) − pagos a cuenta (haber). Base UYU.
+// ============================================================
+function CuentasCorrientes() {
+  const [clientes, setClientes] = useState<Cliente[]>([])
+  const [ventas, setVentas] = useState<Venta[]>([])
+  const [pagos, setPagos] = useState<Pago[]>([])
+  const [cargando, setCargando] = useState(true)
+  const [sel, setSel] = useState<number | null>(null)
+
+  useEffect(() => {
+    (async () => {
+      setCargando(true)
+      const { data: cl } = await supabase.from('clientes').select('id,nombre,tipo').in('tipo', ['distribuidor', 'mayorista']).order('nombre')
+      const arr = (cl as Cliente[]) ?? []
+      setClientes(arr)
+      const ids = arr.map((c) => c.id)
+      if (ids.length > 0) {
+        const [v, p] = await Promise.all([
+          supabase.from('ventas').select('id,fecha,total,con_factura,ubicacion_id,cliente_id').in('cliente_id', ids).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
+          supabase.from('pagos').select('id,cliente_id,fecha,monto,moneda,medio_pago,nota').in('cliente_id', ids),
+        ])
+        setVentas((v.data as Venta[]) ?? [])
+        setPagos((p.data as Pago[]) ?? [])
+      } else {
+        setVentas([]); setPagos([])
+      }
+      setCargando(false)
+    })()
+  }, [])
+
+  const porCliente = useMemo(() => {
+    const m = new Map<number, { debe: number; haber: number; haberUSD: number }>()
+    for (const c of clientes) m.set(c.id, { debe: 0, haber: 0, haberUSD: 0 })
+    for (const v of ventas) { if (v.cliente_id && m.has(v.cliente_id)) m.get(v.cliente_id)!.debe += Number(v.total) }
+    for (const p of pagos) {
+      if (!p.cliente_id || !m.has(p.cliente_id)) continue
+      if (p.moneda === 'USD') m.get(p.cliente_id)!.haberUSD += Number(p.monto)
+      else m.get(p.cliente_id)!.haber += Number(p.monto)
+    }
+    return m
+  }, [clientes, ventas, pagos])
+
+  const filas = clientes
+    .map((c) => ({ c, ...(porCliente.get(c.id) ?? { debe: 0, haber: 0, haberUSD: 0 }) }))
+    .map((f) => ({ ...f, saldo: f.debe - f.haber }))
+    .filter((f) => f.debe > 0 || f.haber > 0 || f.haberUSD > 0)
+    .sort((a, b) => b.saldo - a.saldo)
+
+  const totalPorCobrar = filas.reduce((s, f) => s + Math.max(0, f.saldo), 0)
+  const totalAFavor = filas.reduce((s, f) => s + Math.max(0, -f.saldo), 0)
+
+  const selData = sel ? filas.find((f) => f.c.id === sel) : null
+  const ledger = useMemo(() => {
+    if (!sel) return [] as { fecha: string; tipo: 'venta' | 'pago'; detalle: string; debe: number; haber: number; moneda: string }[]
+    const vs = ventas.filter((v) => v.cliente_id === sel).map((v) => ({ fecha: v.fecha, tipo: 'venta' as const, detalle: `Venta #${v.id}`, debe: Number(v.total), haber: 0, moneda: 'UYU' }))
+    const ps = pagos.filter((p) => p.cliente_id === sel).map((p) => ({ fecha: p.fecha, tipo: 'pago' as const, detalle: p.nota ?? 'Pago a cuenta', debe: 0, haber: Number(p.monto), moneda: p.moneda }))
+    return [...vs, ...ps].sort((a, b) => a.fecha.localeCompare(b.fecha))
+  }, [sel, ventas, pagos])
+
+  if (cargando) return <div className="card p-6 text-sm text-oliva-700">Cargando…</div>
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        <Kpi titulo="Clientes con cuenta" valor={String(filas.length)} />
+        <Kpi titulo="Total por cobrar" valor={money(totalPorCobrar)} tono={totalPorCobrar > 0 ? 'aceite' : undefined} />
+        <Kpi titulo="Saldo a favor de clientes" valor={money(totalAFavor)} />
+      </div>
+      <p className="text-xs text-oliva-600">
+        Saldo = ventas acumuladas − pagos a cuenta. Positivo (rojo) = el cliente debe. Los pagos se registran desde la conciliación bancaria (“Cobro a cuenta”).
+      </p>
+
+      {filas.length === 0 ? (
+        <div className="card p-6 text-sm text-oliva-700">No hay distribuidores o mayoristas con movimientos.</div>
+      ) : (
+        <div className="card p-0 overflow-x-auto">
+          <table className="w-full text-sm min-w-[560px]">
+            <thead>
+              <tr className="text-left text-xs uppercase tracking-wide text-oliva-600 border-b border-oliva-100 bg-oliva-50">
+                <th className="py-2 px-3">Cliente</th>
+                <th className="py-2 px-3 text-right">Ventas</th>
+                <th className="py-2 px-3 text-right">Pagos</th>
+                <th className="py-2 px-3 text-right">Saldo</th>
+                <th className="py-2 px-3"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filas.map((f) => (
+                <tr key={f.c.id} className={`border-b border-oliva-100/70 last:border-0 ${sel === f.c.id ? 'bg-oliva-50/60' : ''}`}>
+                  <td className="py-2 px-3 text-oliva-900">
+                    {f.c.nombre}
+                    <span className="text-[10px] uppercase tracking-wide text-aceite-600 ml-1.5">{f.c.tipo}</span>
+                  </td>
+                  <td className="py-2 px-3 text-right tabular-nums text-oliva-700">{money(f.debe)}</td>
+                  <td className="py-2 px-3 text-right tabular-nums text-oliva-700">
+                    {money(f.haber)}{f.haberUSD > 0 ? ` + ${money(f.haberUSD, 'USD')}` : ''}
+                  </td>
+                  <td className={`py-2 px-3 text-right tabular-nums font-semibold ${f.saldo > 0.01 ? 'text-red-700' : f.saldo < -0.01 ? 'text-green-700' : 'text-oliva-500'}`}>{money(f.saldo)}</td>
+                  <td className="py-2 px-3 text-right">
+                    <button className="text-xs text-oliva-700 underline" onClick={() => setSel(sel === f.c.id ? null : f.c.id)}>{sel === f.c.id ? 'ocultar' : 'ver'}</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {selData && (
+        <div className="card p-0 overflow-hidden">
+          <div className="px-4 py-3 border-b border-oliva-100 bg-oliva-50 flex items-center justify-between">
+            <span className="text-sm font-semibold text-oliva-900">Estado de cuenta · {selData.c.nombre}</span>
+            <span className={`text-sm font-semibold tabular-nums ${selData.saldo > 0.01 ? 'text-red-700' : 'text-green-700'}`}>Saldo {money(selData.saldo)}{selData.haberUSD > 0 ? ` · ${money(selData.haberUSD, 'USD')} USD a favor` : ''}</span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[520px]">
+              <thead>
+                <tr className="text-left text-xs uppercase tracking-wide text-oliva-600 border-b border-oliva-100">
+                  <th className="py-2 px-3">Fecha</th>
+                  <th className="py-2 px-3">Detalle</th>
+                  <th className="py-2 px-3 text-right">Debe</th>
+                  <th className="py-2 px-3 text-right">Haber</th>
+                  <th className="py-2 px-3 text-right">Saldo</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(() => {
+                  let run = 0
+                  return ledger.map((l, i) => {
+                    if (l.moneda !== 'USD') run += l.debe - l.haber
+                    return (
+                      <tr key={i} className="border-b border-oliva-100/70 last:border-0">
+                        <td className="py-1.5 px-3 tabular-nums text-oliva-600 whitespace-nowrap">{l.fecha}</td>
+                        <td className="py-1.5 px-3 text-oliva-800">{l.tipo === 'pago' ? '💵 ' : '🧾 '}{l.detalle}{l.moneda === 'USD' ? ' (USD)' : ''}</td>
+                        <td className="py-1.5 px-3 text-right tabular-nums text-oliva-700">{l.debe > 0 ? money(l.debe) : ''}</td>
+                        <td className="py-1.5 px-3 text-right tabular-nums text-green-700">{l.haber > 0 ? money(l.haber, l.moneda === 'USD' ? 'USD' : 'UYU') : ''}</td>
+                        <td className="py-1.5 px-3 text-right tabular-nums font-medium text-oliva-900">{l.moneda !== 'USD' ? money(run) : '—'}</td>
+                      </tr>
+                    )
+                  })
+                })()}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 
