@@ -679,28 +679,29 @@ Deno.serve(async (req) => {
       const threadIds = rows.map(r => r.thread_id)
       const { data: existentes } = await admin
         .from('correos_sincronizados')
-        .select('thread_id, monto_detectado, moneda_detectada, fecha_vencimiento, cuerpo_texto')
+        .select('thread_id, monto_detectado, moneda_detectada, fecha_vencimiento, cuerpo_texto, estado_manual')
         .eq('cuenta_correo_id', cuenta.id)
         .in('thread_id', threadIds)
       const existMap = new Map(
-        (existentes ?? []).map((e: { thread_id: string; monto_detectado: number | null; moneda_detectada: string | null; fecha_vencimiento: string | null; cuerpo_texto: string | null }) =>
+        (existentes ?? []).map((e: { thread_id: string; monto_detectado: number | null; moneda_detectada: string | null; fecha_vencimiento: string | null; cuerpo_texto: string | null; estado_manual: string | null }) =>
           [e.thread_id, e]),
       )
 
-      // Si el registro nuevo no tiene monto pero el existente si, preservar datos
+      // Merge con el existente: preservar datos de pago y, sobre todo, la
+      // clasificacion manual (pagada/descartada/revisar) que puso el usuario.
       const rowsMerge = rows.map(r => {
         const ex = existMap.get(r.thread_id)
         if (!ex) return r
+        const base: Record<string, unknown> = { ...r }
+        // Nunca pisar la clasificacion manual al re-sincronizar.
+        if (ex.estado_manual != null) base.estado_manual = ex.estado_manual
         if (r.monto_detectado == null && ex.monto_detectado != null) {
-          return {
-            ...r,
-            monto_detectado: ex.monto_detectado,
-            moneda_detectada: ex.moneda_detectada,
-            fecha_vencimiento: r.fecha_vencimiento ?? ex.fecha_vencimiento,
-            cuerpo_texto: ex.cuerpo_texto ?? r.cuerpo_texto,
-          }
+          base.monto_detectado = ex.monto_detectado
+          base.moneda_detectada = ex.moneda_detectada
+          base.fecha_vencimiento = r.fecha_vencimiento ?? ex.fecha_vencimiento
+          base.cuerpo_texto = ex.cuerpo_texto ?? r.cuerpo_texto
         }
-        return r
+        return base
       })
 
       const { error: insertErr } = await admin

@@ -99,20 +99,37 @@ Deno.serve(async (req) => {
       .limit(1)
     if (existing && existing.length > 0) return json({ error: 'Ya hay una cuenta conectada' }, 400)
 
-    // Limpiar intentos previos incompletos y cuentas rotas (token caducado/revocado),
-    // asi una reconexion deja una sola cuenta limpia.
-    await admin.from('cuentas_correo').delete().in('estado', ['pendiente_oauth', 'error_token'])
+    // Limpiar intentos previos incompletos.
+    await admin.from('cuentas_correo').delete().eq('estado', 'pendiente_oauth')
 
     const state = Array.from(crypto.getRandomValues(new Uint8Array(32)), (b) =>
       b.toString(16).padStart(2, '0'),
     ).join('')
 
-    const { error: insertErr } = await admin.from('cuentas_correo').insert({
-      conectada_por: user.id,
-      oauth_state: state,
-      estado: 'pendiente_oauth',
-    })
-    if (insertErr) return json({ error: insertErr.message }, 500)
+    // Si hay una cuenta con token caducado/revocado, REUTILIZAR su fila (mismo id)
+    // en vez de borrarla: asi se preservan los correos ya sincronizados y clasificados
+    // (la FK correos_sincronizados.cuenta_correo_id es ON DELETE CASCADE).
+    const { data: rota } = await admin
+      .from('cuentas_correo')
+      .select('id')
+      .eq('estado', 'error_token')
+      .limit(1)
+      .maybeSingle()
+
+    if (rota) {
+      const { error: updErr } = await admin
+        .from('cuentas_correo')
+        .update({ oauth_state: state, estado: 'pendiente_oauth', conectada_por: user.id, error_detalle: null })
+        .eq('id', rota.id)
+      if (updErr) return json({ error: updErr.message }, 500)
+    } else {
+      const { error: insertErr } = await admin.from('cuentas_correo').insert({
+        conectada_por: user.id,
+        oauth_state: state,
+        estado: 'pendiente_oauth',
+      })
+      if (insertErr) return json({ error: insertErr.message }, 500)
+    }
 
     const params = new URLSearchParams({
       client_id: CLIENT_ID,

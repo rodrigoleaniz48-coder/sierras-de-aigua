@@ -43,7 +43,7 @@ export function ConectarGmailCard({ recargar }: { recargar?: boolean }) {
   }
 
   async function handleDesconectar() {
-    if (!confirm('Desconectar la cuenta de Gmail? Los correos ya importados se mantienen.')) return
+    if (!confirm('Desconectar la cuenta de Gmail? Se quitaran tambien los correos y obligaciones ya importados. Si el token caduco, usa "Reconectar" en su lugar para conservarlos.')) return
     setDesconectando(true)
     setError(null)
     const result = await desconectarGmail()
