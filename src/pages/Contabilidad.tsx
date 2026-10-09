@@ -48,6 +48,7 @@ interface MovBancario {
   saldo: number | null
   conciliado_gasto_id: number | null
   conciliado_venta_id: number | null
+  conciliado_ingreso_id: number | null
   categoria_manual: string | null
   es_transferencia_interna: boolean
   nota: string | null
@@ -55,6 +56,9 @@ interface MovBancario {
 }
 interface Venta { id: number; fecha: string; total: number; con_factura: boolean; ubicacion_id: number; cliente_id: number | null }
 interface Gasto { id: number; fecha: string; monto: number; moneda: 'UYU' | 'USD'; descripcion: string | null; categoria: string; socio_id: string }
+interface Ingreso { id: number; fecha: string; monto: number; moneda: string; descripcion: string | null; categoria_id: number | null }
+interface CategoriaGasto { id: number; slug: string; nombre: string }
+interface CategoriaIngreso { id: number; nombre: string }
 interface Cliente { id: number; nombre: string }
 
 export function Contabilidad() {
@@ -728,16 +732,25 @@ function EstadoResultados() {
 // ============================================================
 function Conciliacion() {
   const hoy = new Date()
+  // El filtro (cuenta/mes/año) se recuerda en localStorage para no perderlo al
+  // cambiar de pestaña — los movimientos pueden ser de un mes distinto al actual.
+  const filtroGuardado = (() => {
+    try { return JSON.parse(localStorage.getItem('concil:filtro') ?? 'null') as { cuentaId?: string; mes?: string; anio?: string } | null } catch { return null }
+  })()
   const [cuentas, setCuentas] = useState<Cuenta[]>([])
-  const [cuentaId, setCuentaId] = useState<string>('')
-  const [mes, setMes] = useState<string>(String(hoy.getMonth() + 1).padStart(2, '0'))
-  const [anio, setAnio] = useState<string>(String(hoy.getFullYear()))
+  const [cuentaId, setCuentaId] = useState<string>(filtroGuardado?.cuentaId ?? '')
+  const [mes, setMes] = useState<string>(filtroGuardado?.mes ?? String(hoy.getMonth() + 1).padStart(2, '0'))
+  const [anio, setAnio] = useState<string>(filtroGuardado?.anio ?? String(hoy.getFullYear()))
   const [movs, setMovs] = useState<MovBancario[]>([])
   const [ventas, setVentas] = useState<Venta[]>([])
   const [gastos, setGastos] = useState<Gasto[]>([])
+  const [ingresos, setIngresos] = useState<Ingreso[]>([])
+  const [catGasto, setCatGasto] = useState<CategoriaGasto[]>([])
+  const [catIngreso, setCatIngreso] = useState<CategoriaIngreso[]>([])
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [cargando, setCargando] = useState(true)
   const [cargarAbierto, setCargarAbierto] = useState(false)
+  const [registrar, setRegistrar] = useState<MovBancario | null>(null)
 
   const desde = `${anio}-${mes}-01`
   const ult = new Date(Number(anio), Number(mes), 0).getDate()
@@ -747,22 +760,31 @@ function Conciliacion() {
     supabase.from('cuentas_bancarias').select('*').eq('activo', true).order('id').then(({ data }) => {
       const arr = (data as Cuenta[]) ?? []
       setCuentas(arr)
-      if (arr.length > 0 && !cuentaId) setCuentaId(String(arr[0].id))
+      if (arr.length > 0 && !arr.some((c) => String(c.id) === cuentaId)) setCuentaId(String(arr[0].id))
     })
+    supabase.from('categorias_gasto').select('id,slug,nombre').eq('activo', true).order('orden').order('nombre').then(({ data }) => setCatGasto((data as CategoriaGasto[]) ?? []))
+    supabase.from('categorias_ingreso').select('id,nombre').eq('activo', true).order('orden').then(({ data }) => setCatIngreso((data as CategoriaIngreso[]) ?? []))
   }, [])
+
+  // Recordar el filtro elegido.
+  useEffect(() => {
+    try { localStorage.setItem('concil:filtro', JSON.stringify({ cuentaId, mes, anio })) } catch { /* nada */ }
+  }, [cuentaId, mes, anio])
 
   async function cargar() {
     if (!cuentaId) return
     setCargando(true)
-    const [mb, v, g, cl] = await Promise.all([
+    const [mb, v, g, ing, cl] = await Promise.all([
       supabase.from('movimientos_bancarios').select('*').eq('cuenta_id', Number(cuentaId)).gte('fecha', desde).lte('fecha', hasta).order('fecha'),
       supabase.from('ventas').select('id,fecha,total,con_factura,ubicacion_id,cliente_id').gte('fecha', desde).lte('fecha', hasta).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
       supabase.from('gastos').select('id,fecha,monto,moneda,descripcion,categoria,socio_id').gte('fecha', desde).lte('fecha', hasta).eq('es_adelanto', false),
+      supabase.from('ingresos').select('id,fecha,monto,moneda,descripcion,categoria_id').gte('fecha', desde).lte('fecha', hasta),
       supabase.from('clientes').select('id,nombre'),
     ])
     setMovs((mb.data as MovBancario[]) ?? [])
     setVentas((v.data as Venta[]) ?? [])
     setGastos((g.data as Gasto[]) ?? [])
+    setIngresos((ing.data as Ingreso[]) ?? [])
     setClientes((cl.data as Cliente[]) ?? [])
     setCargando(false)
   }
@@ -775,7 +797,7 @@ function Conciliacion() {
   async function autoConciliar() {
     let matched = 0
     for (const m of movs) {
-      if (m.conciliado_gasto_id || m.conciliado_venta_id || m.es_transferencia_interna) continue
+      if (m.conciliado_gasto_id || m.conciliado_venta_id || m.conciliado_ingreso_id || m.es_transferencia_interna) continue
       const monto = Math.abs(Number(m.monto))
       const fechaM = new Date(m.fecha).getTime()
       if (m.debito > 0) {
@@ -805,20 +827,21 @@ function Conciliacion() {
   // Estadísticas
   const totalDebitos = movs.reduce((s, m) => s + Number(m.debito), 0)
   const totalCreditos = movs.reduce((s, m) => s + Number(m.credito), 0)
-  const conciliados = movs.filter((m) => m.conciliado_gasto_id || m.conciliado_venta_id || m.es_transferencia_interna)
-  const pendientes = movs.filter((m) => !m.conciliado_gasto_id && !m.conciliado_venta_id && !m.es_transferencia_interna)
+  const estaConciliado = (m: MovBancario) => m.conciliado_gasto_id || m.conciliado_venta_id || m.conciliado_ingreso_id || m.es_transferencia_interna
+  const conciliados = movs.filter(estaConciliado)
+  const pendientes = movs.filter((m) => !estaConciliado(m))
 
   async function toggleTransferencia(m: MovBancario) {
     await supabase.from('movimientos_bancarios').update({
       es_transferencia_interna: !m.es_transferencia_interna,
-      conciliado_gasto_id: null, conciliado_venta_id: null,
+      conciliado_gasto_id: null, conciliado_venta_id: null, conciliado_ingreso_id: null,
     }).eq('id', m.id)
     cargar()
   }
 
   async function desconciliar(m: MovBancario) {
     await supabase.from('movimientos_bancarios').update({
-      conciliado_gasto_id: null, conciliado_venta_id: null, es_transferencia_interna: false,
+      conciliado_gasto_id: null, conciliado_venta_id: null, conciliado_ingreso_id: null, es_transferencia_interna: false,
     }).eq('id', m.id)
     cargar()
   }
@@ -893,9 +916,10 @@ function Conciliacion() {
             </thead>
             <tbody>
               {movs.map((m) => {
-                const conciliado = m.conciliado_gasto_id || m.conciliado_venta_id
+                const conciliado = m.conciliado_gasto_id || m.conciliado_venta_id || m.conciliado_ingreso_id
                 const g = m.conciliado_gasto_id ? gastos.find((x) => x.id === m.conciliado_gasto_id) : null
                 const v = m.conciliado_venta_id ? ventas.find((x) => x.id === m.conciliado_venta_id) : null
+                const ing = m.conciliado_ingreso_id ? ingresos.find((x) => x.id === m.conciliado_ingreso_id) : null
                 return (
                   <tr key={m.id} className={`border-b border-oliva-100/70 last:border-0 ${m.es_transferencia_interna ? 'bg-blue-50/40' : conciliado ? 'bg-oliva-50/40' : ''}`}>
                     <td className="py-2 px-3 tabular-nums text-oliva-700 whitespace-nowrap">{m.fecha}</td>
@@ -910,6 +934,8 @@ function Conciliacion() {
                         <span className="text-oliva-800">✅ Gasto: {g.descripcion ?? g.categoria}</span>
                       ) : v ? (
                         <span className="text-oliva-800">✅ Venta #{v.id} {v.cliente_id ? `· ${clientePorId.get(v.cliente_id)?.nombre ?? ''}` : ''}</span>
+                      ) : ing ? (
+                        <span className="text-oliva-800">✅ Ingreso: {ing.descripcion ?? 'registrado'}</span>
                       ) : (
                         <span className="text-red-700">🔴 sin conciliar</span>
                       )}
@@ -918,7 +944,15 @@ function Conciliacion() {
                       {conciliado || m.es_transferencia_interna ? (
                         <button className="text-xs text-oliva-700 underline" onClick={() => desconciliar(m)}>Desconciliar</button>
                       ) : (
-                        <button className="text-xs text-blue-700 underline" onClick={() => toggleTransferencia(m)}>Marcar interna</button>
+                        <div className="flex gap-2 justify-end">
+                          <button
+                            className="text-xs text-green-700 underline"
+                            onClick={() => setRegistrar(m)}
+                          >
+                            {Number(m.debito) > 0 ? 'Registrar egreso' : 'Registrar ingreso'}
+                          </button>
+                          <button className="text-xs text-blue-700 underline" onClick={() => toggleTransferencia(m)}>Interna</button>
+                        </div>
                       )}
                     </td>
                   </tr>
@@ -935,7 +969,132 @@ function Conciliacion() {
         onCerrar={() => setCargarAbierto(false)}
         onOk={() => { setCargarAbierto(false); cargar() }}
       />
+
+      <RegistrarMovimientoDialog
+        mov={registrar}
+        cuenta={cuenta ?? null}
+        catGasto={catGasto}
+        catIngreso={catIngreso}
+        onCerrar={() => setRegistrar(null)}
+        onOk={() => { setRegistrar(null); cargar() }}
+      />
     </div>
+  )
+}
+
+// Registrar un movimiento bancario pendiente como egreso (gasto) o ingreso,
+// con la fecha del movimiento, y conciliarlo en el acto.
+function RegistrarMovimientoDialog({
+  mov, cuenta, catGasto, catIngreso, onCerrar, onOk,
+}: {
+  mov: MovBancario | null
+  cuenta: Cuenta | null
+  catGasto: CategoriaGasto[]
+  catIngreso: CategoriaIngreso[]
+  onCerrar: () => void
+  onOk: () => void
+}) {
+  const { perfil } = useAuth()
+  const esEgreso = !!mov && Number(mov.debito) > 0
+  const [fecha, setFecha] = useState('')
+  const [monto, setMonto] = useState('')
+  const [descripcion, setDescripcion] = useState('')
+  const [categoria, setCategoria] = useState('') // slug (gasto) o id (ingreso)
+  const [guardando, setGuardando] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!mov) return
+    setFecha(mov.fecha)
+    setMonto(String(Number(mov.debito) > 0 ? mov.debito : mov.credito))
+    const desc = [mov.descripcion, mov.asunto].filter(Boolean).join(' · ')
+    setDescripcion(desc)
+    setCategoria('')
+    setError(null)
+  }, [mov])
+
+  async function guardar() {
+    if (!mov || !cuenta || !perfil) return
+    if (!categoria) { setError('Elegí una categoría.'); return }
+    const m = Number(monto)
+    if (!(m > 0)) { setError('El monto debe ser mayor a cero.'); return }
+    setGuardando(true); setError(null)
+
+    if (esEgreso) {
+      const { data, error: e } = await supabase.from('gastos').insert({
+        fecha,
+        socio_id: perfil.id,
+        categoria,
+        monto: m,
+        moneda: cuenta.moneda,
+        descripcion: descripcion.trim() || null,
+        metodo_pago: 'transferencia',
+        reembolsable: false,
+        reembolsado: false,
+        es_adelanto: false,
+        cuenta_id: cuenta.id,
+        actualizado_en: new Date().toISOString(),
+      }).select('id').single()
+      if (e || !data) { setGuardando(false); setError(e?.message ?? 'No se pudo guardar'); return }
+      await supabase.from('movimientos_bancarios').update({ conciliado_gasto_id: data.id }).eq('id', mov.id)
+    } else {
+      const { data, error: e } = await supabase.from('ingresos').insert({
+        fecha,
+        socio_id: perfil.id,
+        categoria_id: Number(categoria),
+        monto: m,
+        moneda: cuenta.moneda,
+        descripcion: descripcion.trim() || null,
+        cuenta_id: cuenta.id,
+        actualizado_en: new Date().toISOString(),
+      }).select('id').single()
+      if (e || !data) { setGuardando(false); setError(e?.message ?? 'No se pudo guardar'); return }
+      await supabase.from('movimientos_bancarios').update({ conciliado_ingreso_id: data.id }).eq('id', mov.id)
+    }
+    setGuardando(false)
+    onOk()
+  }
+
+  if (!mov) return null
+
+  return (
+    <Dialog abierto={mov !== null} onCerrar={onCerrar} titulo={esEgreso ? 'Registrar egreso' : 'Registrar ingreso'} ancho="sm">
+      <div className="space-y-4">
+        <p className="text-xs text-oliva-600">
+          Se registra como {esEgreso ? 'gasto (egreso)' : 'ingreso'} con la fecha del movimiento y queda conciliado automáticamente.
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="label">Fecha</label>
+            <input type="date" className="input" value={fecha} onChange={(e) => setFecha(e.target.value)} />
+          </div>
+          <div>
+            <label className="label">Monto ({cuenta?.moneda ?? 'UYU'})</label>
+            <input type="number" className="input tabular-nums" min="0" step="0.01" value={monto} onChange={(e) => setMonto(e.target.value)} />
+          </div>
+        </div>
+        <div>
+          <label className="label">Categoría</label>
+          <select className="input" value={categoria} onChange={(e) => setCategoria(e.target.value)}>
+            <option value="">Elegí…</option>
+            {esEgreso
+              ? catGasto.map((c) => <option key={c.id} value={c.slug}>{c.nombre}</option>)
+              : catIngreso.map((c) => <option key={c.id} value={String(c.id)}>{c.nombre}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="label">Descripción</label>
+          <input className="input" value={descripcion} onChange={(e) => setDescripcion(e.target.value)} />
+        </div>
+        {error && <div className="text-sm text-red-700">{error}</div>}
+        <div className="flex justify-end gap-2 pt-1">
+          <button className="btn-secondary" onClick={onCerrar}>Cancelar</button>
+          <button className="btn-primary" onClick={guardar} disabled={guardando}>
+            {guardando ? 'Guardando…' : (esEgreso ? 'Registrar egreso' : 'Registrar ingreso')}
+          </button>
+        </div>
+      </div>
+    </Dialog>
   )
 }
 
