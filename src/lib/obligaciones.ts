@@ -123,17 +123,28 @@ function detectarPeriodo(texto: string): string | null {
   return null
 }
 
+// Normaliza un numero de documento para comparar entre correos de distinto
+// remitente: mayusculas, sin espacios ("A 2325" -> "A2325") y sin el sufijo de
+// serie que agrega la e-factura ("A2325-EF" -> "A2325").
+function normalizarNumDoc(raw: string): string {
+  let s = raw.toUpperCase().replace(/\s+/g, '')
+  s = s.replace(/[-/][A-Z]{1,4}$/, '') // sufijo tipo -EF
+  s = s.replace(/[-/]+$/, '')          // guiones/barras colgantes
+  return s
+}
+
 function detectarNumDoc(texto: string): string | null {
   const n = norm(texto)
   const pats = [
-    /(?:factura|fact\.?|fc\.?)\s*(?:n[°o]?\.?\s*)?[#:]?\s*([a-z]?\d[\d\-/]{2,})/i,
+    // "Factura A2325", "Factura A 2325", "Ref A2325-EF", "Fc N° 0001-0001234"
+    /(?:factura|fact\.?|fc\.?|comprobante|ref\.?)\s*(?:n[°o]?\.?\s*)?[#:]?\s*([a-z]{0,3}\s?\d[\d\s\-/]{1,}\d)/i,
     /(?:poliza)\s*(?:n[°o]?\.?\s*)?[#:]?\s*(\d[\d\-/]{2,})/i,
     /(?:recibo|comprobante)\s*(?:n[°o]?\.?\s*)?[#:]?\s*(\d[\d\-/]{2,})/i,
     /\bn[°o]\.?\s*(\d[\d\-/]{3,})/i,
   ]
   for (const re of pats) {
     const m = re.exec(n)
-    if (m) return m[1].toUpperCase()
+    if (m) return normalizarNumDoc(m[1])
   }
   return null
 }
@@ -224,11 +235,21 @@ export function procesarCorreos(correos: CorreoRaw[], hoy: string): Obligacion[]
     }
   })
 
-  // Deduplicar: si dos obligaciones del mismo organismo tienen el mismo
-  // concepto base (asunto sin Re:/Fwd:), fusionar preservando datos de pago
+  // Deduplicar. Clave principal: el numero de factura cuando es distintivo
+  // (tiene letra o es largo), asi una misma factura que llega de dos remitentes
+  // distintos (p.ej. la e-factura + el proveedor por Gmail) se une en una sola.
+  // Si no hay numero util, se cae al criterio organismo + concepto base.
+  const docDistintivo = (d: string | null): boolean => {
+    if (!d) return false
+    // Excluir periodos/fechas (MM/YYYY, DD/MM/YYYY): no son numeros de factura.
+    if (/^\d{1,2}\/\d{2,4}$/.test(d) || /^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(d)) return false
+    return /[a-z]/i.test(d) || d.replace(/\D/g, '').length >= 5
+  }
   const dedup = new Map<string, Obligacion>()
   for (const ob of todas) {
-    const clave = `${ob.organismo.toLowerCase()}::${ob.concepto.toLowerCase()}`
+    const clave = docDistintivo(ob.numero_documento)
+      ? `doc::${ob.numero_documento!.toLowerCase()}`
+      : `${ob.organismo.toLowerCase()}::${ob.concepto.toLowerCase()}`
     const existing = dedup.get(clave)
     if (!existing) {
       dedup.set(clave, ob)
