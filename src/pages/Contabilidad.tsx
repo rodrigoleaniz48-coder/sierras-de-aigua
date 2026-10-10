@@ -56,7 +56,7 @@ interface MovBancario {
   hash_unico: string
 }
 interface Venta { id: number; fecha: string; total: number; con_factura: boolean; ubicacion_id: number; cliente_id: number | null; moneda?: string | null; cotizacion?: number | null }
-interface Gasto { id: number; fecha: string; monto: number; moneda: 'UYU' | 'USD'; descripcion: string | null; categoria: string; socio_id: string }
+interface Gasto { id: number; fecha: string; monto: number; moneda: 'UYU' | 'USD'; descripcion: string | null; categoria: string; socio_id: string; conciliado_mov_id?: number | null }
 interface Ingreso { id: number; fecha: string; monto: number; moneda: string; descripcion: string | null; categoria_id: number | null }
 interface Pago { id: number; cliente_id: number | null; fecha: string; monto: number; moneda: string; medio_pago: string | null; nota: string | null }
 interface CategoriaGasto { id: number; slug: string; nombre: string }
@@ -773,6 +773,7 @@ function Conciliacion() {
   const [cargarAbierto, setCargarAbierto] = useState(false)
   const [registrar, setRegistrar] = useState<MovBancario | null>(null)
   const [conciliarCon, setConciliarCon] = useState<MovBancario | null>(null)
+  const [conciliarVarios, setConciliarVarios] = useState<MovBancario | null>(null)
   const [cobroCuenta, setCobroCuenta] = useState<MovBancario | null>(null)
   const [verResumen, setVerResumen] = useState(false)
 
@@ -805,7 +806,7 @@ function Conciliacion() {
     const [mb, v, g, ing, pg, cl] = await Promise.all([
       supabase.from('movimientos_bancarios').select('*').eq('cuenta_id', Number(cuentaId)).gte('fecha', desde).lte('fecha', hasta).order('fecha'),
       supabase.from('ventas').select('id,fecha,total,con_factura,ubicacion_id,cliente_id').gte('fecha', desdeAmplio).lte('fecha', hasta).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
-      supabase.from('gastos').select('id,fecha,monto,moneda,descripcion,categoria,socio_id').gte('fecha', desdeAmplio).lte('fecha', hasta).eq('es_adelanto', false),
+      supabase.from('gastos').select('id,fecha,monto,moneda,descripcion,categoria,socio_id,conciliado_mov_id').gte('fecha', desdeAmplio).lte('fecha', hasta).eq('es_adelanto', false),
       supabase.from('ingresos').select('id,fecha,monto,moneda,descripcion,categoria_id').gte('fecha', desdeAmplio).lte('fecha', hasta),
       supabase.from('pagos').select('id,cliente_id,fecha,monto,moneda,medio_pago,nota').gte('fecha', desdeAmplio).lte('fecha', hasta),
       supabase.from('clientes').select('id,nombre,tipo'),
@@ -827,7 +828,7 @@ function Conciliacion() {
   async function autoConciliar() {
     let matched = 0
     for (const m of movs) {
-      if (m.conciliado_gasto_id || m.conciliado_venta_id || m.conciliado_ingreso_id || m.conciliado_pago_id || m.es_transferencia_interna) continue
+      if (m.conciliado_gasto_id || m.conciliado_venta_id || m.conciliado_ingreso_id || m.conciliado_pago_id || m.es_transferencia_interna || gastos.some((g) => g.conciliado_mov_id === m.id)) continue
       const monto = Math.abs(Number(m.monto))
       const fechaM = new Date(m.fecha).getTime()
       if (m.debito > 0) {
@@ -864,7 +865,9 @@ function Conciliacion() {
   // Estadísticas
   const totalDebitos = movs.reduce((s, m) => s + Number(m.debito), 0)
   const totalCreditos = movs.reduce((s, m) => s + Number(m.credito), 0)
-  const estaConciliado = (m: MovBancario) => m.conciliado_gasto_id || m.conciliado_venta_id || m.conciliado_ingreso_id || m.conciliado_pago_id || m.es_transferencia_interna
+  // Gastos vinculados a un movimiento por la via "varios gastos" (p.ej. un sueldo repartido en categorias).
+  const gastosDeMov = (m: MovBancario) => gastos.filter((g) => g.conciliado_mov_id === m.id)
+  const estaConciliado = (m: MovBancario) => m.conciliado_gasto_id || m.conciliado_venta_id || m.conciliado_ingreso_id || m.conciliado_pago_id || m.es_transferencia_interna || gastosDeMov(m).length > 0
   const conciliados = movs.filter(estaConciliado)
   const pendientes = movs.filter((m) => !estaConciliado(m))
   const pagoPorId = useMemo(() => new Map(pagos.map((p) => [p.id, p])), [pagos])
@@ -872,7 +875,10 @@ function Conciliacion() {
   // Para el resumen del mes: que ventas/ingresos/gastos ya estan enlazados a un movimiento del banco.
   const ventasConc = useMemo(() => new Set(movs.map((m) => m.conciliado_venta_id).filter(Boolean) as number[]), [movs])
   const ingresosConc = useMemo(() => new Set(movs.map((m) => m.conciliado_ingreso_id).filter(Boolean) as number[]), [movs])
-  const gastosConc = useMemo(() => new Set(movs.map((m) => m.conciliado_gasto_id).filter(Boolean) as number[]), [movs])
+  const gastosConc = useMemo(() => new Set([
+    ...movs.map((m) => m.conciliado_gasto_id).filter(Boolean) as number[],
+    ...gastos.filter((g) => g.conciliado_mov_id).map((g) => g.id),
+  ]), [movs, gastos])
   // El resumen muestra solo los registros del mes (los candidatos incluyen meses previos).
   const ventasMes = ventas.filter((v) => v.fecha >= desde)
   const ingresosMes = ingresos.filter((i) => i.fecha >= desde)
@@ -890,6 +896,9 @@ function Conciliacion() {
     await supabase.from('movimientos_bancarios').update({
       conciliado_gasto_id: null, conciliado_venta_id: null, conciliado_ingreso_id: null, conciliado_pago_id: null, es_transferencia_interna: false,
     }).eq('id', m.id)
+    // Liberar tambien los gastos vinculados por "varios gastos".
+    const ids = gastosDeMov(m).map((g) => g.id)
+    if (ids.length > 0) await supabase.from('gastos').update({ conciliado_mov_id: null }).in('id', ids)
     cargar()
   }
 
@@ -963,7 +972,8 @@ function Conciliacion() {
             </thead>
             <tbody>
               {movs.map((m) => {
-                const conciliado = m.conciliado_gasto_id || m.conciliado_venta_id || m.conciliado_ingreso_id || m.conciliado_pago_id
+                const gastosVarios = gastosDeMov(m)
+                const conciliado = m.conciliado_gasto_id || m.conciliado_venta_id || m.conciliado_ingreso_id || m.conciliado_pago_id || gastosVarios.length > 0
                 const g = m.conciliado_gasto_id ? gastos.find((x) => x.id === m.conciliado_gasto_id) : null
                 const v = m.conciliado_venta_id ? ventas.find((x) => x.id === m.conciliado_venta_id) : null
                 const ing = m.conciliado_ingreso_id ? ingresos.find((x) => x.id === m.conciliado_ingreso_id) : null
@@ -986,6 +996,8 @@ function Conciliacion() {
                         <span className="text-oliva-800">✅ Ingreso: {ing.descripcion ?? 'registrado'}</span>
                       ) : pg ? (
                         <span className="text-oliva-800">✅ Cobro a cuenta: {pg.cliente_id ? (clientePorId.get(pg.cliente_id)?.nombre ?? '') : ''}</span>
+                      ) : gastosVarios.length > 0 ? (
+                        <span className="text-oliva-800">✅ {gastosVarios.length} gastos · {money(gastosVarios.reduce((s, x) => s + Number(x.monto), 0))}</span>
                       ) : (
                         <span className="text-red-700">🔴 sin conciliar</span>
                       )}
@@ -996,6 +1008,9 @@ function Conciliacion() {
                       ) : (
                         <div className="flex gap-2 justify-end flex-wrap">
                           <button className="text-xs text-oliva-700 underline" onClick={() => setConciliarCon(m)}>Conciliar con…</button>
+                          {Number(m.debito) > 0 && (
+                            <button className="text-xs text-oliva-700 underline" onClick={() => setConciliarVarios(m)}>Con varios…</button>
+                          )}
                           {Number(m.credito) > 0 && (
                             <button className="text-xs text-aceite-600 underline" onClick={() => setCobroCuenta(m)}>Cobro a cuenta…</button>
                           )}
@@ -1093,6 +1108,15 @@ function Conciliacion() {
         clientes={clientes}
         onCerrar={() => setCobroCuenta(null)}
         onOk={() => { setCobroCuenta(null); cargar() }}
+      />
+
+      <ConciliarVariosDialog
+        mov={conciliarVarios}
+        cuenta={cuenta ?? null}
+        gastos={gastos}
+        movs={movs}
+        onCerrar={() => setConciliarVarios(null)}
+        onOk={() => { setConciliarVarios(null); cargar() }}
       />
 
       <RegistrarMovimientoDialog
@@ -1217,6 +1241,84 @@ function RegistrarMovimientoDialog({
           <button className="btn-primary" onClick={guardar} disabled={guardando}>
             {guardando ? 'Guardando…' : (esEgreso ? 'Registrar egreso' : 'Registrar ingreso')}
           </button>
+        </div>
+      </div>
+    </Dialog>
+  )
+}
+
+// Conciliar un egreso del banco con VARIOS gastos (p.ej. un sueldo repartido en
+// categorias, o jornales juntos). Vincula cada gasto al movimiento (conciliado_mov_id).
+function ConciliarVariosDialog({
+  mov, cuenta, gastos, movs, onCerrar, onOk,
+}: {
+  mov: MovBancario | null
+  cuenta: Cuenta | null
+  gastos: Gasto[]
+  movs: MovBancario[]
+  onCerrar: () => void
+  onOk: () => void
+}) {
+  const [sel, setSel] = useState<Set<number>>(new Set())
+  const [guardando, setGuardando] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => { setSel(new Set()); setError(null) }, [mov])
+
+  if (!mov) return null
+  const movMonto = Math.abs(Number(mov.debito))
+  const fechaM = new Date(mov.fecha).getTime()
+  // Gastos ya tomados por una conciliacion 1 a 1 (en algun movimiento) o por otro movimiento (varios).
+  const yaUsados = new Set(movs.map((x) => x.conciliado_gasto_id).filter(Boolean) as number[])
+  const candidatos = gastos
+    .filter((g) => g.moneda === (cuenta?.moneda ?? 'UYU') && !g.conciliado_mov_id && !yaUsados.has(g.id))
+    .sort((a, b) => Math.abs(new Date(a.fecha).getTime() - fechaM) - Math.abs(new Date(b.fecha).getTime() - fechaM))
+
+  const sumSel = candidatos.filter((g) => sel.has(g.id)).reduce((s, g) => s + Number(g.monto), 0)
+  const coincide = Math.abs(sumSel - movMonto) < 0.01
+
+  function toggle(id: number) {
+    setSel((prev) => { const s = new Set(prev); if (s.has(id)) s.delete(id); else s.add(id); return s })
+  }
+
+  async function guardar() {
+    if (sel.size === 0) { setError('Elegí al menos un gasto.'); return }
+    setGuardando(true); setError(null)
+    const { error: e } = await supabase.from('gastos').update({ conciliado_mov_id: mov!.id }).in('id', [...sel])
+    setGuardando(false)
+    if (e) { setError(e.message); return }
+    onOk()
+  }
+
+  return (
+    <Dialog abierto={mov !== null} onCerrar={onCerrar} titulo="Conciliar con varios gastos" ancho="md">
+      <div className="space-y-3">
+        <div className="text-sm text-oliva-700">
+          Egreso: <b>{mov.fecha}</b> · {mov.descripcion}{mov.asunto ? ` · ${mov.asunto}` : ''} · <b className="text-red-700">{money(movMonto)}</b>
+        </div>
+        <p className="text-xs text-oliva-600">
+          Marcá los gastos que paga este movimiento (p.ej. un sueldo repartido en categorías). Podés elegir varios.
+        </p>
+        <div className={`text-sm font-semibold ${coincide ? 'text-green-700' : 'text-oliva-700'}`}>
+          {sel.size} seleccionado{sel.size === 1 ? '' : 's'} · {money(sumSel)}
+          {sel.size > 0 && (coincide ? ' · coincide ✅' : ` · ${sumSel > movMonto ? 'excede' : 'faltan'} ${money(Math.abs(movMonto - sumSel))}`)}
+        </div>
+        {error && <div className="text-sm text-red-700">{error}</div>}
+        <div className="max-h-[45vh] overflow-y-auto rounded-lg border border-oliva-100 divide-y divide-oliva-100/70">
+          {candidatos.length === 0 ? (
+            <div className="px-3 py-4 text-sm text-oliva-500">No hay gastos disponibles para enlazar en {cuenta?.moneda ?? 'UYU'}.</div>
+          ) : candidatos.map((g) => (
+            <label key={g.id} className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-oliva-50 cursor-pointer">
+              <input type="checkbox" className="h-4 w-4 accent-oliva-700" checked={sel.has(g.id)} onChange={() => toggle(g.id)} />
+              <span className="tabular-nums text-oliva-500 shrink-0">{g.fecha.slice(5)}</span>
+              <span className="flex-1 truncate text-oliva-800">{g.descripcion ?? g.categoria}</span>
+              <span className="tabular-nums text-oliva-900 shrink-0">{money(Number(g.monto), g.moneda)}</span>
+            </label>
+          ))}
+        </div>
+        <div className="flex justify-end gap-2 pt-1">
+          <button className="btn-secondary" onClick={onCerrar}>Cancelar</button>
+          <button className="btn-primary" onClick={guardar} disabled={guardando || sel.size === 0}>{guardando ? 'Guardando…' : `Conciliar ${sel.size || ''}`}</button>
         </div>
       </div>
     </Dialog>
