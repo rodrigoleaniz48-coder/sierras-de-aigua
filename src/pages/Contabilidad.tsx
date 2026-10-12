@@ -759,8 +759,10 @@ function Conciliacion() {
   })()
   const [cuentas, setCuentas] = useState<Cuenta[]>([])
   const [cuentaId, setCuentaId] = useState<string>(filtroGuardado?.cuentaId ?? '')
-  const [mes, setMes] = useState<string>(filtroGuardado?.mes ?? String(hoy.getMonth() + 1).padStart(2, '0'))
-  const [anio, setAnio] = useState<string>(filtroGuardado?.anio ?? String(hoy.getFullYear()))
+  // Las conciliaciones son siempre a meses vencidos: por defecto arranca en el mes anterior (el ultimo cerrado).
+  const mesPrevio = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1)
+  const [mes, setMes] = useState<string>(filtroGuardado?.mes ?? String(mesPrevio.getMonth() + 1).padStart(2, '0'))
+  const [anio, setAnio] = useState<string>(filtroGuardado?.anio ?? String(mesPrevio.getFullYear()))
   const [movs, setMovs] = useState<MovBancario[]>([])
   const [ventas, setVentas] = useState<Venta[]>([])
   const [gastos, setGastos] = useState<Gasto[]>([])
@@ -946,7 +948,7 @@ function Conciliacion() {
         <div>
           <label className="label">Año</label>
           <select className="input" value={anio} onChange={(e) => setAnio(e.target.value)}>
-            {[hoy.getFullYear() - 1, hoy.getFullYear(), hoy.getFullYear() + 1].map((y) => (
+            {[hoy.getFullYear() - 1, hoy.getFullYear()].map((y) => (
               <option key={y} value={y}>{y}</option>
             ))}
           </select>
