@@ -832,6 +832,8 @@ function Conciliacion() {
 
   const cuenta = cuentas.find((c) => c.id === Number(cuentaId))
   const clientePorId = useMemo(() => new Map(clientes.map((c) => [c.id, c])), [clientes])
+  // Clientes de cuenta corriente: sus cobros van por "Cobro a cuenta" (pago), nunca atados a una venta.
+  const ccIds = useMemo(() => new Set(clientes.filter((c) => c.tipo === 'distribuidor' || c.tipo === 'mayorista').map((c) => c.id)), [clientes])
 
   // Match automático: para cada movimiento no conciliado, buscar gasto o venta con monto y fecha cercana
   async function autoConciliar() {
@@ -854,8 +856,9 @@ function Conciliacion() {
           matched++
         }
       } else if (m.credito > 0) {
-        // Credito bancario → buscar primero una venta; si no, un ingreso registrado.
-        const venta = ventas.find((v) => Math.abs(Number(v.total) - monto) < 0.01 && Math.abs(new Date(v.fecha).getTime() - fechaM) / 86400000 <= 5)
+        // Credito bancario → buscar primero una venta (excepto de distribuidores: esos van por
+        // "Cobro a cuenta"); si no, un ingreso registrado.
+        const venta = ventas.find((v) => !(v.cliente_id && ccIds.has(v.cliente_id)) && Math.abs(Number(v.total) - monto) < 0.01 && Math.abs(new Date(v.fecha).getTime() - fechaM) / 86400000 <= 5)
         if (venta) {
           await supabase.from('movimientos_bancarios').update({ conciliado_venta_id: venta.id }).eq('id', m.id)
           matched++
@@ -1287,7 +1290,10 @@ async function fetchCandidatosConc(esEgreso: boolean, monedaCta: string, cliente
     supabase.from('ingresos').select('id,fecha,monto,moneda,descripcion,conciliado_mov_id').is('conciliado_mov_id', null).eq('moneda', monedaCta).gte('fecha', piso).order('fecha', { ascending: false }),
   ])
   const ventaMontoCta = (v: Record<string, any>) => { const esUSD = (v.moneda ?? 'UYU') === 'USD' && Number(v.cotizacion) > 0; return monedaCta === 'USD' ? (esUSD ? Number(v.total) / Number(v.cotizacion) : 0) : (esUSD ? 0 : Number(v.total)) }
-  const vs = ((vR.data ?? []) as Record<string, any>[]).filter((v) => !vRef.has(v.id) && ventaMontoCta(v) > 0).map((v) => ({ tipo: 'venta' as const, id: v.id, fecha: v.fecha, monto: ventaMontoCta(v), etiqueta: `Venta #${v.id}${v.cliente_id ? ` · ${clientePorId.get(v.cliente_id)?.nombre ?? ''}` : ''}` }))
+  // Las ventas de distribuidores/mayoristas NO se concilian contra el banco: su cobro va por
+  // "Cobro a cuenta" (pago), que baja el saldo. Por eso se excluyen de los candidatos.
+  const esCC = (cid: number | null) => { const c = cid ? clientePorId.get(cid) : null; return c?.tipo === 'distribuidor' || c?.tipo === 'mayorista' }
+  const vs = ((vR.data ?? []) as Record<string, any>[]).filter((v) => !vRef.has(v.id) && ventaMontoCta(v) > 0 && !esCC(v.cliente_id)).map((v) => ({ tipo: 'venta' as const, id: v.id, fecha: v.fecha, monto: ventaMontoCta(v), etiqueta: `Venta #${v.id}${v.cliente_id ? ` · ${clientePorId.get(v.cliente_id)?.nombre ?? ''}` : ''}` }))
   const is = ((iR.data ?? []) as Record<string, any>[]).filter((i) => !iRef.has(i.id)).map((i) => ({ tipo: 'ingreso' as const, id: i.id, fecha: i.fecha, monto: Number(i.monto), etiqueta: i.descripcion ?? 'Ingreso' }))
   return [...vs, ...is]
 }
