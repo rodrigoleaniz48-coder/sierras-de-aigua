@@ -68,14 +68,15 @@ export function Dashboard() {
   useEffect(() => {
     const hoy = new Date()
     const mesInicio = new Date(hoy.getFullYear(), hoy.getMonth(), 1).toISOString().slice(0, 10)
+    const mesFin = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0).toISOString().slice(0, 10)
     const mesAntInicio = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1).toISOString().slice(0, 10)
     const mesAntFin = new Date(hoy.getFullYear(), hoy.getMonth(), 0).toISOString().slice(0, 10)
 
     Promise.all([
-      // Ventas del mes (para KPI de facturado) — excluye potenciales
-      supabase.from('ventas').select('id, total, entregado, cobrado, cliente_id').gte('fecha', mesInicio).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
-      // Total del mes anterior
-      supabase.from('ventas').select('total, cliente_id').gte('fecha', mesAntInicio).lte('fecha', mesAntFin).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
+      // Ventas del mes = cobradas en el mes (por fecha_cobro), igual criterio que el Estado de resultados.
+      supabase.from('ventas').select('id, total, entregado, cobrado, cliente_id').gte('fecha_cobro', mesInicio).lte('fecha_cobro', mesFin).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
+      // Total del mes anterior (tambien por fecha_cobro)
+      supabase.from('ventas').select('total, cliente_id').gte('fecha_cobro', mesAntInicio).lte('fecha_cobro', mesAntFin).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
       // Items del mes con producto y presentación, para calcular litros de aceite (envasado + granel)
       supabase.from('items_venta').select('unidades, presentacion:presentaciones(volumen_ml, producto:productos(nombre, categoria)), venta:ventas!inner(fecha, estado, a_confirmar)').gte('venta.fecha', mesInicio).neq('venta.estado', 'cancelado').eq('venta.a_confirmar', false),
       // Pendientes de entrega/cobro (todas las fechas, no filtrar por mes: siguen pendientes despues del cierre)
