@@ -776,6 +776,7 @@ function Conciliacion() {
   const [conciliarVarios, setConciliarVarios] = useState<MovBancario | null>(null)
   const [cobroCuenta, setCobroCuenta] = useState<MovBancario | null>(null)
   const [verResumen, setVerResumen] = useState(false)
+  const [refsTodas, setRefsTodas] = useState<{ g: Set<number>; v: Set<number>; i: Set<number> }>({ g: new Set(), v: new Set(), i: new Set() })
 
   const desde = `${anio}-${mes}-01`
   const ult = new Date(Number(anio), Number(mes), 0).getDate()
@@ -803,13 +804,15 @@ function Conciliacion() {
   async function cargar() {
     if (!cuentaId) return
     setCargando(true)
-    const [mb, v, g, ing, pg, cl] = await Promise.all([
+    const [mb, v, g, ing, pg, cl, refs] = await Promise.all([
       supabase.from('movimientos_bancarios').select('*').eq('cuenta_id', Number(cuentaId)).gte('fecha', desde).lte('fecha', hasta).order('fecha'),
       supabase.from('ventas').select('id,fecha,total,con_factura,ubicacion_id,cliente_id,conciliado_mov_id').gte('fecha', desdeAmplio).lte('fecha', hasta).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
       supabase.from('gastos').select('id,fecha,monto,moneda,descripcion,categoria,socio_id,conciliado_mov_id').gte('fecha', desdeAmplio).lte('fecha', hasta).eq('es_adelanto', false),
       supabase.from('ingresos').select('id,fecha,monto,moneda,descripcion,categoria_id,conciliado_mov_id').gte('fecha', desdeAmplio).lte('fecha', hasta),
       supabase.from('pagos').select('id,cliente_id,fecha,monto,moneda,medio_pago,nota').gte('fecha', desdeAmplio).lte('fecha', hasta),
       supabase.from('clientes').select('id,nombre,tipo'),
+      // Referencias de conciliacion de TODAS las cuentas (para el resumen, que es global).
+      supabase.from('movimientos_bancarios').select('conciliado_gasto_id,conciliado_venta_id,conciliado_ingreso_id'),
     ])
     setMovs((mb.data as MovBancario[]) ?? [])
     setVentas((v.data as Venta[]) ?? [])
@@ -817,6 +820,12 @@ function Conciliacion() {
     setIngresos((ing.data as Ingreso[]) ?? [])
     setPagos((pg.data as Pago[]) ?? [])
     setClientes((cl.data as Cliente[]) ?? [])
+    const rr = (refs.data ?? []) as { conciliado_gasto_id: number | null; conciliado_venta_id: number | null; conciliado_ingreso_id: number | null }[]
+    setRefsTodas({
+      g: new Set(rr.map((x) => x.conciliado_gasto_id).filter(Boolean) as number[]),
+      v: new Set(rr.map((x) => x.conciliado_venta_id).filter(Boolean) as number[]),
+      i: new Set(rr.map((x) => x.conciliado_ingreso_id).filter(Boolean) as number[]),
+    })
     setCargando(false)
   }
   useEffect(() => { cargar() }, [cuentaId, desde, hasta])
@@ -879,19 +888,11 @@ function Conciliacion() {
   const pendientes = movs.filter((m) => !estaConciliado(m))
   const pagoPorId = useMemo(() => new Map(pagos.map((p) => [p.id, p])), [pagos])
 
-  // Para el resumen del mes: que ventas/ingresos/gastos ya estan enlazados a un movimiento del banco.
-  const ventasConc = useMemo(() => new Set([
-    ...movs.map((m) => m.conciliado_venta_id).filter(Boolean) as number[],
-    ...ventas.filter((v) => v.conciliado_mov_id).map((v) => v.id),
-  ]), [movs, ventas])
-  const ingresosConc = useMemo(() => new Set([
-    ...movs.map((m) => m.conciliado_ingreso_id).filter(Boolean) as number[],
-    ...ingresos.filter((i) => i.conciliado_mov_id).map((i) => i.id),
-  ]), [movs, ingresos])
-  const gastosConc = useMemo(() => new Set([
-    ...movs.map((m) => m.conciliado_gasto_id).filter(Boolean) as number[],
-    ...gastos.filter((g) => g.conciliado_mov_id).map((g) => g.id),
-  ]), [movs, gastos])
+  // Para el resumen del mes (global, no cambia al cambiar de cuenta): un registro esta
+  // conciliado si lo referencia cualquier movimiento (de cualquier cuenta) o tiene conciliado_mov_id.
+  const ventasConc = useMemo(() => new Set([...refsTodas.v, ...ventas.filter((v) => v.conciliado_mov_id).map((v) => v.id)]), [refsTodas, ventas])
+  const ingresosConc = useMemo(() => new Set([...refsTodas.i, ...ingresos.filter((i) => i.conciliado_mov_id).map((i) => i.id)]), [refsTodas, ingresos])
+  const gastosConc = useMemo(() => new Set([...refsTodas.g, ...gastos.filter((g) => g.conciliado_mov_id).map((g) => g.id)]), [refsTodas, gastos])
   // El resumen muestra solo los registros del mes (los candidatos incluyen meses previos).
   const ventasMes = ventas.filter((v) => v.fecha >= desde)
   const ingresosMes = ingresos.filter((i) => i.fecha >= desde)
@@ -1109,9 +1110,7 @@ function Conciliacion() {
 
       <ConciliarConExistenteDialog
         mov={conciliarCon}
-        ventas={ventas}
-        ingresos={ingresos}
-        gastos={gastos}
+        cuenta={cuenta ?? null}
         clientePorId={clientePorId}
         onCerrar={() => setConciliarCon(null)}
         onOk={() => { setConciliarCon(null); cargar() }}
@@ -1128,10 +1127,6 @@ function Conciliacion() {
       <ConciliarVariosDialog
         mov={conciliarVarios}
         cuenta={cuenta ?? null}
-        gastos={gastos}
-        ventas={ventas}
-        ingresos={ingresos}
-        movs={movs}
         clientePorId={clientePorId}
         onCerrar={() => setConciliarVarios(null)}
         onOk={() => { setConciliarVarios(null); cargar() }}
@@ -1269,50 +1264,67 @@ function RegistrarMovimientoDialog({
 // (p.ej. un sueldo repartido en categorias) o un credito con varias ventas/ingresos
 // (p.ej. un deposito que cubre varias ventas). Vincula cada uno via conciliado_mov_id.
 interface CandVarios { tipo: 'gasto' | 'venta' | 'ingreso'; id: number; fecha: string; monto: number; etiqueta: string }
+
+// Trae candidatos a conciliar de los ULTIMOS 18 MESES, EXCLUYENDO lo ya conciliado
+// (por otro movimiento de cualquier cuenta, o ya enlazado por "varios").
+// Egreso -> gastos; Credito -> ventas + ingresos. Montos en la moneda de la cuenta.
+async function fetchCandidatosConc(esEgreso: boolean, monedaCta: string, clientePorId: Map<number, Cliente>): Promise<CandVarios[]> {
+  const d = new Date(); d.setMonth(d.getMonth() - 18)
+  const piso = d.toISOString().slice(0, 10)
+  const { data: refs } = await supabase.from('movimientos_bancarios').select('conciliado_gasto_id,conciliado_venta_id,conciliado_ingreso_id')
+  const gRef = new Set<number>(), vRef = new Set<number>(), iRef = new Set<number>()
+  for (const r of (refs ?? []) as Record<string, number | null>[]) {
+    if (r.conciliado_gasto_id) gRef.add(r.conciliado_gasto_id)
+    if (r.conciliado_venta_id) vRef.add(r.conciliado_venta_id)
+    if (r.conciliado_ingreso_id) iRef.add(r.conciliado_ingreso_id)
+  }
+  if (esEgreso) {
+    const { data } = await supabase.from('gastos').select('id,fecha,monto,moneda,descripcion,categoria,conciliado_mov_id').eq('es_adelanto', false).is('conciliado_mov_id', null).eq('moneda', monedaCta).gte('fecha', piso).order('fecha', { ascending: false })
+    return ((data ?? []) as Record<string, any>[]).filter((g) => !gRef.has(g.id)).map((g) => ({ tipo: 'gasto' as const, id: g.id, fecha: g.fecha, monto: Number(g.monto), etiqueta: g.descripcion ?? g.categoria }))
+  }
+  const [vR, iR] = await Promise.all([
+    supabase.from('ventas').select('id,fecha,total,cliente_id,moneda,cotizacion,conciliado_mov_id').neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false).is('conciliado_mov_id', null).gte('fecha', piso).order('fecha', { ascending: false }),
+    supabase.from('ingresos').select('id,fecha,monto,moneda,descripcion,conciliado_mov_id').is('conciliado_mov_id', null).eq('moneda', monedaCta).gte('fecha', piso).order('fecha', { ascending: false }),
+  ])
+  const ventaMontoCta = (v: Record<string, any>) => { const esUSD = (v.moneda ?? 'UYU') === 'USD' && Number(v.cotizacion) > 0; return monedaCta === 'USD' ? (esUSD ? Number(v.total) / Number(v.cotizacion) : 0) : (esUSD ? 0 : Number(v.total)) }
+  const vs = ((vR.data ?? []) as Record<string, any>[]).filter((v) => !vRef.has(v.id) && ventaMontoCta(v) > 0).map((v) => ({ tipo: 'venta' as const, id: v.id, fecha: v.fecha, monto: ventaMontoCta(v), etiqueta: `Venta #${v.id}${v.cliente_id ? ` · ${clientePorId.get(v.cliente_id)?.nombre ?? ''}` : ''}` }))
+  const is = ((iR.data ?? []) as Record<string, any>[]).filter((i) => !iRef.has(i.id)).map((i) => ({ tipo: 'ingreso' as const, id: i.id, fecha: i.fecha, monto: Number(i.monto), etiqueta: i.descripcion ?? 'Ingreso' }))
+  return [...vs, ...is]
+}
+
+// Conciliar un movimiento con VARIOS registros: un egreso con varios gastos
+// (p.ej. un sueldo repartido en categorias) o un credito con varias ventas/ingresos.
 function ConciliarVariosDialog({
-  mov, cuenta, gastos, ventas, ingresos, movs, clientePorId, onCerrar, onOk,
+  mov, cuenta, clientePorId, onCerrar, onOk,
 }: {
   mov: MovBancario | null
   cuenta: Cuenta | null
-  gastos: Gasto[]
-  ventas: Venta[]
-  ingresos: Ingreso[]
-  movs: MovBancario[]
   clientePorId: Map<number, Cliente>
   onCerrar: () => void
   onOk: () => void
 }) {
   const [sel, setSel] = useState<Set<string>>(new Set())
+  const [candidatos, setCandidatos] = useState<CandVarios[]>([])
+  const [cargando, setCargando] = useState(false)
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => { setSel(new Set()); setError(null) }, [mov])
+  const esEgreso = !!mov && Number(mov.debito) > 0
+  const movMonto = mov ? Math.abs(esEgreso ? Number(mov.debito) : Number(mov.credito)) : 0
+  const monedaCta = cuenta?.moneda ?? 'UYU'
+
+  useEffect(() => {
+    setSel(new Set()); setError(null); setCandidatos([])
+    if (!mov) return
+    const fechaM = new Date(mov.fecha).getTime()
+    setCargando(true)
+    fetchCandidatosConc(esEgreso, monedaCta, clientePorId)
+      .then((cs) => setCandidatos(cs.sort((a, b) => Math.abs(a.monto - movMonto) - Math.abs(b.monto - movMonto) || Math.abs(new Date(a.fecha).getTime() - fechaM) - Math.abs(new Date(b.fecha).getTime() - fechaM))))
+      .catch((e) => setError(String(e)))
+      .finally(() => setCargando(false))
+  }, [mov])
 
   if (!mov) return null
-  const esEgreso = Number(mov.debito) > 0
-  const movMonto = Math.abs(esEgreso ? Number(mov.debito) : Number(mov.credito))
-  const fechaM = new Date(mov.fecha).getTime()
-  const monedaCta = cuenta?.moneda ?? 'UYU'
-  const ventaEsUSD = (v: Venta) => (v.moneda ?? 'UYU') === 'USD' && !!v.cotizacion && Number(v.cotizacion) > 0
-  const ventaMontoCta = (v: Venta) => (monedaCta === 'USD' ? (ventaEsUSD(v) ? Number(v.total) / Number(v.cotizacion) : 0) : (ventaEsUSD(v) ? 0 : Number(v.total)))
-
-  let candidatos: CandVarios[]
-  if (esEgreso) {
-    const yaUsados = new Set(movs.map((x) => x.conciliado_gasto_id).filter(Boolean) as number[])
-    candidatos = gastos
-      .filter((g) => g.moneda === monedaCta && !g.conciliado_mov_id && !yaUsados.has(g.id))
-      .map((g) => ({ tipo: 'gasto' as const, id: g.id, fecha: g.fecha, monto: Number(g.monto), etiqueta: g.descripcion ?? g.categoria }))
-  } else {
-    const vUsadas = new Set(movs.map((x) => x.conciliado_venta_id).filter(Boolean) as number[])
-    const iUsados = new Set(movs.map((x) => x.conciliado_ingreso_id).filter(Boolean) as number[])
-    candidatos = [
-      ...ventas.filter((v) => !v.conciliado_mov_id && !vUsadas.has(v.id) && ventaMontoCta(v) > 0)
-        .map((v) => ({ tipo: 'venta' as const, id: v.id, fecha: v.fecha, monto: ventaMontoCta(v), etiqueta: `Venta #${v.id}${v.cliente_id ? ` · ${clientePorId.get(v.cliente_id)?.nombre ?? ''}` : ''}` })),
-      ...ingresos.filter((i) => !i.conciliado_mov_id && !iUsados.has(i.id) && i.moneda === monedaCta)
-        .map((i) => ({ tipo: 'ingreso' as const, id: i.id, fecha: i.fecha, monto: Number(i.monto), etiqueta: i.descripcion ?? 'Ingreso' })),
-    ]
-  }
-  candidatos.sort((a, b) => Math.abs(new Date(a.fecha).getTime() - fechaM) - Math.abs(new Date(b.fecha).getTime() - fechaM))
 
   const key = (c: CandVarios) => `${c.tipo}-${c.id}`
   const sumSel = candidatos.filter((c) => sel.has(key(c))).reduce((s, c) => s + c.monto, 0)
@@ -1352,8 +1364,10 @@ function ConciliarVariosDialog({
         </div>
         {error && <div className="text-sm text-red-700">{error}</div>}
         <div className="max-h-[45vh] overflow-y-auto rounded-lg border border-oliva-100 divide-y divide-oliva-100/70">
-          {candidatos.length === 0 ? (
-            <div className="px-3 py-4 text-sm text-oliva-500">No hay {esEgreso ? 'gastos' : 'ventas ni ingresos'} disponibles en {monedaCta}.</div>
+          {cargando ? (
+            <div className="px-3 py-4 text-sm text-oliva-500">Buscando…</div>
+          ) : candidatos.length === 0 ? (
+            <div className="px-3 py-4 text-sm text-oliva-500">No hay {esEgreso ? 'gastos' : 'ventas ni ingresos'} sin conciliar en {monedaCta}.</div>
           ) : candidatos.map((c) => (
             <label key={key(c)} className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-oliva-50 cursor-pointer">
               <input type="checkbox" className="h-4 w-4 accent-oliva-700" checked={sel.has(key(c))} onChange={() => toggle(key(c))} />
@@ -1401,43 +1415,40 @@ function ResumenLista({ titulo, filas }: { titulo: string; filas: FilaResumen[] 
   )
 }
 
-// Conciliar manualmente un movimiento pendiente con un registro ya existente
-// (venta/ingreso para creditos; gasto para debitos). Para casos confusos.
-interface Candidato { tipo: 'venta' | 'ingreso' | 'gasto'; id: number; fecha: string; monto: number; moneda: string; etiqueta: string }
+// Conciliar manualmente un movimiento pendiente con UN registro ya existente
+// (venta/ingreso para creditos; gasto para debitos). Busca en 18 meses y excluye lo ya conciliado.
 function ConciliarConExistenteDialog({
-  mov, ventas, ingresos, gastos, clientePorId, onCerrar, onOk,
+  mov, cuenta, clientePorId, onCerrar, onOk,
 }: {
   mov: MovBancario | null
-  ventas: Venta[]
-  ingresos: Ingreso[]
-  gastos: Gasto[]
+  cuenta: Cuenta | null
   clientePorId: Map<number, Cliente>
   onCerrar: () => void
   onOk: () => void
 }) {
+  const [candidatos, setCandidatos] = useState<CandVarios[]>([])
+  const [cargando, setCargando] = useState(false)
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const esEgreso = !!mov && Number(mov.debito) > 0
+  const movMonto = mov ? Math.abs(esEgreso ? Number(mov.debito) : Number(mov.credito)) : 0
+  const monedaCta = cuenta?.moneda ?? 'UYU'
+
+  useEffect(() => {
+    setError(null); setCandidatos([])
+    if (!mov) return
+    const fechaM = new Date(mov.fecha).getTime()
+    setCargando(true)
+    fetchCandidatosConc(esEgreso, monedaCta, clientePorId)
+      .then((cs) => setCandidatos(cs.sort((a, b) => Math.abs(a.monto - movMonto) - Math.abs(b.monto - movMonto) || Math.abs(new Date(a.fecha).getTime() - fechaM) - Math.abs(new Date(b.fecha).getTime() - fechaM))))
+      .catch((e) => setError(String(e)))
+      .finally(() => setCargando(false))
+  }, [mov])
+
   if (!mov) return null
-  const esEgreso = Number(mov.debito) > 0
-  const movMonto = Math.abs(Number(mov.debito) > 0 ? mov.debito : mov.credito)
-  const fechaM = new Date(mov.fecha).getTime()
 
-  const candidatos: Candidato[] = esEgreso
-    ? gastos.map((g) => ({ tipo: 'gasto', id: g.id, fecha: g.fecha, monto: Number(g.monto), moneda: g.moneda, etiqueta: g.descripcion ?? g.categoria }))
-    : [
-        ...ventas.map((v) => ({ tipo: 'venta' as const, id: v.id, fecha: v.fecha, monto: Number(v.total), moneda: 'UYU', etiqueta: `Venta #${v.id}${v.cliente_id ? ` · ${clientePorId.get(v.cliente_id)?.nombre ?? ''}` : ''}` })),
-        ...ingresos.map((i) => ({ tipo: 'ingreso' as const, id: i.id, fecha: i.fecha, monto: Number(i.monto), moneda: i.moneda, etiqueta: i.descripcion ?? 'Ingreso' })),
-      ]
-
-  // Ordenar por cercania de monto y luego de fecha.
-  candidatos.sort((a, b) => {
-    const da = Math.abs(a.monto - movMonto), db = Math.abs(b.monto - movMonto)
-    if (da !== db) return da - db
-    return Math.abs(new Date(a.fecha).getTime() - fechaM) - Math.abs(new Date(b.fecha).getTime() - fechaM)
-  })
-
-  async function enlazar(c: Candidato) {
+  async function enlazar(c: CandVarios) {
     setGuardando(true); setError(null)
     const patch =
       c.tipo === 'venta' ? { conciliado_venta_id: c.id, conciliado_gasto_id: null, conciliado_ingreso_id: null, es_transferencia_interna: false }
@@ -1454,15 +1465,17 @@ function ConciliarConExistenteDialog({
       <div className="space-y-3">
         <div className="text-sm text-oliva-700">
           Movimiento: <b>{mov.fecha}</b> · {mov.descripcion}{mov.asunto ? ` · ${mov.asunto}` : ''} ·{' '}
-          <b className={esEgreso ? 'text-red-700' : 'text-green-700'}>{money(movMonto)}</b>
+          <b className={esEgreso ? 'text-red-700' : 'text-green-700'}>{money(movMonto, monedaCta === 'USD' ? 'USD' : 'UYU')}</b>
         </div>
         <p className="text-xs text-oliva-600">
-          Elegí el {esEgreso ? 'gasto' : 'venta o ingreso'} que corresponde a este movimiento. Los más parecidos (por monto y fecha) aparecen primero.
+          Elegí el {esEgreso ? 'gasto' : 'venta o ingreso'} que corresponde. Muestra solo lo <b>no conciliado</b> (últimos 18 meses, cualquier mes), con los de monto parecido primero.
         </p>
         {error && <div className="text-sm text-red-700">{error}</div>}
         <div className="max-h-[50vh] overflow-y-auto rounded-lg border border-oliva-100 divide-y divide-oliva-100/70">
-          {candidatos.length === 0 ? (
-            <div className="px-3 py-4 text-sm text-oliva-500">No hay {esEgreso ? 'gastos' : 'ventas ni ingresos'} en el período para enlazar.</div>
+          {cargando ? (
+            <div className="px-3 py-4 text-sm text-oliva-500">Buscando…</div>
+          ) : candidatos.length === 0 ? (
+            <div className="px-3 py-4 text-sm text-oliva-500">No hay {esEgreso ? 'gastos' : 'ventas ni ingresos'} sin conciliar en {monedaCta}.</div>
           ) : candidatos.map((c) => {
             const exacto = Math.abs(c.monto - movMonto) < 0.01
             return (
@@ -1477,7 +1490,7 @@ function ConciliarConExistenteDialog({
                 <span className="tabular-nums text-oliva-500 shrink-0">{c.fecha.slice(5)}</span>
                 <span className="flex-1 truncate text-oliva-800">{c.etiqueta}</span>
                 {exacto && <span className="text-[10px] text-green-700 shrink-0">monto exacto</span>}
-                <span className="tabular-nums text-oliva-900 shrink-0">{money(c.monto, c.moneda === 'USD' ? 'USD' : 'UYU')}</span>
+                <span className="tabular-nums text-oliva-900 shrink-0">{money(c.monto, monedaCta === 'USD' ? 'USD' : 'UYU')}</span>
               </button>
             )
           })}
