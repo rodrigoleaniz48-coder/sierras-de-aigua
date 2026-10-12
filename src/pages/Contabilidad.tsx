@@ -844,8 +844,9 @@ function Conciliacion() {
       const monto = Math.abs(Number(m.monto))
       const fechaM = new Date(m.fecha).getTime()
       if (m.debito > 0) {
-        // Egreso bancario → buscar gasto
+        // Egreso bancario → buscar gasto (las promos no son movimientos reales de dinero)
         const cand = gastos.find((g) => {
+          if (g.categoria === 'promociones_comerciales') return false
           if (g.moneda !== cuenta?.moneda) return false
           if (Math.abs(Number(g.monto) - monto) > 0.01) return false
           const diff = Math.abs(new Date(g.fecha).getTime() - fechaM) / 86400000
@@ -1091,7 +1092,7 @@ function Conciliacion() {
             />
             <ResumenLista
               titulo="Egresos"
-              filas={gastosMes.map((g) => ({
+              filas={gastosMes.filter((g) => g.categoria !== 'promociones_comerciales').map((g) => ({
                 id: g.id,
                 fecha: g.fecha,
                 monto: Number(g.monto),
@@ -1282,7 +1283,8 @@ async function fetchCandidatosConc(esEgreso: boolean, monedaCta: string, cliente
     if (r.conciliado_ingreso_id) iRef.add(r.conciliado_ingreso_id)
   }
   if (esEgreso) {
-    const { data } = await supabase.from('gastos').select('id,fecha,monto,moneda,descripcion,categoria,conciliado_mov_id').eq('es_adelanto', false).is('conciliado_mov_id', null).eq('moneda', monedaCta).gte('fecha', piso).order('fecha', { ascending: false })
+    // Las promociones comerciales (regalos) son un costo sin movimiento real de dinero: no se concilian.
+    const { data } = await supabase.from('gastos').select('id,fecha,monto,moneda,descripcion,categoria,conciliado_mov_id').eq('es_adelanto', false).neq('categoria', 'promociones_comerciales').is('conciliado_mov_id', null).eq('moneda', monedaCta).gte('fecha', piso).order('fecha', { ascending: false })
     return ((data ?? []) as Record<string, any>[]).filter((g) => !gRef.has(g.id)).map((g) => ({ tipo: 'gasto' as const, id: g.id, fecha: g.fecha, monto: Number(g.monto), etiqueta: g.descripcion ?? g.categoria }))
   }
   const [vR, iR] = await Promise.all([
