@@ -124,6 +124,23 @@ export async function generarBackupExcel(datasets: Set<BackupDataset>): Promise<
   const pagos = (pagosR.data ?? []) as Record<string, any>[]
   const movs = (movsR.data ?? []) as Record<string, any>[]
 
+  // --- Estado de conciliacion por registro (columna "Conciliado") ---
+  const gToMov = new Map<number, number>(), vToMov = new Map<number, number>(), iToMov = new Map<number, number>()
+  if (quiere('ventas') || quiere('gastos') || quiere('ingresos')) {
+    const { data: refs } = await supabase.from('movimientos_bancarios').select('id,conciliado_gasto_id,conciliado_venta_id,conciliado_ingreso_id')
+    for (const r of (refs ?? []) as Record<string, number | null>[]) {
+      if (r.conciliado_gasto_id) gToMov.set(r.conciliado_gasto_id, r.id as number)
+      if (r.conciliado_venta_id) vToMov.set(r.conciliado_venta_id, r.id as number)
+      if (r.conciliado_ingreso_id) iToMov.set(r.conciliado_ingreso_id, r.id as number)
+    }
+    for (const g of gastos) if (g.conciliado_mov_id) gToMov.set(g.id, g.conciliado_mov_id)
+    for (const v of ventas) if (v.conciliado_mov_id) vToMov.set(v.id, v.conciliado_mov_id)
+    for (const i of ingresos) if (i.conciliado_mov_id) iToMov.set(i.id, i.conciliado_mov_id)
+  }
+  const concVenta = (v: Record<string, any>) => v.promocion_comercial ? 'promo (no concilia)' : v.forma_pago === 'efectivo' ? 'efectivo (no concilia)' : vToMov.has(v.id) ? `Mov #${vToMov.get(v.id)}` : 'No conciliado'
+  const concGasto = (g: Record<string, any>) => g.es_adelanto ? 'adelanto (no concilia)' : g.reembolsable ? 'reembolsable (no concilia)' : g.categoria === 'promociones_comerciales' ? 'promo (no concilia)' : gToMov.has(g.id) ? `Mov #${gToMov.get(g.id)}` : 'No conciliado'
+  const concIngreso = (i: Record<string, any>) => i.cuenta_id == null ? 'efectivo (no concilia)' : iToMov.has(i.id) ? `Mov #${iToMov.get(i.id)}` : 'No conciliado'
+
   // --- Columnas de cada sección ---
   const colsVentas: ColSpec[] = [
     { header: 'ID', key: 'id', width: 6 }, { header: 'Fecha', key: 'fecha', width: 12 },
@@ -133,14 +150,15 @@ export async function generarBackupExcel(datasets: Set<BackupDataset>): Promise<
     { header: 'Entregado', key: 'entregado', width: 10 }, { header: 'Cobrado', key: 'cobrado', width: 9 },
     { header: 'Promo', key: 'promo', width: 8 }, { header: 'Moneda', key: 'moneda', width: 8 },
     { header: 'Cotización', key: 'cotizacion', width: 10 }, { header: 'Total UYU', key: 'total', width: 12 },
-    { header: 'IVA UYU', key: 'iva', width: 10 }, { header: 'Notas', key: 'notas', width: 28 },
+    { header: 'IVA UYU', key: 'iva', width: 10 }, { header: 'Conciliado', key: 'conciliado', width: 20 },
+    { header: 'Notas', key: 'notas', width: 28 },
   ]
   const mapVenta = (v: Record<string, any>) => ({
     id: v.id, fecha: v.fecha, cliente: v.cliente_id ? cliNombre.get(v.cliente_id) ?? '—' : '—',
     socio: perfNombre.get(v.socio_id) ?? '—', ubicacion: ubicNombre.get(v.ubicacion_id) ?? '—',
     estado: v.estado, forma_pago: v.forma_pago, con_factura: v.con_factura, entregado: v.entregado,
     cobrado: v.cobrado, promo: v.promocion_comercial, moneda: v.moneda, cotizacion: v.cotizacion,
-    total: Number(v.total), iva: Number(v.iva), notas: v.notas,
+    total: Number(v.total), iva: Number(v.iva), conciliado: concVenta(v), notas: v.notas,
   })
 
   const colsGastos: ColSpec[] = [
@@ -149,25 +167,26 @@ export async function generarBackupExcel(datasets: Set<BackupDataset>): Promise<
     { header: 'Monto', key: 'monto', width: 12 }, { header: 'Moneda', key: 'moneda', width: 8 },
     { header: 'Método pago', key: 'metodo_pago', width: 13 }, { header: 'Cuenta', key: 'cuenta', width: 18 },
     { header: 'Reembolsable', key: 'reembolsable', width: 11 }, { header: 'Reembolsado', key: 'reembolsado', width: 11 },
-    { header: 'Adelanto', key: 'es_adelanto', width: 9 }, { header: 'Descripción', key: 'descripcion', width: 40 },
+    { header: 'Adelanto', key: 'es_adelanto', width: 9 }, { header: 'Conciliado', key: 'conciliado', width: 20 },
+    { header: 'Descripción', key: 'descripcion', width: 40 },
   ]
   const mapGasto = (g: Record<string, any>) => ({
     id: g.id, fecha: g.fecha, socio: perfNombre.get(g.socio_id) ?? '—',
     categoria: catGNombre.get(g.categoria) ?? g.categoria, monto: Number(g.monto), moneda: g.moneda,
     metodo_pago: g.metodo_pago, cuenta: g.cuenta_id ? cuentaNombre.get(g.cuenta_id) ?? '—' : '',
-    reembolsable: g.reembolsable, reembolsado: g.reembolsado, es_adelanto: g.es_adelanto, descripcion: g.descripcion,
+    reembolsable: g.reembolsable, reembolsado: g.reembolsado, es_adelanto: g.es_adelanto, conciliado: concGasto(g), descripcion: g.descripcion,
   })
 
   const colsIngresos: ColSpec[] = [
     { header: 'ID', key: 'id', width: 6 }, { header: 'Fecha', key: 'fecha', width: 12 },
     { header: 'Socio', key: 'socio', width: 12 }, { header: 'Categoría', key: 'categoria', width: 24 },
     { header: 'Monto', key: 'monto', width: 12 }, { header: 'Moneda', key: 'moneda', width: 8 },
-    { header: 'Descripción', key: 'descripcion', width: 40 },
+    { header: 'Conciliado', key: 'conciliado', width: 20 }, { header: 'Descripción', key: 'descripcion', width: 40 },
   ]
   const mapIngreso = (i: Record<string, any>) => ({
     id: i.id, fecha: i.fecha, socio: perfNombre.get(i.socio_id) ?? '—',
     categoria: i.categoria_id ? catINombre.get(i.categoria_id) ?? '—' : '—',
-    monto: Number(i.monto), moneda: i.moneda, descripcion: i.descripcion,
+    monto: Number(i.monto), moneda: i.moneda, conciliado: concIngreso(i), descripcion: i.descripcion,
   })
 
   const colsPagos: ColSpec[] = [
