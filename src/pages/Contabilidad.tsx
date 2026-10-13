@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { Dialog } from '../components/Dialog'
 import { money } from '../lib/format'
+import { normalizarTelWA } from '../lib/config'
 import { parsearExtractoBROU } from '../lib/parserBROU'
 import { parsearExcelBanco, type ResultadoParseo } from '../lib/parserExcelBanco'
 import { ConectarGmailCard } from '../components/ConectarGmailCard'
@@ -55,13 +56,13 @@ interface MovBancario {
   nota: string | null
   hash_unico: string
 }
-interface Venta { id: number; fecha: string; total: number; con_factura: boolean; ubicacion_id: number; cliente_id: number | null; moneda?: string | null; cotizacion?: number | null; forma_pago?: string | null; conciliado_mov_id?: number | null }
+interface Venta { id: number; fecha: string; total: number; con_factura: boolean; ubicacion_id: number; cliente_id: number | null; moneda?: string | null; cotizacion?: number | null; forma_pago?: string | null; entregado?: boolean; fecha_entrega?: string | null; conciliado_mov_id?: number | null }
 interface Gasto { id: number; fecha: string; monto: number; moneda: 'UYU' | 'USD'; descripcion: string | null; categoria: string; socio_id: string; es_adelanto?: boolean; reembolsable?: boolean; conciliado_mov_id?: number | null }
 interface Ingreso { id: number; fecha: string; monto: number; moneda: string; descripcion: string | null; categoria_id: number | null; cuenta_id?: number | null; conciliado_mov_id?: number | null }
 interface Pago { id: number; cliente_id: number | null; fecha: string; monto: number; moneda: string; medio_pago: string | null; nota: string | null }
 interface CategoriaGasto { id: number; slug: string; nombre: string }
 interface CategoriaIngreso { id: number; nombre: string }
-interface Cliente { id: number; nombre: string; tipo?: string; saldo_inicial?: number; saldo_inicial_usd?: number; saldo_inicial_fecha?: string | null }
+interface Cliente { id: number; nombre: string; tipo?: string; telefono?: string | null; whatsapp?: string | null; saldo_inicial?: number; saldo_inicial_usd?: number; saldo_inicial_fecha?: string | null }
 
 export function Contabilidad() {
   const { perfil } = useAuth()
@@ -1638,6 +1639,7 @@ function CobroACuentaDialog({
 // Saldo por cliente = ventas (debe) − pagos a cuenta (haber). Base UYU.
 // ============================================================
 export function CuentasCorrientes() {
+  const { perfil } = useAuth()
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [ventas, setVentas] = useState<Venta[]>([])
   const [pagos, setPagos] = useState<Pago[]>([])
@@ -1647,13 +1649,13 @@ export function CuentasCorrientes() {
 
   async function cargar() {
     setCargando(true)
-    const { data: cl } = await supabase.from('clientes').select('id,nombre,tipo,saldo_inicial,saldo_inicial_usd,saldo_inicial_fecha').in('tipo', ['distribuidor', 'mayorista']).order('nombre')
+    const { data: cl } = await supabase.from('clientes').select('id,nombre,tipo,telefono,whatsapp,saldo_inicial,saldo_inicial_usd,saldo_inicial_fecha').in('tipo', ['distribuidor', 'mayorista']).order('nombre')
     const arr = (cl as Cliente[]) ?? []
     setClientes(arr)
     const ids = arr.map((c) => c.id)
     if (ids.length > 0) {
       const [v, p] = await Promise.all([
-        supabase.from('ventas').select('id,fecha,total,con_factura,ubicacion_id,cliente_id,moneda,cotizacion').in('cliente_id', ids).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
+        supabase.from('ventas').select('id,fecha,total,con_factura,ubicacion_id,cliente_id,moneda,cotizacion,entregado,fecha_entrega').in('cliente_id', ids).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
         supabase.from('pagos').select('id,cliente_id,fecha,monto,moneda,medio_pago,nota').in('cliente_id', ids),
       ])
       setVentas((v.data as Venta[]) ?? [])
@@ -1701,6 +1703,35 @@ export function CuentasCorrientes() {
   const totalCobrarUSD = filas.reduce((s, f) => s + Math.max(0, f.saldoUSD), 0)
   const hayUSD = filas.some((f) => Math.abs(f.saldoUSD) > 0.01 || f.vUSD > 0 || f.pUSD > 0)
 
+  // Ultima entrega por cliente (para el contador de dias) y recordatorio por WhatsApp.
+  const ultimaEntrega = useMemo(() => {
+    const m = new Map<number, string>()
+    for (const v of ventas) {
+      if (!v.cliente_id || !v.entregado) continue
+      const f = v.fecha_entrega ?? v.fecha
+      const cur = m.get(v.cliente_id)
+      if (!cur || f > cur) m.set(v.cliente_id, f)
+    }
+    return m
+  }, [ventas])
+  const diasDesde = (f: string | undefined) => (f ? Math.floor((Date.now() - new Date(f + 'T00:00:00').getTime()) / 86400000) : null)
+
+  function recordar(c: Cliente, saldoUYU: number, saldoUSD: number) {
+    const wa = normalizarTelWA(c.whatsapp ?? c.telefono ?? null)
+    const socio = perfil?.nombre?.split(' ')[0] ?? ''
+    const saldoTxt = [saldoUYU > 0.01 ? money(saldoUYU) : null, saldoUSD > 0.01 ? money(saldoUSD, 'USD') : null].filter(Boolean).join(' + ')
+    const partes = [
+      `Hola ${c.nombre?.split(' ')[0] ?? ''}!`.trim(),
+      'Te escribo de Sierras de Aiguá 🫒',
+      '',
+      `Te paso el saldo pendiente de tu cuenta: *${saldoTxt}*.`,
+      'Cuando puedas coordinamos el pago, ¡gracias! 🙏',
+    ]
+    if (socio) { partes.push(''); partes.push(socio) }
+    const texto = encodeURIComponent(partes.join('\n'))
+    window.open(wa ? `https://wa.me/${wa}?text=${texto}` : `https://wa.me/?text=${texto}`, '_blank')
+  }
+
   const selData = sel ? filas.find((f) => f.c.id === sel) : null
   const ledger = useMemo(() => {
     type L = { fecha: string; tipo: 'inicial' | 'venta' | 'pago'; detalle: string; debe: number; haber: number; moneda: string }
@@ -1737,11 +1768,15 @@ export function CuentasCorrientes() {
                 <th className="py-2 px-3">Cliente</th>
                 <th className="py-2 px-3 text-right">Saldo (pesos)</th>
                 {hayUSD && <th className="py-2 px-3 text-right">Saldo (USD)</th>}
+                <th className="py-2 px-3 text-right">Últ. entrega</th>
                 <th className="py-2 px-3"></th>
               </tr>
             </thead>
             <tbody>
-              {filas.map((f) => (
+              {filas.map((f) => {
+                const dias = diasDesde(ultimaEntrega.get(f.c.id))
+                const debe = f.saldoUYU > 0.01 || f.saldoUSD > 0.01
+                return (
                 <tr key={f.c.id} className={`border-b border-oliva-100/70 last:border-0 ${sel === f.c.id ? 'bg-oliva-50/60' : ''}`}>
                   <td className="py-2 px-3 text-oliva-900">
                     {f.c.nombre}
@@ -1750,11 +1785,18 @@ export function CuentasCorrientes() {
                   </td>
                   <td className={`py-2 px-3 text-right tabular-nums font-semibold ${f.saldoUYU > 0.01 ? 'text-red-700' : f.saldoUYU < -0.01 ? 'text-green-700' : 'text-oliva-500'}`}>{money(f.saldoUYU)}</td>
                   {hayUSD && <td className={`py-2 px-3 text-right tabular-nums font-semibold ${f.saldoUSD > 0.01 ? 'text-red-700' : f.saldoUSD < -0.01 ? 'text-green-700' : 'text-oliva-400'}`}>{Math.abs(f.saldoUSD) > 0.01 ? money(f.saldoUSD, 'USD') : '—'}</td>}
-                  <td className="py-2 px-3 text-right">
-                    <button className="text-xs text-oliva-700 underline" onClick={() => setSel(sel === f.c.id ? null : f.c.id)}>{sel === f.c.id ? 'ocultar' : 'ver'}</button>
+                  <td className="py-2 px-3 text-right tabular-nums text-oliva-600 whitespace-nowrap">{dias != null ? `hace ${dias}d` : '—'}</td>
+                  <td className="py-2 px-3 text-right whitespace-nowrap">
+                    <div className="flex gap-2 justify-end items-center">
+                      {debe && (
+                        <button className="text-xs rounded-md bg-green-600 hover:bg-green-700 text-white px-2 py-0.5 font-medium" title="Recordar saldo por WhatsApp" onClick={() => recordar(f.c, f.saldoUYU, f.saldoUSD)}>Recordar</button>
+                      )}
+                      <button className="text-xs text-oliva-700 underline" onClick={() => setSel(sel === f.c.id ? null : f.c.id)}>{sel === f.c.id ? 'ocultar' : 'ver'}</button>
+                    </div>
                   </td>
                 </tr>
-              ))}
+                )
+              })}
             </tbody>
           </table>
         </div>
