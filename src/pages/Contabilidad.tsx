@@ -809,7 +809,7 @@ function Conciliacion() {
     const [mb, v, g, ing, pg, cl, refs] = await Promise.all([
       supabase.from('movimientos_bancarios').select('*').eq('cuenta_id', Number(cuentaId)).gte('fecha', desde).lte('fecha', hasta).order('fecha'),
       supabase.from('ventas').select('id,fecha,total,con_factura,ubicacion_id,cliente_id,conciliado_mov_id').gte('fecha', desdeAmplio).lte('fecha', hasta).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
-      supabase.from('gastos').select('id,fecha,monto,moneda,descripcion,categoria,socio_id,conciliado_mov_id').gte('fecha', desdeAmplio).lte('fecha', hasta).eq('es_adelanto', false),
+      supabase.from('gastos').select('id,fecha,monto,moneda,descripcion,categoria,socio_id,conciliado_mov_id').gte('fecha', desdeAmplio).lte('fecha', hasta).eq('es_adelanto', false).eq('reembolsable', false),
       supabase.from('ingresos').select('id,fecha,monto,moneda,descripcion,categoria_id,conciliado_mov_id').gte('fecha', desdeAmplio).lte('fecha', hasta),
       supabase.from('pagos').select('id,cliente_id,fecha,monto,moneda,medio_pago,nota').gte('fecha', desdeAmplio).lte('fecha', hasta),
       supabase.from('clientes').select('id,nombre,tipo'),
@@ -1285,8 +1285,9 @@ async function fetchCandidatosConc(esEgreso: boolean, monedaCta: string, cliente
     if (r.conciliado_ingreso_id) iRef.add(r.conciliado_ingreso_id)
   }
   if (esEgreso) {
-    // Las promociones comerciales (regalos) son un costo sin movimiento real de dinero: no se concilian.
-    const { data } = await supabase.from('gastos').select('id,fecha,monto,moneda,descripcion,categoria,conciliado_mov_id').eq('es_adelanto', false).neq('categoria', 'promociones_comerciales').is('conciliado_mov_id', null).eq('moneda', monedaCta).gte('fecha', piso).order('fecha', { ascending: false })
+    // No se concilian: promociones comerciales (regalos, sin movimiento real), ni adelantos ni
+    // reembolsables (se liquidan dentro del sueldo, no por un movimiento puntual del banco).
+    const { data } = await supabase.from('gastos').select('id,fecha,monto,moneda,descripcion,categoria,conciliado_mov_id').eq('es_adelanto', false).eq('reembolsable', false).neq('categoria', 'promociones_comerciales').is('conciliado_mov_id', null).eq('moneda', monedaCta).gte('fecha', piso).order('fecha', { ascending: false })
     return ((data ?? []) as Record<string, any>[]).filter((g) => !gRef.has(g.id)).map((g) => ({ tipo: 'gasto' as const, id: g.id, fecha: g.fecha, monto: Number(g.monto), etiqueta: g.descripcion ?? g.categoria }))
   }
   const [vR, iR] = await Promise.all([
