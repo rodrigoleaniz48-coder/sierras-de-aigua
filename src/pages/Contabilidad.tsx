@@ -808,11 +808,10 @@ function Conciliacion() {
     setCargando(true)
     const [mb, v, g, ing, pg, cl, refs] = await Promise.all([
       supabase.from('movimientos_bancarios').select('*').eq('cuenta_id', Number(cuentaId)).gte('fecha', desde).lte('fecha', hasta).order('fecha'),
-      // Para conciliar: ventas que NO fueron en efectivo (las de efectivo se llevan como adelanto, no van al banco).
-      supabase.from('ventas').select('id,fecha,total,con_factura,ubicacion_id,cliente_id,forma_pago,conciliado_mov_id').gte('fecha', desdeAmplio).lte('fecha', hasta).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false).or('forma_pago.is.null,forma_pago.neq.efectivo'),
+      // Se cargan todas (incl. efectivo) para mostrarlas en el resumen; el efectivo se marca "no aplica".
+      supabase.from('ventas').select('id,fecha,total,con_factura,ubicacion_id,cliente_id,forma_pago,conciliado_mov_id').gte('fecha', desdeAmplio).lte('fecha', hasta).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
       supabase.from('gastos').select('id,fecha,monto,moneda,descripcion,categoria,socio_id,conciliado_mov_id').gte('fecha', desdeAmplio).lte('fecha', hasta).eq('es_adelanto', false).eq('reembolsable', false),
-      // Ingresos depositados en banco (con cuenta); los de efectivo (cuenta null) no se concilian.
-      supabase.from('ingresos').select('id,fecha,monto,moneda,descripcion,categoria_id,cuenta_id,conciliado_mov_id').gte('fecha', desdeAmplio).lte('fecha', hasta).not('cuenta_id', 'is', null),
+      supabase.from('ingresos').select('id,fecha,monto,moneda,descripcion,categoria_id,cuenta_id,conciliado_mov_id').gte('fecha', desdeAmplio).lte('fecha', hasta),
       supabase.from('pagos').select('id,cliente_id,fecha,monto,moneda,medio_pago,nota').gte('fecha', desdeAmplio).lte('fecha', hasta),
       supabase.from('clientes').select('id,nombre,tipo'),
       // Referencias de conciliacion de TODAS las cuentas (para el resumen, que es global).
@@ -861,14 +860,14 @@ function Conciliacion() {
           matched++
         }
       } else if (m.credito > 0) {
-        // Credito bancario → buscar primero una venta (excepto de distribuidores: esos van por
-        // "Cobro a cuenta"); si no, un ingreso registrado.
-        const venta = ventas.find((v) => !(v.cliente_id && ccIds.has(v.cliente_id)) && Math.abs(Number(v.total) - monto) < 0.01 && Math.abs(new Date(v.fecha).getTime() - fechaM) / 86400000 <= 5)
+        // Credito bancario → buscar primero una venta (no de distribuidores ni en efectivo);
+        // si no, un ingreso depositado en banco.
+        const venta = ventas.find((v) => v.forma_pago !== 'efectivo' && !(v.cliente_id && ccIds.has(v.cliente_id)) && Math.abs(Number(v.total) - monto) < 0.01 && Math.abs(new Date(v.fecha).getTime() - fechaM) / 86400000 <= 5)
         if (venta) {
           await supabase.from('movimientos_bancarios').update({ conciliado_venta_id: venta.id }).eq('id', m.id)
           matched++
         } else {
-          const ing = ingresos.find((i) => i.moneda === cuenta?.moneda && Math.abs(Number(i.monto) - monto) < 0.01 && Math.abs(new Date(i.fecha).getTime() - fechaM) / 86400000 <= 5)
+          const ing = ingresos.find((i) => i.cuenta_id != null && i.moneda === cuenta?.moneda && Math.abs(Number(i.monto) - monto) < 0.01 && Math.abs(new Date(i.fecha).getTime() - fechaM) / 86400000 <= 5)
           if (ing) {
             await supabase.from('movimientos_bancarios').update({ conciliado_ingreso_id: ing.id }).eq('id', m.id)
             matched++
@@ -1074,35 +1073,32 @@ function Conciliacion() {
           <div className="border-t border-oliva-100 p-3 grid grid-cols-1 lg:grid-cols-3 gap-3">
             <ResumenLista
               titulo="Ventas"
-              filas={ventasMes.map((v) => ({
-                id: v.id,
-                fecha: v.fecha,
-                monto: Number(v.total),
-                moneda: 'UYU',
-                etiqueta: `#${v.id}${v.cliente_id ? ` · ${clientePorId.get(v.cliente_id)?.nombre ?? ''}` : ''}`,
-                conc: ventasConc.has(v.id),
-              }))}
+              filas={[...ventasMes].sort((a, b) => a.fecha.localeCompare(b.fecha) || a.id - b.id).map((v) => {
+                const na = v.forma_pago === 'efectivo' ? 'efectivo' : (v.cliente_id && ccIds.has(v.cliente_id)) ? 'cta cte' : null
+                return {
+                  id: v.id, fecha: v.fecha, monto: Number(v.total), moneda: 'UYU',
+                  etiqueta: `#${v.id}${v.cliente_id ? ` · ${clientePorId.get(v.cliente_id)?.nombre ?? ''}` : ''}`,
+                  estado: na ? 'na' : ventasConc.has(v.id) ? 'ok' : 'pendiente', motivo: na ?? undefined,
+                }
+              })}
             />
             <ResumenLista
               titulo="Ingresos"
-              filas={ingresosMes.map((i) => ({
-                id: i.id,
-                fecha: i.fecha,
-                monto: Number(i.monto),
-                moneda: i.moneda,
-                etiqueta: i.descripcion ?? 'Ingreso',
-                conc: ingresosConc.has(i.id),
-              }))}
+              filas={[...ingresosMes].sort((a, b) => a.fecha.localeCompare(b.fecha) || a.id - b.id).map((i) => {
+                const na = i.cuenta_id == null ? 'efectivo' : null
+                return {
+                  id: i.id, fecha: i.fecha, monto: Number(i.monto), moneda: i.moneda,
+                  etiqueta: i.descripcion ?? 'Ingreso',
+                  estado: na ? 'na' : ingresosConc.has(i.id) ? 'ok' : 'pendiente', motivo: na ?? undefined,
+                }
+              })}
             />
             <ResumenLista
               titulo="Egresos"
-              filas={gastosMes.filter((g) => g.categoria !== 'promociones_comerciales').map((g) => ({
-                id: g.id,
-                fecha: g.fecha,
-                monto: Number(g.monto),
-                moneda: g.moneda,
+              filas={gastosMes.filter((g) => g.categoria !== 'promociones_comerciales').sort((a, b) => a.fecha.localeCompare(b.fecha) || a.id - b.id).map((g) => ({
+                id: g.id, fecha: g.fecha, monto: Number(g.monto), moneda: g.moneda,
                 etiqueta: g.descripcion ?? g.categoria,
-                conc: gastosConc.has(g.id),
+                estado: (gastosConc.has(g.id) ? 'ok' : 'pendiente') as 'ok' | 'pendiente',
               }))}
             />
           </div>
@@ -1402,15 +1398,19 @@ function ConciliarVariosDialog({
   )
 }
 
-// Lista compacta de un tipo de registro (ventas/ingresos/egresos) con su chip de conciliacion.
-interface FilaResumen { id: number; fecha: string; monto: number; moneda: string; etiqueta: string; conc: boolean }
+// Lista compacta de un tipo de registro (ventas/ingresos/egresos) con su estado de conciliacion.
+// estado: 'ok' = conciliado · 'pendiente' = falta conciliar (pasó por el banco) · 'na' = no aplica
+// (efectivo, cuenta corriente, etc.: no es un movimiento del banco). Se ordena por fecha.
+interface FilaResumen { id: number; fecha: string; monto: number; moneda: string; etiqueta: string; estado: 'ok' | 'pendiente' | 'na'; motivo?: string }
 function ResumenLista({ titulo, filas }: { titulo: string; filas: FilaResumen[] }) {
-  const conc = filas.filter((f) => f.conc).length
+  const ok = filas.filter((f) => f.estado === 'ok').length
+  const pend = filas.filter((f) => f.estado === 'pendiente').length
+  const icono = (e: FilaResumen['estado']) => e === 'ok' ? '✅' : e === 'pendiente' ? '🔴' : '⚪'
   return (
     <div className="rounded-lg border border-oliva-100 overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 bg-oliva-50 border-b border-oliva-100">
         <span className="text-xs font-semibold uppercase tracking-wide text-oliva-700">{titulo}</span>
-        <span className="text-[11px] text-oliva-600">{conc}/{filas.length} conc.</span>
+        <span className="text-[11px] text-oliva-600">{ok}/{ok + pend} conc.{pend > 0 ? ` · ${pend} falta${pend === 1 ? '' : 'n'}` : ''}</span>
       </div>
       {filas.length === 0 ? (
         <div className="px-3 py-3 text-xs text-oliva-500">Sin registros.</div>
@@ -1418,9 +1418,9 @@ function ResumenLista({ titulo, filas }: { titulo: string; filas: FilaResumen[] 
         <div className="max-h-72 overflow-y-auto divide-y divide-oliva-100/70">
           {filas.map((f) => (
             <div key={f.id} className="flex items-center gap-2 px-3 py-1.5 text-xs">
-              <span title={f.conc ? 'Conciliado' : 'No conciliado'} className="shrink-0">{f.conc ? '✅' : '🔴'}</span>
+              <span title={f.estado === 'ok' ? 'Conciliado' : f.estado === 'pendiente' ? 'Falta conciliar' : `No aplica${f.motivo ? ` (${f.motivo})` : ''}`} className="shrink-0">{icono(f.estado)}</span>
               <span className="tabular-nums text-oliva-500 shrink-0">{f.fecha.slice(5)}</span>
-              <span className="flex-1 truncate text-oliva-800">{f.etiqueta}</span>
+              <span className="flex-1 truncate text-oliva-800">{f.etiqueta}{f.estado === 'na' && f.motivo ? <span className="text-oliva-400"> · {f.motivo}</span> : null}</span>
               <span className="tabular-nums text-oliva-900 shrink-0">{money(f.monto, f.moneda === 'USD' ? 'USD' : 'UYU')}</span>
             </div>
           ))}
