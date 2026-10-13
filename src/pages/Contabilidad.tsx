@@ -56,7 +56,7 @@ interface MovBancario {
   hash_unico: string
 }
 interface Venta { id: number; fecha: string; total: number; con_factura: boolean; ubicacion_id: number; cliente_id: number | null; moneda?: string | null; cotizacion?: number | null; forma_pago?: string | null; conciliado_mov_id?: number | null }
-interface Gasto { id: number; fecha: string; monto: number; moneda: 'UYU' | 'USD'; descripcion: string | null; categoria: string; socio_id: string; conciliado_mov_id?: number | null }
+interface Gasto { id: number; fecha: string; monto: number; moneda: 'UYU' | 'USD'; descripcion: string | null; categoria: string; socio_id: string; es_adelanto?: boolean; reembolsable?: boolean; conciliado_mov_id?: number | null }
 interface Ingreso { id: number; fecha: string; monto: number; moneda: string; descripcion: string | null; categoria_id: number | null; cuenta_id?: number | null; conciliado_mov_id?: number | null }
 interface Pago { id: number; cliente_id: number | null; fecha: string; monto: number; moneda: string; medio_pago: string | null; nota: string | null }
 interface CategoriaGasto { id: number; slug: string; nombre: string }
@@ -810,7 +810,8 @@ function Conciliacion() {
       supabase.from('movimientos_bancarios').select('*').eq('cuenta_id', Number(cuentaId)).gte('fecha', desde).lte('fecha', hasta).order('fecha'),
       // Se cargan todas (incl. efectivo) para mostrarlas en el resumen; el efectivo se marca "no aplica".
       supabase.from('ventas').select('id,fecha,total,con_factura,ubicacion_id,cliente_id,forma_pago,conciliado_mov_id').gte('fecha', desdeAmplio).lte('fecha', hasta).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
-      supabase.from('gastos').select('id,fecha,monto,moneda,descripcion,categoria,socio_id,conciliado_mov_id').gte('fecha', desdeAmplio).lte('fecha', hasta).eq('es_adelanto', false).eq('reembolsable', false),
+      // Se cargan todos (incl. adelantos/reembolsables) para mostrarlos en el resumen como "en sueldo".
+      supabase.from('gastos').select('id,fecha,monto,moneda,descripcion,categoria,socio_id,es_adelanto,reembolsable,conciliado_mov_id').gte('fecha', desdeAmplio).lte('fecha', hasta),
       supabase.from('ingresos').select('id,fecha,monto,moneda,descripcion,categoria_id,cuenta_id,conciliado_mov_id').gte('fecha', desdeAmplio).lte('fecha', hasta),
       supabase.from('pagos').select('id,cliente_id,fecha,monto,moneda,medio_pago,nota').gte('fecha', desdeAmplio).lte('fecha', hasta),
       supabase.from('clientes').select('id,nombre,tipo'),
@@ -847,9 +848,9 @@ function Conciliacion() {
       const monto = Math.abs(Number(m.monto))
       const fechaM = new Date(m.fecha).getTime()
       if (m.debito > 0) {
-        // Egreso bancario → buscar gasto (las promos no son movimientos reales de dinero)
+        // Egreso bancario → buscar gasto (adelantos/reembolsables van en el sueldo; promos no mueven dinero)
         const cand = gastos.find((g) => {
-          if (g.categoria === 'promociones_comerciales') return false
+          if (g.es_adelanto || g.reembolsable || g.categoria === 'promociones_comerciales') return false
           if (g.moneda !== cuenta?.moneda) return false
           if (Math.abs(Number(g.monto) - monto) > 0.01) return false
           const diff = Math.abs(new Date(g.fecha).getTime() - fechaM) / 86400000
@@ -1095,11 +1096,14 @@ function Conciliacion() {
             />
             <ResumenLista
               titulo="Egresos"
-              filas={gastosMes.filter((g) => g.categoria !== 'promociones_comerciales').sort((a, b) => a.fecha.localeCompare(b.fecha) || a.id - b.id).map((g) => ({
-                id: g.id, fecha: g.fecha, monto: Number(g.monto), moneda: g.moneda,
-                etiqueta: g.descripcion ?? g.categoria,
-                estado: (gastosConc.has(g.id) ? 'ok' : 'pendiente') as 'ok' | 'pendiente',
-              }))}
+              filas={gastosMes.filter((g) => g.categoria !== 'promociones_comerciales').sort((a, b) => a.fecha.localeCompare(b.fecha) || a.id - b.id).map((g) => {
+                const sueldo = g.es_adelanto ? 'adelanto' : g.reembolsable ? 'reembolso' : null
+                return {
+                  id: g.id, fecha: g.fecha, monto: Number(g.monto), moneda: g.moneda,
+                  etiqueta: g.descripcion ?? g.categoria,
+                  estado: sueldo ? 'sueldo' : gastosConc.has(g.id) ? 'ok' : 'pendiente', motivo: sueldo ?? undefined,
+                }
+              })}
             />
           </div>
         )}
@@ -1399,13 +1403,14 @@ function ConciliarVariosDialog({
 }
 
 // Lista compacta de un tipo de registro (ventas/ingresos/egresos) con su estado de conciliacion.
-// estado: 'ok' = conciliado · 'pendiente' = falta conciliar (pasó por el banco) · 'na' = no aplica
-// (efectivo, cuenta corriente, etc.: no es un movimiento del banco). Se ordena por fecha.
-interface FilaResumen { id: number; fecha: string; monto: number; moneda: string; etiqueta: string; estado: 'ok' | 'pendiente' | 'na'; motivo?: string }
+// estado: 'ok' = conciliado · 'pendiente' = falta conciliar (pasó por el banco) · 'sueldo' = se
+// salda dentro del sueldo (adelantos/reembolsables) · 'na' = no aplica (efectivo, cuenta corriente).
+interface FilaResumen { id: number; fecha: string; monto: number; moneda: string; etiqueta: string; estado: 'ok' | 'pendiente' | 'sueldo' | 'na'; motivo?: string }
 function ResumenLista({ titulo, filas }: { titulo: string; filas: FilaResumen[] }) {
   const ok = filas.filter((f) => f.estado === 'ok').length
   const pend = filas.filter((f) => f.estado === 'pendiente').length
-  const icono = (e: FilaResumen['estado']) => e === 'ok' ? '✅' : e === 'pendiente' ? '🔴' : '⚪'
+  const icono = (e: FilaResumen['estado']) => e === 'ok' ? '✅' : e === 'pendiente' ? '🔴' : e === 'sueldo' ? '💼' : '⚪'
+  const titulos: Record<FilaResumen['estado'], string> = { ok: 'Conciliado', pendiente: 'Falta conciliar', sueldo: 'Se salda en el sueldo', na: 'No aplica' }
   return (
     <div className="rounded-lg border border-oliva-100 overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 bg-oliva-50 border-b border-oliva-100">
@@ -1418,9 +1423,9 @@ function ResumenLista({ titulo, filas }: { titulo: string; filas: FilaResumen[] 
         <div className="max-h-72 overflow-y-auto divide-y divide-oliva-100/70">
           {filas.map((f) => (
             <div key={f.id} className="flex items-center gap-2 px-3 py-1.5 text-xs">
-              <span title={f.estado === 'ok' ? 'Conciliado' : f.estado === 'pendiente' ? 'Falta conciliar' : `No aplica${f.motivo ? ` (${f.motivo})` : ''}`} className="shrink-0">{icono(f.estado)}</span>
+              <span title={`${titulos[f.estado]}${f.motivo ? ` (${f.motivo})` : ''}`} className="shrink-0">{icono(f.estado)}</span>
               <span className="tabular-nums text-oliva-500 shrink-0">{f.fecha.slice(5)}</span>
-              <span className="flex-1 truncate text-oliva-800">{f.etiqueta}{f.estado === 'na' && f.motivo ? <span className="text-oliva-400"> · {f.motivo}</span> : null}</span>
+              <span className="flex-1 truncate text-oliva-800">{f.etiqueta}{(f.estado === 'na' || f.estado === 'sueldo') && f.motivo ? <span className="text-oliva-400"> · {f.motivo}</span> : null}</span>
               <span className="tabular-nums text-oliva-900 shrink-0">{money(f.monto, f.moneda === 'USD' ? 'USD' : 'UYU')}</span>
             </div>
           ))}

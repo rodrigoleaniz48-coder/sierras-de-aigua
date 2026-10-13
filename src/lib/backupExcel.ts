@@ -138,7 +138,7 @@ export async function generarBackupExcel(datasets: Set<BackupDataset>): Promise<
     for (const i of ingresos) if (i.conciliado_mov_id) iToMov.set(i.id, i.conciliado_mov_id)
   }
   const concVenta = (v: Record<string, any>) => v.promocion_comercial ? 'promo (no concilia)' : v.forma_pago === 'efectivo' ? 'efectivo (no concilia)' : vToMov.has(v.id) ? `Mov #${vToMov.get(v.id)}` : 'No conciliado'
-  const concGasto = (g: Record<string, any>) => g.es_adelanto ? 'adelanto (no concilia)' : g.reembolsable ? 'reembolsable (no concilia)' : g.categoria === 'promociones_comerciales' ? 'promo (no concilia)' : gToMov.has(g.id) ? `Mov #${gToMov.get(g.id)}` : 'No conciliado'
+  const concGasto = (g: Record<string, any>) => g.es_adelanto ? 'En sueldo (adelanto)' : g.reembolsable ? 'En sueldo (reembolso)' : g.categoria === 'promociones_comerciales' ? 'promo (no concilia)' : gToMov.has(g.id) ? `Mov #${gToMov.get(g.id)}` : 'No conciliado'
   const concIngreso = (i: Record<string, any>) => i.cuenta_id == null ? 'efectivo (no concilia)' : iToMov.has(i.id) ? `Mov #${iToMov.get(i.id)}` : 'No conciliado'
 
   // --- Columnas de cada sección ---
