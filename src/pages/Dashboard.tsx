@@ -245,7 +245,7 @@ export function Dashboard() {
 
       {!soloReporte && puedeVender && ccPorCobrar.total > 0 && (
         <button
-          onClick={() => nav('/ventas')}
+          onClick={() => nav('/ventas', { state: { vista: 'ctacte' } })}
           className="card p-3 w-full flex items-center justify-between text-left hover:bg-aceite-500/10 border-aceite-500/30 bg-aceite-500/5"
         >
           <span className="text-sm text-oliva-800">📂 <b>{ccPorCobrar.n}</b> distribuidor{ccPorCobrar.n === 1 ? '' : 'es'} con saldo a cobrar</span>

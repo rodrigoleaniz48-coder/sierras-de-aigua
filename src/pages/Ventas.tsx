@@ -75,7 +75,7 @@ export function Ventas() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   const [ventaDetalleId, setVentaDetalleId] = useState<number | null>(null)
-  const [vista, setVista] = useState<'ventas' | 'ctacte'>('ventas')
+  const [vista, setVista] = useState<'ventas' | 'ctacte'>((location.state as { vista?: 'ventas' | 'ctacte' } | null)?.vista === 'ctacte' ? 'ctacte' : 'ventas')
   const [ventaEnEdicion, setVentaEnEdicion] = useState<Venta | null>(null)
   const [cadeteAbierto, setCadeteAbierto] = useState(false)
   const [resumenCadeteAbierto, setResumenCadeteAbierto] = useState(false)
