@@ -1714,7 +1714,6 @@ export function CuentasCorrientes() {
     }
     return m
   }, [ventas])
-  const diasDesde = (f: string | undefined) => (f ? Math.floor((Date.now() - new Date(f + 'T00:00:00').getTime()) / 86400000) : null)
 
   function recordar(c: Cliente, saldoUYU: number, saldoUSD: number) {
     const wa = normalizarTelWA(c.whatsapp ?? c.telefono ?? null)
@@ -1774,7 +1773,7 @@ export function CuentasCorrientes() {
             </thead>
             <tbody>
               {filas.map((f) => {
-                const dias = diasDesde(ultimaEntrega.get(f.c.id))
+                const fEnt = ultimaEntrega.get(f.c.id)
                 const debe = f.saldoUYU > 0.01 || f.saldoUSD > 0.01
                 return (
                 <tr key={f.c.id} className={`border-b border-oliva-100/70 last:border-0 ${sel === f.c.id ? 'bg-oliva-50/60' : ''}`}>
@@ -1785,7 +1784,7 @@ export function CuentasCorrientes() {
                   </td>
                   <td className={`py-2 px-3 text-right tabular-nums font-semibold ${f.saldoUYU > 0.01 ? 'text-red-700' : f.saldoUYU < -0.01 ? 'text-green-700' : 'text-oliva-500'}`}>{money(f.saldoUYU)}</td>
                   {hayUSD && <td className={`py-2 px-3 text-right tabular-nums font-semibold ${f.saldoUSD > 0.01 ? 'text-red-700' : f.saldoUSD < -0.01 ? 'text-green-700' : 'text-oliva-400'}`}>{Math.abs(f.saldoUSD) > 0.01 ? money(f.saldoUSD, 'USD') : '—'}</td>}
-                  <td className="py-2 px-3 text-right tabular-nums text-oliva-600 whitespace-nowrap">{dias != null ? `hace ${dias}d` : '—'}</td>
+                  <td className="py-2 px-3 text-right tabular-nums text-oliva-600 whitespace-nowrap">{fEnt ?? '—'}</td>
                   <td className="py-2 px-3 text-right whitespace-nowrap">
                     <div className="flex gap-2 justify-end items-center">
                       {debe && (
