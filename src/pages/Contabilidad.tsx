@@ -55,9 +55,9 @@ interface MovBancario {
   nota: string | null
   hash_unico: string
 }
-interface Venta { id: number; fecha: string; total: number; con_factura: boolean; ubicacion_id: number; cliente_id: number | null; moneda?: string | null; cotizacion?: number | null; conciliado_mov_id?: number | null }
+interface Venta { id: number; fecha: string; total: number; con_factura: boolean; ubicacion_id: number; cliente_id: number | null; moneda?: string | null; cotizacion?: number | null; forma_pago?: string | null; conciliado_mov_id?: number | null }
 interface Gasto { id: number; fecha: string; monto: number; moneda: 'UYU' | 'USD'; descripcion: string | null; categoria: string; socio_id: string; conciliado_mov_id?: number | null }
-interface Ingreso { id: number; fecha: string; monto: number; moneda: string; descripcion: string | null; categoria_id: number | null; conciliado_mov_id?: number | null }
+interface Ingreso { id: number; fecha: string; monto: number; moneda: string; descripcion: string | null; categoria_id: number | null; cuenta_id?: number | null; conciliado_mov_id?: number | null }
 interface Pago { id: number; cliente_id: number | null; fecha: string; monto: number; moneda: string; medio_pago: string | null; nota: string | null }
 interface CategoriaGasto { id: number; slug: string; nombre: string }
 interface CategoriaIngreso { id: number; nombre: string }
@@ -808,9 +808,11 @@ function Conciliacion() {
     setCargando(true)
     const [mb, v, g, ing, pg, cl, refs] = await Promise.all([
       supabase.from('movimientos_bancarios').select('*').eq('cuenta_id', Number(cuentaId)).gte('fecha', desde).lte('fecha', hasta).order('fecha'),
-      supabase.from('ventas').select('id,fecha,total,con_factura,ubicacion_id,cliente_id,conciliado_mov_id').gte('fecha', desdeAmplio).lte('fecha', hasta).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
+      // Para conciliar: ventas que NO fueron en efectivo (las de efectivo se llevan como adelanto, no van al banco).
+      supabase.from('ventas').select('id,fecha,total,con_factura,ubicacion_id,cliente_id,forma_pago,conciliado_mov_id').gte('fecha', desdeAmplio).lte('fecha', hasta).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false).or('forma_pago.is.null,forma_pago.neq.efectivo'),
       supabase.from('gastos').select('id,fecha,monto,moneda,descripcion,categoria,socio_id,conciliado_mov_id').gte('fecha', desdeAmplio).lte('fecha', hasta).eq('es_adelanto', false).eq('reembolsable', false),
-      supabase.from('ingresos').select('id,fecha,monto,moneda,descripcion,categoria_id,conciliado_mov_id').gte('fecha', desdeAmplio).lte('fecha', hasta),
+      // Ingresos depositados en banco (con cuenta); los de efectivo (cuenta null) no se concilian.
+      supabase.from('ingresos').select('id,fecha,monto,moneda,descripcion,categoria_id,cuenta_id,conciliado_mov_id').gte('fecha', desdeAmplio).lte('fecha', hasta).not('cuenta_id', 'is', null),
       supabase.from('pagos').select('id,cliente_id,fecha,monto,moneda,medio_pago,nota').gte('fecha', desdeAmplio).lte('fecha', hasta),
       supabase.from('clientes').select('id,nombre,tipo'),
       // Referencias de conciliacion de TODAS las cuentas (para el resumen, que es global).
@@ -1291,8 +1293,10 @@ async function fetchCandidatosConc(esEgreso: boolean, monedaCta: string, cliente
     return ((data ?? []) as Record<string, any>[]).filter((g) => !gRef.has(g.id)).map((g) => ({ tipo: 'gasto' as const, id: g.id, fecha: g.fecha, monto: Number(g.monto), etiqueta: g.descripcion ?? g.categoria }))
   }
   const [vR, iR] = await Promise.all([
-    supabase.from('ventas').select('id,fecha,total,cliente_id,moneda,cotizacion,conciliado_mov_id').neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false).is('conciliado_mov_id', null).gte('fecha', piso).order('fecha', { ascending: false }),
-    supabase.from('ingresos').select('id,fecha,monto,moneda,descripcion,conciliado_mov_id').is('conciliado_mov_id', null).eq('moneda', monedaCta).gte('fecha', piso).order('fecha', { ascending: false }),
+    // Ventas no-efectivo (las de efectivo se llevan como adelanto, no van al banco).
+    supabase.from('ventas').select('id,fecha,total,cliente_id,moneda,cotizacion,conciliado_mov_id').neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false).or('forma_pago.is.null,forma_pago.neq.efectivo').is('conciliado_mov_id', null).gte('fecha', piso).order('fecha', { ascending: false }),
+    // Ingresos depositados en banco (con cuenta); los de efectivo no se concilian.
+    supabase.from('ingresos').select('id,fecha,monto,moneda,descripcion,conciliado_mov_id').is('conciliado_mov_id', null).not('cuenta_id', 'is', null).eq('moneda', monedaCta).gte('fecha', piso).order('fecha', { ascending: false }),
   ])
   const ventaMontoCta = (v: Record<string, any>) => { const esUSD = (v.moneda ?? 'UYU') === 'USD' && Number(v.cotizacion) > 0; return monedaCta === 'USD' ? (esUSD ? Number(v.total) / Number(v.cotizacion) : 0) : (esUSD ? 0 : Number(v.total)) }
   // Las ventas de distribuidores/mayoristas NO se concilian contra el banco: su cobro va por
