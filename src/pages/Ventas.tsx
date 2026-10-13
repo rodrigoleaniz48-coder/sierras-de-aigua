@@ -538,6 +538,8 @@ function TablaVentas({
                     <span className="text-[11px] text-oliva-400">—</span>
                   ) : v.cobrado ? (
                     <span className="text-[11px] uppercase tracking-wide rounded-full px-2 py-[1px] bg-aceite-500/20 text-aceite-600">💰 cobrado</span>
+                  ) : (() => { const t = v.cliente_id ? clientePorId.get(v.cliente_id)?.tipo : null; return t === 'distribuidor' || t === 'mayorista' })() ? (
+                    <span className="text-[11px] uppercase tracking-wide rounded-full px-2 py-[1px] bg-oliva-100 text-oliva-700" title="El cobro se gestiona por cuenta corriente">📂 cta cte</span>
                   ) : (
                     <div className="flex items-center justify-center gap-1.5 flex-wrap">
                       <span className="text-[11px] uppercase tracking-wide rounded-full px-2 py-[1px] bg-red-100 text-red-800">⚠ sin cobrar</span>
