@@ -36,9 +36,35 @@ export function Dashboard() {
   const [meses, setMeses] = useState<MesDato[]>([])
   const [cargando, setCargando] = useState(true)
   const [avisosCadete, setAvisosCadete] = useState<AvisoCadete[]>([])
+  const [ccPorCobrar, setCcPorCobrar] = useState<{ total: number; n: number }>({ total: 0, n: 0 })
   const soyYo = perfil?.id ?? ''
   const nombreLower0 = (perfil?.nombre ?? '').toLowerCase()
   const usaCadete = nombreLower0.includes('rodrigo') || nombreLower0.includes('santi')
+
+  // Saldo por cobrar de distribuidores/mayoristas (cuenta corriente, base UYU, post-corte)
+  useEffect(() => {
+    (async () => {
+      const { data: cl } = await supabase.from('clientes').select('id,saldo_inicial,saldo_inicial_fecha').in('tipo', ['distribuidor', 'mayorista'])
+      const cc = (cl ?? []) as { id: number; saldo_inicial: number | null; saldo_inicial_fecha: string | null }[]
+      if (cc.length === 0) { setCcPorCobrar({ total: 0, n: 0 }); return }
+      const ids = cc.map((c) => c.id)
+      const [v, p] = await Promise.all([
+        supabase.from('ventas').select('cliente_id,fecha,total,moneda').in('cliente_id', ids).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
+        supabase.from('pagos').select('cliente_id,fecha,monto,moneda').in('cliente_id', ids),
+      ])
+      const ventas = (v.data ?? []) as { cliente_id: number; fecha: string; total: number; moneda: string | null }[]
+      const pagos = (p.data ?? []) as { cliente_id: number; fecha: string; monto: number; moneda: string }[]
+      let total = 0, n = 0
+      for (const c of cc) {
+        const post = (f: string) => !c.saldo_inicial_fecha || f > c.saldo_inicial_fecha
+        let s = Number(c.saldo_inicial ?? 0)
+        for (const x of ventas) if (x.cliente_id === c.id && post(x.fecha) && x.moneda !== 'USD') s += Number(x.total)
+        for (const x of pagos) if (x.cliente_id === c.id && post(x.fecha) && x.moneda !== 'USD') s -= Number(x.monto)
+        if (s > 0.01) { total += s; n++ }
+      }
+      setCcPorCobrar({ total, n })
+    })()
+  }, [])
 
   // Aviso: pedidos con cadete pendientes de OTROS socios (para unificar el envío)
   useEffect(() => {
@@ -80,7 +106,7 @@ export function Dashboard() {
       // Items del mes con producto y presentación, para calcular litros de aceite (envasado + granel)
       supabase.from('items_venta').select('unidades, presentacion:presentaciones(volumen_ml, producto:productos(nombre, categoria)), venta:ventas!inner(fecha, estado, a_confirmar)').gte('venta.fecha', mesInicio).neq('venta.estado', 'cancelado').eq('venta.a_confirmar', false),
       // Pendientes de entrega/cobro (todas las fechas, no filtrar por mes: siguen pendientes despues del cierre)
-      supabase.from('ventas').select('id, total, entregado, cobrado, promocion_comercial').eq('socio_id', soyYo).neq('estado', 'cancelado').eq('a_confirmar', false).or('entregado.eq.false,cobrado.eq.false'),
+      supabase.from('ventas').select('id, total, entregado, cobrado, promocion_comercial, cliente_id').eq('socio_id', soyYo).neq('estado', 'cancelado').eq('a_confirmar', false).or('entregado.eq.false,cobrado.eq.false'),
       // Distribuidores/mayoristas: su ingreso cuenta por el PAGO a cuenta, no por la venta.
       supabase.from('clientes').select('id').in('tipo', ['distribuidor', 'mayorista']),
       supabase.from('pagos').select('fecha,monto,moneda,cliente_id').gte('fecha', mesAntInicio),
@@ -99,10 +125,12 @@ export function Dashboard() {
         // Pendientes: TODAS las ventas no-canceladas no-entregadas o no-cobradas (independiente del mes)
         // Las promos no tienen cobro; solo cuentan si falta entregar.
         const pendientes = pendRes.data ?? []
-        // Promo entregada NO es pendiente (no requiere cobro). Filtro esas out.
-        const realmentePendientes = pendientes.filter((v) => !v.entregado || (!v.cobrado && !v.promocion_comercial))
+        // Los distribuidores/mayoristas NO cuentan como "pendiente de cobro" (se saldan por cuenta
+        // corriente), pero SÍ como "pendiente de entrega". Las promos no requieren cobro.
+        const esCC = (v: { cliente_id?: number | null }) => !!(v.cliente_id && ccSet.has(v.cliente_id))
+        const realmentePendientes = pendientes.filter((v) => !v.entregado || (!v.cobrado && !v.promocion_comercial && !esCC(v)))
         const pendEntrega = realmentePendientes.filter((v) => !v.entregado).length
-        const pendCobroList = realmentePendientes.filter((v) => !v.cobrado && !v.promocion_comercial)
+        const pendCobroList = realmentePendientes.filter((v) => !v.cobrado && !v.promocion_comercial && !esCC(v))
         const pendCobro = pendCobroList.length
         const pendCobroMonto = pendCobroList.reduce((s, v) => s + Number(v.total ?? 0), 0)
         // Union: una venta puede estar pendiente por ambos motivos, pero se cuenta 1 sola vez
@@ -213,6 +241,16 @@ export function Dashboard() {
           cobroMonto={r.pendCobroMonto}
           onClick={() => nav('/ventas')}
         />
+      )}
+
+      {!soloReporte && puedeVender && ccPorCobrar.total > 0 && (
+        <button
+          onClick={() => nav('/ventas')}
+          className="card p-3 w-full flex items-center justify-between text-left hover:bg-aceite-500/10 border-aceite-500/30 bg-aceite-500/5"
+        >
+          <span className="text-sm text-oliva-800">📂 <b>{ccPorCobrar.n}</b> distribuidor{ccPorCobrar.n === 1 ? '' : 'es'} con saldo a cobrar</span>
+          <span className="text-sm font-semibold text-aceite-600 tabular-nums">{money(ccPorCobrar.total)}</span>
+        </button>
       )}
 
 

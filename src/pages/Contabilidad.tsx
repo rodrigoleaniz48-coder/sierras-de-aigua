@@ -23,7 +23,7 @@ import {
   type EstadoManual,
 } from '../lib/obligaciones'
 
-type Tab = 'resultados' | 'conciliacion' | 'ctacte' | 'mail'
+type Tab = 'resultados' | 'conciliacion' | 'mail'
 
 interface Cuenta {
   id: number
@@ -69,7 +69,7 @@ export function Contabilidad() {
   const [tab, setTabState] = useState<Tab>(() => {
     try {
       const s = sessionStorage.getItem('contabilidad_tab')
-      if (s === 'resultados' || s === 'conciliacion' || s === 'ctacte' || s === 'mail') return s
+      if (s === 'resultados' || s === 'conciliacion' || s === 'mail') return s
     } catch { /* ignore */ }
     return 'resultados'
   })
@@ -118,7 +118,7 @@ export function Contabilidad() {
       </div>
 
       <div className="flex gap-1 border-b border-oliva-100 overflow-x-auto">
-        {(['resultados', 'conciliacion', 'ctacte', 'mail'] as Tab[]).map((t) => (
+        {(['resultados', 'conciliacion', 'mail'] as Tab[]).map((t) => (
           <button
             key={t}
             className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition ${
@@ -126,14 +126,13 @@ export function Contabilidad() {
             }`}
             onClick={() => setTab(t)}
           >
-            {t === 'resultados' ? 'Estado de resultados' : t === 'conciliacion' ? 'Conciliación bancaria' : t === 'ctacte' ? 'Cuentas corrientes' : 'Mail'}
+            {t === 'resultados' ? 'Estado de resultados' : t === 'conciliacion' ? 'Conciliación bancaria' : 'Mail'}
           </button>
         ))}
       </div>
 
       {tab === 'resultados' && <EstadoResultados />}
       {tab === 'conciliacion' && <Conciliacion />}
-      {tab === 'ctacte' && <CuentasCorrientes />}
       {tab === 'mail' && <Obligaciones gmailMsg={gmailMsg} />}
     </div>
   )
@@ -1638,7 +1637,7 @@ function CobroACuentaDialog({
 // Cuentas corrientes (distribuidores / mayoristas)
 // Saldo por cliente = ventas (debe) − pagos a cuenta (haber). Base UYU.
 // ============================================================
-function CuentasCorrientes() {
+export function CuentasCorrientes() {
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [ventas, setVentas] = useState<Venta[]>([])
   const [pagos, setPagos] = useState<Pago[]>([])

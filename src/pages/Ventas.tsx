@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { Dialog } from '../components/Dialog'
 import { ClienteDialog, type Cliente, type Socio } from '../components/ClienteDialog'
+import { CuentasCorrientes } from './Contabilidad'
 import { ClienteCombo } from '../components/ClienteCombo'
 import { money, ordenarPresentaciones } from '../lib/format'
 import { CADETE_MVD_WA, normalizarTelWA } from '../lib/config'
@@ -74,6 +75,7 @@ export function Ventas() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   const [ventaDetalleId, setVentaDetalleId] = useState<number | null>(null)
+  const [vista, setVista] = useState<'ventas' | 'ctacte'>('ventas')
   const [ventaEnEdicion, setVentaEnEdicion] = useState<Venta | null>(null)
   const [cadeteAbierto, setCadeteAbierto] = useState(false)
   const [resumenCadeteAbierto, setResumenCadeteAbierto] = useState(false)
@@ -171,9 +173,12 @@ export function Ventas() {
       if (filtroSocio !== 'todos' && v.socio_id !== filtroSocio) return false
       if (v.a_confirmar) return true
       if (v.promocion_comercial) return !v.entregado
-      return !v.entregado || !v.cobrado
+      // Distribuidores/mayoristas: el cobro se gestiona por cuenta corriente, no por venta.
+      const cli = v.cliente_id ? clientePorId.get(v.cliente_id) : null
+      const esCC = cli?.tipo === 'distribuidor' || cli?.tipo === 'mayorista'
+      return !v.entregado || (!v.cobrado && !esCC)
     }),
-    [ventas, filtroSocio],
+    [ventas, filtroSocio, clientePorId],
   )
 
   // Resumen del pedido (items en 1 línea) para las ventas pendientes
@@ -229,6 +234,23 @@ export function Ventas() {
         </div>
       </div>
 
+      {/* Tabs: Ventas / Cuentas corrientes (distribuidores y mayoristas) */}
+      <div className="flex gap-1 border-b border-oliva-200">
+        {([['ventas', '🧾 Ventas'], ['ctacte', '📂 Cuentas corrientes']] as const).map(([v, label]) => (
+          <button
+            key={v}
+            type="button"
+            onClick={() => setVista(v)}
+            className={`px-4 py-2 text-sm font-semibold border-b-2 -mb-px transition ${vista === v ? 'border-oliva-800 text-oliva-900' : 'border-transparent text-oliva-500 hover:text-oliva-700'}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {vista === 'ctacte' && <CuentasCorrientes />}
+
+      {vista === 'ventas' && (<>
       {/* Sección 1: Pendientes de entrega o cobro (siempre visible arriba, sin filtros) */}
       {pendientes.length > 0 && (
         <div className="card p-0 overflow-x-auto border-2 border-amber-300 bg-amber-50/40">
@@ -298,6 +320,7 @@ export function Ventas() {
           />
         </div>
       )}
+      </>)}
 
       <NuevaVentaDialog
         abierto={nueva || ventaEnEdicion !== null}
