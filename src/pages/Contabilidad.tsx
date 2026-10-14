@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { Dialog } from '../components/Dialog'
 import { money } from '../lib/format'
-import { normalizarTelWA } from '../lib/config'
+import { normalizarTelWA, usuarioDatosBancarios } from '../lib/config'
 import { parsearExtractoBROU } from '../lib/parserBROU'
 import { parsearExcelBanco, type ResultadoParseo } from '../lib/parserExcelBanco'
 import { ConectarGmailCard } from '../components/ConectarGmailCard'
@@ -1271,20 +1271,21 @@ function RegistrarMovimientoDialog({
 // Conciliar un movimiento con VARIOS registros: un egreso con varios gastos
 // (p.ej. un sueldo repartido en categorias) o un credito con varias ventas/ingresos
 // (p.ej. un deposito que cubre varias ventas). Vincula cada uno via conciliado_mov_id.
-interface CandVarios { tipo: 'gasto' | 'venta' | 'ingreso'; id: number; fecha: string; monto: number; etiqueta: string }
+interface CandVarios { tipo: 'gasto' | 'venta' | 'ingreso' | 'pago'; id: number; fecha: string; monto: number; etiqueta: string }
 
 // Trae candidatos a conciliar de los ULTIMOS 18 MESES, EXCLUYENDO lo ya conciliado
 // (por otro movimiento de cualquier cuenta, o ya enlazado por "varios").
 // Egreso -> gastos; Credito -> ventas + ingresos. Montos en la moneda de la cuenta.
-async function fetchCandidatosConc(esEgreso: boolean, monedaCta: string, clientePorId: Map<number, Cliente>): Promise<CandVarios[]> {
+async function fetchCandidatosConc(esEgreso: boolean, monedaCta: string, clientePorId: Map<number, Cliente>, incluirPagos = false): Promise<CandVarios[]> {
   const d = new Date(); d.setMonth(d.getMonth() - 18)
   const piso = d.toISOString().slice(0, 10)
-  const { data: refs } = await supabase.from('movimientos_bancarios').select('conciliado_gasto_id,conciliado_venta_id,conciliado_ingreso_id')
-  const gRef = new Set<number>(), vRef = new Set<number>(), iRef = new Set<number>()
+  const { data: refs } = await supabase.from('movimientos_bancarios').select('conciliado_gasto_id,conciliado_venta_id,conciliado_ingreso_id,conciliado_pago_id')
+  const gRef = new Set<number>(), vRef = new Set<number>(), iRef = new Set<number>(), pRef = new Set<number>()
   for (const r of (refs ?? []) as Record<string, number | null>[]) {
     if (r.conciliado_gasto_id) gRef.add(r.conciliado_gasto_id)
     if (r.conciliado_venta_id) vRef.add(r.conciliado_venta_id)
     if (r.conciliado_ingreso_id) iRef.add(r.conciliado_ingreso_id)
+    if (r.conciliado_pago_id) pRef.add(r.conciliado_pago_id)
   }
   if (esEgreso) {
     // No se concilian: promociones comerciales (regalos, sin movimiento real), ni adelantos ni
@@ -1304,7 +1305,14 @@ async function fetchCandidatosConc(esEgreso: boolean, monedaCta: string, cliente
   const esCC = (cid: number | null) => { const c = cid ? clientePorId.get(cid) : null; return c?.tipo === 'distribuidor' || c?.tipo === 'mayorista' }
   const vs = ((vR.data ?? []) as Record<string, any>[]).filter((v) => !vRef.has(v.id) && ventaMontoCta(v) > 0 && !esCC(v.cliente_id)).map((v) => ({ tipo: 'venta' as const, id: v.id, fecha: v.fecha, monto: ventaMontoCta(v), etiqueta: `Venta #${v.id}${v.cliente_id ? ` · ${clientePorId.get(v.cliente_id)?.nombre ?? ''}` : ''}` }))
   const is = ((iR.data ?? []) as Record<string, any>[]).filter((i) => !iRef.has(i.id)).map((i) => ({ tipo: 'ingreso' as const, id: i.id, fecha: i.fecha, monto: Number(i.monto), etiqueta: i.descripcion ?? 'Ingreso' }))
-  return [...vs, ...is]
+  let ps: CandVarios[] = []
+  if (incluirPagos) {
+    // Pagos a cuenta ya registrados (p.ej. desde Cuentas corrientes) sin conciliar: para enlazar
+    // el credito del banco a ese pago en vez de crear uno nuevo (evita duplicar el ingreso).
+    const { data: pR } = await supabase.from('pagos').select('id,fecha,monto,moneda,cliente_id,nota').eq('moneda', monedaCta).gte('fecha', piso).order('fecha', { ascending: false })
+    ps = ((pR ?? []) as Record<string, any>[]).filter((p) => !pRef.has(p.id)).map((p) => ({ tipo: 'pago' as const, id: p.id, fecha: p.fecha, monto: Number(p.monto), etiqueta: `Pago · ${p.cliente_id ? (clientePorId.get(p.cliente_id)?.nombre ?? '') : ''}${p.nota ? ` (${p.nota})` : ''}` }))
+  }
+  return [...vs, ...is, ...ps]
 }
 
 // Conciliar un movimiento con VARIOS registros: un egreso con varios gastos
@@ -1460,7 +1468,7 @@ function ConciliarConExistenteDialog({
     if (!mov) return
     const fechaM = new Date(mov.fecha).getTime()
     setCargando(true)
-    fetchCandidatosConc(esEgreso, monedaCta, clientePorId)
+    fetchCandidatosConc(esEgreso, monedaCta, clientePorId, true)
       .then((cs) => setCandidatos(cs.sort((a, b) => Math.abs(a.monto - movMonto) - Math.abs(b.monto - movMonto) || Math.abs(new Date(a.fecha).getTime() - fechaM) - Math.abs(new Date(b.fecha).getTime() - fechaM))))
       .catch((e) => setError(String(e)))
       .finally(() => setCargando(false))
@@ -1471,9 +1479,10 @@ function ConciliarConExistenteDialog({
   async function enlazar(c: CandVarios) {
     setGuardando(true); setError(null)
     const patch =
-      c.tipo === 'venta' ? { conciliado_venta_id: c.id, conciliado_gasto_id: null, conciliado_ingreso_id: null, es_transferencia_interna: false }
-      : c.tipo === 'ingreso' ? { conciliado_ingreso_id: c.id, conciliado_venta_id: null, conciliado_gasto_id: null, es_transferencia_interna: false }
-      : { conciliado_gasto_id: c.id, conciliado_venta_id: null, conciliado_ingreso_id: null, es_transferencia_interna: false }
+      c.tipo === 'venta' ? { conciliado_venta_id: c.id, conciliado_gasto_id: null, conciliado_ingreso_id: null, conciliado_pago_id: null, es_transferencia_interna: false }
+      : c.tipo === 'ingreso' ? { conciliado_ingreso_id: c.id, conciliado_venta_id: null, conciliado_gasto_id: null, conciliado_pago_id: null, es_transferencia_interna: false }
+      : c.tipo === 'pago' ? { conciliado_pago_id: c.id, conciliado_venta_id: null, conciliado_gasto_id: null, conciliado_ingreso_id: null, es_transferencia_interna: false }
+      : { conciliado_gasto_id: c.id, conciliado_venta_id: null, conciliado_ingreso_id: null, conciliado_pago_id: null, es_transferencia_interna: false }
     const { error: e } = await supabase.from('movimientos_bancarios').update(patch).eq('id', mov!.id)
     setGuardando(false)
     if (e) { setError(e.message); return }
@@ -1646,6 +1655,7 @@ export function CuentasCorrientes() {
   const [cargando, setCargando] = useState(true)
   const [sel, setSel] = useState<number | null>(null)
   const [editSaldo, setEditSaldo] = useState<Cliente | null>(null)
+  const [pagarCliente, setPagarCliente] = useState<Cliente | null>(null)
 
   async function cargar() {
     setCargando(true)
@@ -1726,6 +1736,9 @@ export function CuentasCorrientes() {
       `Te paso el saldo pendiente de tu cuenta: *${saldoTxt}*.`,
       'Cuando puedas coordinamos el pago, ¡gracias! 🙏',
     ]
+    // Datos de transferencia (según el socio logueado; USD si la deuda es solo en dólares).
+    const banco = usuarioDatosBancarios(perfil?.nombre, false, saldoUSD > 0.01 && saldoUYU <= 0.01 ? 'USD' : 'UYU')
+    if (banco) { partes.push(''); partes.push(...banco) }
     if (socio) { partes.push(''); partes.push(socio) }
     const texto = encodeURIComponent(partes.join('\n'))
     window.open(wa ? `https://wa.me/${wa}?text=${texto}` : `https://wa.me/?text=${texto}`, '_blank')
@@ -1787,6 +1800,7 @@ export function CuentasCorrientes() {
                   <td className="py-2 px-3 text-right tabular-nums text-oliva-600 whitespace-nowrap">{fEnt ?? '—'}</td>
                   <td className="py-2 px-3 text-right whitespace-nowrap">
                     <div className="flex gap-2 justify-end items-center">
+                      <button className="text-xs rounded-md bg-oliva-800 hover:bg-oliva-900 text-oliva-50 px-2 py-0.5 font-medium" title="Registrar un pago a cuenta" onClick={() => setPagarCliente(f.c)}>+ Pago</button>
                       {debe && (
                         <button className="text-xs rounded-md bg-green-600 hover:bg-green-700 text-white px-2 py-0.5 font-medium" title="Recordar saldo por WhatsApp" onClick={() => recordar(f.c, f.saldoUYU, f.saldoUSD)}>Recordar</button>
                       )}
@@ -1848,11 +1862,90 @@ export function CuentasCorrientes() {
       )}
 
       <SaldoInicialDialog cliente={editSaldo} onCerrar={() => setEditSaldo(null)} onOk={() => { setEditSaldo(null); cargar() }} />
+      <RegistrarPagoDialog cliente={pagarCliente} onCerrar={() => setPagarCliente(null)} onOk={() => { setPagarCliente(null); cargar() }} />
     </div>
   )
 }
 
 // Editar el saldo inicial (deuda a una fecha de corte) de un cliente de cuenta corriente.
+// Registrar un pago a cuenta directamente desde Cuentas corrientes (p.ej. pago en efectivo,
+// o por adelantado). Si el pago entra por banco, conviene conciliarlo luego contra este pago
+// (para no duplicar el ingreso).
+function RegistrarPagoDialog({ cliente, onCerrar, onOk }: { cliente: Cliente | null; onCerrar: () => void; onOk: () => void }) {
+  const { perfil } = useAuth()
+  const [fecha, setFecha] = useState('')
+  const [monto, setMonto] = useState('')
+  const [moneda, setMoneda] = useState<'UYU' | 'USD'>('UYU')
+  const [medio, setMedio] = useState('transferencia')
+  const [nota, setNota] = useState('')
+  const [guardando, setGuardando] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!cliente) return
+    setFecha(new Date().toISOString().slice(0, 10)); setMonto(''); setMoneda('UYU'); setMedio('transferencia'); setNota(''); setError(null)
+  }, [cliente])
+
+  async function guardar() {
+    if (!cliente || !perfil) return
+    const m = Number(monto)
+    if (!(m > 0)) { setError('El monto debe ser mayor a cero.'); return }
+    setGuardando(true); setError(null)
+    const { error: e } = await supabase.from('pagos').insert({
+      cliente_id: cliente.id, fecha, monto: m, moneda, medio_pago: medio,
+      nota: nota.trim() || null, socio_id: perfil.id, actualizado_en: new Date().toISOString(),
+    })
+    setGuardando(false)
+    if (e) { setError(e.message); return }
+    onOk()
+  }
+
+  if (!cliente) return null
+  return (
+    <Dialog abierto={cliente !== null} onCerrar={onCerrar} titulo={`Registrar pago · ${cliente.nombre}`} ancho="sm">
+      <div className="space-y-4">
+        <p className="text-xs text-oliva-600">
+          Registra un pago a cuenta del cliente (le baja el saldo y cuenta como ingreso). Si el pago entró por el banco, después concilialo contra este pago para no duplicarlo.
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="label">Fecha</label>
+            <input type="date" className="input" value={fecha} onChange={(e) => setFecha(e.target.value)} />
+          </div>
+          <div>
+            <label className="label">Monto</label>
+            <input type="number" className="input tabular-nums" min="0" step="0.01" value={monto} onChange={(e) => setMonto(e.target.value)} />
+          </div>
+          <div>
+            <label className="label">Moneda</label>
+            <select className="input" value={moneda} onChange={(e) => setMoneda(e.target.value as 'UYU' | 'USD')}>
+              <option value="UYU">UYU</option>
+              <option value="USD">USD</option>
+            </select>
+          </div>
+          <div>
+            <label className="label">Medio</label>
+            <select className="input" value={medio} onChange={(e) => setMedio(e.target.value)}>
+              <option value="transferencia">Transferencia</option>
+              <option value="efectivo">Efectivo</option>
+              <option value="otro">Otro</option>
+            </select>
+          </div>
+          <div className="col-span-2">
+            <label className="label">Nota (opcional)</label>
+            <input className="input" value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Pago a cuenta" />
+          </div>
+        </div>
+        {error && <div className="text-sm text-red-700">{error}</div>}
+        <div className="flex justify-end gap-2 pt-1">
+          <button className="btn-secondary" onClick={onCerrar}>Cancelar</button>
+          <button className="btn-primary" onClick={guardar} disabled={guardando}>{guardando ? 'Guardando…' : 'Registrar pago'}</button>
+        </div>
+      </div>
+    </Dialog>
+  )
+}
+
 function SaldoInicialDialog({ cliente, onCerrar, onOk }: { cliente: Cliente | null; onCerrar: () => void; onOk: () => void }) {
   const [monto, setMonto] = useState('')
   const [montoUsd, setMontoUsd] = useState('')
