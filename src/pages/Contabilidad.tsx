@@ -1878,25 +1878,42 @@ function RegistrarPagoDialog({ cliente, onCerrar, onOk }: { cliente: Cliente | n
   const [moneda, setMoneda] = useState<'UYU' | 'USD'>('UYU')
   const [medio, setMedio] = useState('transferencia')
   const [nota, setNota] = useState('')
+  const [socios, setSocios] = useState<{ id: string; nombre: string }[]>([])
+  const [socioAdel, setSocioAdel] = useState('')
+  const [origenAdel, setOrigenAdel] = useState<'aceite_efectivo' | 'otras_ventas_efectivo'>('aceite_efectivo')
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!cliente) return
-    setFecha(new Date().toISOString().slice(0, 10)); setMonto(''); setMoneda('UYU'); setMedio('transferencia'); setNota(''); setError(null)
+    setFecha(new Date().toISOString().slice(0, 10)); setMonto(''); setMoneda('UYU'); setMedio('transferencia'); setNota('')
+    setOrigenAdel('aceite_efectivo'); setSocioAdel(perfil?.id ?? ''); setError(null)
+    supabase.from('perfiles').select('id,nombre').eq('activo', true).neq('rol', 'campo').order('nombre').then(({ data }) => setSocios((data as { id: string; nombre: string }[]) ?? []))
   }, [cliente])
 
   async function guardar() {
     if (!cliente || !perfil) return
     const m = Number(monto)
     if (!(m > 0)) { setError('El monto debe ser mayor a cero.'); return }
+    if (medio === 'efectivo' && !socioAdel) { setError('Elegí quién recibió el efectivo.'); return }
     setGuardando(true); setError(null)
+    // 1) Pago a cuenta (baja el saldo, cuenta como ingreso)
     const { error: e } = await supabase.from('pagos').insert({
       cliente_id: cliente.id, fecha, monto: m, moneda, medio_pago: medio,
       nota: nota.trim() || null, socio_id: perfil.id, actualizado_en: new Date().toISOString(),
     })
+    if (e) { setGuardando(false); setError(e.message); return }
+    // 2) Si fue en efectivo: el socio que lo recibió lo lleva como adelanto a su sueldo.
+    if (medio === 'efectivo') {
+      const { error: e2 } = await supabase.from('gastos').insert({
+        fecha, socio_id: socioAdel, categoria: origenAdel, monto: m, moneda,
+        descripcion: `Pago a cuenta · ${cliente.nombre} (cobro efectivo)${nota.trim() ? ` — ${nota.trim()}` : ''}`,
+        metodo_pago: 'efectivo', reembolsable: false, reembolsado: false, es_adelanto: true,
+        actualizado_en: new Date().toISOString(),
+      })
+      if (e2) { setGuardando(false); setError('Pago guardado, pero falló el adelanto: ' + e2.message); return }
+    }
     setGuardando(false)
-    if (e) { setError(e.message); return }
     onOk()
   }
 
@@ -1936,10 +1953,34 @@ function RegistrarPagoDialog({ cliente, onCerrar, onOk }: { cliente: Cliente | n
             <input className="input" value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Pago a cuenta" />
           </div>
         </div>
+
+        {medio === 'efectivo' && (
+          <div className="rounded-lg border border-aceite-500/30 bg-aceite-500/5 p-3 space-y-3">
+            <p className="text-xs text-oliva-700">
+              Al ser en <b>efectivo</b>, ese dinero se carga como <b>adelanto</b> del socio que lo recibió (se descuenta de su sueldo).
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="label">¿Quién lo recibió?</label>
+                <select className="input" value={socioAdel} onChange={(e) => setSocioAdel(e.target.value)}>
+                  {socios.map((s) => <option key={s.id} value={s.id}>{s.nombre}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="label">Origen</label>
+                <select className="input" value={origenAdel} onChange={(e) => setOrigenAdel(e.target.value as 'aceite_efectivo' | 'otras_ventas_efectivo')}>
+                  <option value="aceite_efectivo">Aceite</option>
+                  <option value="otras_ventas_efectivo">Otras ventas</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        )}
+
         {error && <div className="text-sm text-red-700">{error}</div>}
         <div className="flex justify-end gap-2 pt-1">
           <button className="btn-secondary" onClick={onCerrar}>Cancelar</button>
-          <button className="btn-primary" onClick={guardar} disabled={guardando}>{guardando ? 'Guardando…' : 'Registrar pago'}</button>
+          <button className="btn-primary" onClick={guardar} disabled={guardando}>{guardando ? 'Guardando…' : (medio === 'efectivo' ? 'Registrar pago + adelanto' : 'Registrar pago')}</button>
         </div>
       </div>
     </Dialog>
