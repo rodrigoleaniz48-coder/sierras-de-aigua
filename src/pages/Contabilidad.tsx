@@ -1881,6 +1881,8 @@ function RegistrarPagoDialog({ cliente, onCerrar, onOk }: { cliente: Cliente | n
   const [socios, setSocios] = useState<{ id: string; nombre: string }[]>([])
   const [socioAdel, setSocioAdel] = useState('')
   const [origenAdel, setOrigenAdel] = useState<'aceite_efectivo' | 'otras_ventas_efectivo'>('aceite_efectivo')
+  const [cuentas, setCuentas] = useState<{ id: number; nombre: string; moneda: string }[]>([])
+  const [cuentaId, setCuentaId] = useState<string>('')
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -1889,7 +1891,20 @@ function RegistrarPagoDialog({ cliente, onCerrar, onOk }: { cliente: Cliente | n
     setFecha(new Date().toISOString().slice(0, 10)); setMonto(''); setMoneda('UYU'); setMedio('transferencia'); setNota('')
     setOrigenAdel('aceite_efectivo'); setSocioAdel(perfil?.id ?? ''); setError(null)
     supabase.from('perfiles').select('id,nombre').eq('activo', true).neq('rol', 'campo').order('nombre').then(({ data }) => setSocios((data as { id: string; nombre: string }[]) ?? []))
+    supabase.from('cuentas_bancarias').select('id,nombre,moneda').eq('activo', true).order('id').then(({ data }) => {
+      const arr = (data as { id: number; nombre: string; moneda: string }[]) ?? []
+      setCuentas(arr)
+      const def = perfil?.cuenta_default_id ? String(perfil.cuenta_default_id) : (arr[0] ? String(arr[0].id) : '')
+      setCuentaId(def)
+    })
   }, [cliente])
+
+  // Cuentas de la moneda elegida (la plata entra a una cuenta de esa moneda).
+  const cuentasMoneda = cuentas.filter((c) => c.moneda === moneda)
+  useEffect(() => {
+    if (medio === 'efectivo') return
+    if (!cuentasMoneda.some((c) => String(c.id) === cuentaId)) setCuentaId(cuentasMoneda[0] ? String(cuentasMoneda[0].id) : '')
+  }, [moneda, medio])
 
   async function guardar() {
     if (!cliente || !perfil) return
@@ -1900,6 +1915,7 @@ function RegistrarPagoDialog({ cliente, onCerrar, onOk }: { cliente: Cliente | n
     // 1) Pago a cuenta (baja el saldo, cuenta como ingreso)
     const { error: e } = await supabase.from('pagos').insert({
       cliente_id: cliente.id, fecha, monto: m, moneda, medio_pago: medio,
+      cuenta_id: medio === 'efectivo' ? null : (cuentaId ? Number(cuentaId) : null),
       nota: nota.trim() || null, socio_id: perfil.id, actualizado_en: new Date().toISOString(),
     })
     if (e) { setGuardando(false); setError(e.message); return }
@@ -1948,6 +1964,15 @@ function RegistrarPagoDialog({ cliente, onCerrar, onOk }: { cliente: Cliente | n
               <option value="otro">Otro</option>
             </select>
           </div>
+          {medio !== 'efectivo' && (
+            <div className="col-span-2">
+              <label className="label">Cuenta que recibe</label>
+              <select className="input" value={cuentaId} onChange={(e) => setCuentaId(e.target.value)}>
+                {cuentasMoneda.length === 0 && <option value="">(sin cuenta en {moneda})</option>}
+                {cuentasMoneda.map((c) => <option key={c.id} value={String(c.id)}>{c.nombre}</option>)}
+              </select>
+            </div>
+          )}
           <div className="col-span-2">
             <label className="label">Nota (opcional)</label>
             <input className="input" value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Pago a cuenta" />
