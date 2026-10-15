@@ -355,6 +355,7 @@ export function Ventas() {
         desde={filtroDesde}
         hasta={filtroHasta}
         onCerrar={() => setCadeteAbierto(false)}
+        onCambio={cargar}
       />
       <ResumenMensualCadeteDialog
         abierto={resumenCadeteAbierto}
@@ -2643,7 +2644,7 @@ function ResumenMensualCadeteDialog({
 // ---------- Diálogo Lista para cadete ----------
 
 function ListaCadeteDialog({
-  abierto, desde, hasta, onCerrar,
+  abierto, desde, hasta, onCerrar, onCambio,
 }: {
   abierto: boolean
   ventas?: Venta[]      // legacy — no se usa mas
@@ -2651,11 +2652,13 @@ function ListaCadeteDialog({
   desde: string
   hasta: string
   onCerrar: () => void
+  onCambio?: () => void
 }) {
   const [enviosRPC, setEnviosRPC] = useState<EnvioCadete[]>([])
   const [seleccion, setSeleccion] = useState<Set<number>>(new Set())
   const [cargando, setCargando] = useState(false)
   const [copiado, setCopiado] = useState(false)
+  const [entregando, setEntregando] = useState<number | null>(null)
 
   // Solo pendientes de entrega en el rango — de TODOS los socios (via RPC SECURITY DEFINER)
   const enviosDelRango = useMemo(() => {
@@ -2695,6 +2698,18 @@ function ListaCadeteDialog({
 
   function resumenItems(v: EnvioCadete): string {
     return v.items_resumen ?? ''
+  }
+
+  // Marcar entregado desde la lista: el pedido sale de la lista del cadete.
+  async function marcarEntregado(v: EnvioCadete) {
+    setEntregando(v.id)
+    const estadoSync = v.cobrado ? 'cobrado' : 'entregado'
+    const { error } = await supabase.from('ventas').update({ entregado: true, estado: estadoSync }).eq('id', v.id)
+    setEntregando(null)
+    if (error) { alert('No se pudo marcar entregado: ' + error.message); return }
+    setEnviosRPC((prev) => prev.map((e) => (e.id === v.id ? { ...e, entregado: true } : e)))
+    setSeleccion((prev) => { const s = new Set(prev); s.delete(v.id); return s })
+    onCambio?.()
   }
 
   function toggleUno(id: number) {
@@ -2796,6 +2811,15 @@ function ListaCadeteDialog({
                         {v.horario_entrega && <div>🕐 {v.horario_entrega}</div>}
                       </div>
                     </div>
+                    <button
+                      type="button"
+                      className="btn-secondary text-xs whitespace-nowrap self-start"
+                      disabled={entregando === v.id}
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); marcarEntregado(v) }}
+                      title="Marcar entregado: sale de la lista del cadete"
+                    >
+                      {entregando === v.id ? '…' : '✓ Entregado'}
+                    </button>
                   </label>
                 )
               })}
