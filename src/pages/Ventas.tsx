@@ -840,10 +840,17 @@ function NuevaVentaDialog({
   // Precios de la lista del cliente (si tiene). presId → precio_uyu.
   const [preciosLista, setPreciosLista] = useState<Map<number, number>>(new Map())
   useEffect(() => {
-    const listaId = (cliente as Cliente | undefined)?.lista_precios_id
-    if (!listaId) { setPreciosLista(new Map()); return }
+    const c = cliente as Cliente | undefined
     let cancel = false
     ;(async () => {
+      // Lista explícita del cliente; si no tiene, la que coincide con su tipo (distribuidor/mayorista).
+      let listaId = c?.lista_precios_id ?? null
+      if (!listaId && (c?.tipo === 'distribuidor' || c?.tipo === 'mayorista')) {
+        const { data: l } = await supabase.from('listas_precios').select('id').eq('nombre', c.tipo).eq('activo', true).limit(1).maybeSingle()
+        if (cancel) return
+        listaId = (l as { id: number } | null)?.id ?? null
+      }
+      if (!listaId) { if (!cancel) setPreciosLista(new Map()); return }
       const { data } = await supabase.from('lista_precios_items').select('presentacion_id, precio_uyu').eq('lista_id', listaId)
       if (cancel) return
       setPreciosLista(new Map((data ?? []).map((r: { presentacion_id: number; precio_uyu: number }) => [r.presentacion_id, Number(r.precio_uyu)])))
