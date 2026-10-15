@@ -591,6 +591,13 @@ function GastoDialog({
   const [error, setError] = useState<string | null>(null)
   const [confirmEliminar, setConfirmEliminar] = useState(false)
   const [catsDialog, setCatsDialog] = useState<Categoria[]>([])
+  const { perfil } = useAuth()
+  // Cuenta corriente: si el socio del gasto tambien es un cliente distribuidor/mayorista
+  // (hoy solo Gonzalo, socio + distribuidor), se puede descontar el gasto de su deuda.
+  const [ctacteCliente, setCtacteCliente] = useState<{ id: number; nombre: string } | null>(null)
+  const [yaDescontado, setYaDescontado] = useState(false)
+  const [descontando, setDescontando] = useState(false)
+  const [confirmDesc, setConfirmDesc] = useState(false)
 
   // Cargar categorias
   useEffect(() => {
@@ -621,6 +628,48 @@ function GastoDialog({
       setCuentas((data as CuentaBancariaBase[]) ?? [])
     })
   }, [abierto, cuentas.length])
+
+  // Detectar si el socio del gasto es tambien cliente de cuenta corriente (distribuidor/mayorista),
+  // y si este gasto ya fue descontado de su cuenta (para no duplicar).
+  useEffect(() => {
+    setCtacteCliente(null); setYaDescontado(false); setConfirmDesc(false)
+    if (!abierto || !editar || !veTodos) return
+    const socioNombre = (socios.find((s) => s.id === editar.socio_id)?.nombre ?? '').trim().toLowerCase()
+    if (!socioNombre) return
+    let cancel = false
+    ;(async () => {
+      const { data } = await supabase.from('clientes').select('id,nombre,tipo').in('tipo', ['distribuidor', 'mayorista'])
+      if (cancel) return
+      const cli = ((data as { id: number; nombre: string; tipo: string }[]) ?? [])
+        .find((c) => c.nombre.toLowerCase().includes(socioNombre))
+      if (!cli) return
+      setCtacteCliente({ id: cli.id, nombre: cli.nombre })
+      const { data: pg } = await supabase.from('pagos').select('id').eq('cliente_id', cli.id).ilike('nota', `%[gasto #${editar.id}]%`).limit(1)
+      if (cancel) return
+      setYaDescontado(((pg as { id: number }[]) ?? []).length > 0)
+    })()
+    return () => { cancel = true }
+  }, [abierto, editar, veTodos, socios])
+
+  async function descontarEnCtaCte() {
+    if (!editar || !ctacteCliente || !perfil) return
+    setDescontando(true); setError(null)
+    // 1) El gasto deja de ser reembolsable (no se le devuelve la plata: salda su deuda).
+    const { error: e1 } = await supabase.from('gastos').update({
+      reembolsable: false, reembolsado: false, actualizado_en: new Date().toISOString(),
+    }).eq('id', editar.id)
+    if (e1) { setDescontando(false); setError('No se pudo actualizar el gasto: ' + e1.message); return }
+    // 2) Pago en especie a su cuenta corriente (baja el saldo, no mueve dinero).
+    const { error: e2 } = await supabase.from('pagos').insert({
+      cliente_id: ctacteCliente.id, fecha: editar.fecha, monto: Number(editar.monto), moneda: editar.moneda,
+      medio_pago: 'especie', cuenta_id: null, socio_id: perfil.id,
+      nota: `Gasto cubierto por el distribuidor · ${editar.descripcion ?? 'gasto'} [gasto #${editar.id}]`,
+      actualizado_en: new Date().toISOString(),
+    })
+    if (e2) { setDescontando(false); setError('El gasto se actualizo, pero fallo el pago: ' + e2.message); return }
+    setDescontando(false)
+    onOk()
+  }
 
   // Cuenta por default: vacía (efectivo / no aplica).
   // El usuario elige cuenta manualmente cuando corresponde.
@@ -806,6 +855,33 @@ function GastoDialog({
                 ))}
               </select>
             </div>
+          </div>
+        )}
+
+        {/* Descontar de cuenta corriente: solo si el socio del gasto es tambien cliente distribuidor */}
+        {editar && ctacteCliente && !editar.es_adelanto && !soloLectura && (
+          <div className="rounded-xl border border-oliva-200 bg-oliva-50 p-3 space-y-2">
+            {yaDescontado ? (
+              <p className="text-xs text-oliva-700">
+                ✓ Este gasto ya fue descontado de la cuenta corriente de <b>{ctacteCliente.nombre}</b>.
+              </p>
+            ) : confirmDesc ? (
+              <div className="space-y-2">
+                <p className="text-xs text-oliva-700">
+                  Lo cubrió <b>{ctacteCliente.nombre}</b> como forma de pago: el gasto deja de ser reembolsable y se le descuentan <b>{formatMonto(editar.monto, editar.moneda)}</b> de su cuenta corriente (pago en especie). El gasto se mantiene como costo de la empresa.
+                </p>
+                <div className="flex justify-end gap-2">
+                  <button type="button" className="btn-secondary text-xs" onClick={() => setConfirmDesc(false)} disabled={descontando}>Cancelar</button>
+                  <button type="button" className="text-xs px-3 py-2 rounded-lg bg-oliva-800 text-oliva-50 hover:bg-oliva-900 disabled:opacity-50" onClick={descontarEnCtaCte} disabled={descontando}>
+                    {descontando ? 'Descontando…' : 'Sí, descontar'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button type="button" className="text-xs text-oliva-800 underline hover:text-oliva-900" onClick={() => setConfirmDesc(true)}>
+                📂 Lo cubrió {ctacteCliente.nombre} → descontar de su cuenta corriente
+              </button>
+            )}
           </div>
         )}
 
