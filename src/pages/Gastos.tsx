@@ -594,10 +594,11 @@ function GastoDialog({
   const { perfil } = useAuth()
   // Cuenta corriente: si el socio del gasto tambien es un cliente distribuidor/mayorista
   // (hoy solo Gonzalo, socio + distribuidor), se puede descontar el gasto de su deuda.
-  const [ctacteCliente, setCtacteCliente] = useState<{ id: number; nombre: string } | null>(null)
+  const [ccClientes, setCcClientes] = useState<{ id: number; nombre: string }[]>([])
   const [yaDescontado, setYaDescontado] = useState(false)
   const [descontando, setDescontando] = useState(false)
   const [confirmDesc, setConfirmDesc] = useState(false)
+  const [descCtaCteNuevo, setDescCtaCteNuevo] = useState(false)  // checkbox en modo "nuevo gasto"
 
   // Cargar categorias
   useEffect(() => {
@@ -629,27 +630,32 @@ function GastoDialog({
     })
   }, [abierto, cuentas.length])
 
-  // Detectar si el socio del gasto es tambien cliente de cuenta corriente (distribuidor/mayorista),
-  // y si este gasto ya fue descontado de su cuenta (para no duplicar).
+  // Clientes de cuenta corriente (distribuidor/mayorista) para cruzar con el socio del gasto.
   useEffect(() => {
-    setCtacteCliente(null); setYaDescontado(false); setConfirmDesc(false)
-    if (!abierto || !editar || !veTodos) return
-    const socioNombre = (socios.find((s) => s.id === editar.socio_id)?.nombre ?? '').trim().toLowerCase()
-    if (!socioNombre) return
+    setConfirmDesc(false); setDescCtaCteNuevo(false)
+    if (!abierto || !veTodos) return
+    supabase.from('clientes').select('id,nombre').in('tipo', ['distribuidor', 'mayorista']).then(({ data }) => {
+      setCcClientes((data as { id: number; nombre: string }[]) ?? [])
+    })
+  }, [abierto, veTodos])
+
+  // Cliente de cuenta corriente que coincide con el socio del gasto (el que paga).
+  const socioGastoId = editar ? editar.socio_id : socioSel
+  const ctacteCliente = useMemo(() => {
+    const n = (socios.find((s) => s.id === socioGastoId)?.nombre ?? '').trim().toLowerCase()
+    if (!n) return null
+    return ccClientes.find((c) => c.nombre.toLowerCase().includes(n)) ?? null
+  }, [ccClientes, socios, socioGastoId])
+
+  // Al editar: ver si este gasto ya fue descontado de su cuenta (para no duplicar).
+  useEffect(() => {
+    setYaDescontado(false)
+    if (!abierto || !editar || !ctacteCliente) return
     let cancel = false
-    ;(async () => {
-      const { data } = await supabase.from('clientes').select('id,nombre,tipo').in('tipo', ['distribuidor', 'mayorista'])
-      if (cancel) return
-      const cli = ((data as { id: number; nombre: string; tipo: string }[]) ?? [])
-        .find((c) => c.nombre.toLowerCase().includes(socioNombre))
-      if (!cli) return
-      setCtacteCliente({ id: cli.id, nombre: cli.nombre })
-      const { data: pg } = await supabase.from('pagos').select('id').eq('cliente_id', cli.id).ilike('nota', `%[gasto #${editar.id}]%`).limit(1)
-      if (cancel) return
-      setYaDescontado(((pg as { id: number }[]) ?? []).length > 0)
-    })()
+    supabase.from('pagos').select('id').eq('cliente_id', ctacteCliente.id).ilike('nota', `%[gasto #${editar.id}]%`).limit(1)
+      .then(({ data }) => { if (!cancel) setYaDescontado(((data as { id: number }[]) ?? []).length > 0) })
     return () => { cancel = true }
-  }, [abierto, editar, veTodos, socios])
+  }, [abierto, editar, ctacteCliente])
 
   async function descontarEnCtaCte() {
     if (!editar || !ctacteCliente || !perfil) return
@@ -717,6 +723,8 @@ function GastoDialog({
   async function guardar(e: React.FormEvent) {
     e.preventDefault()
     setGuardando(true); setError(null)
+    // Si se marca "descontar de cuenta corriente", el gasto NO es reembolsable (lo salda el distribuidor).
+    const descCC = !editar && descCtaCteNuevo && ctacteCliente != null && tipo !== 'adelanto'
     const payload = {
       fecha,
       // Admin puede cargar/reasignar a otro socio via el selector; si no, cae a soyYo (o al que ya tenia el gasto editado).
@@ -726,23 +734,35 @@ function GastoDialog({
       moneda,
       descripcion: descripcion.trim() || null,
       metodo_pago: metodoPago,
-      reembolsable: tipo === 'reembolsable',
-      reembolsado: tipo === 'reembolsable' ? reembolsado : false,
+      reembolsable: descCC ? false : tipo === 'reembolsable',
+      reembolsado: descCC ? false : (tipo === 'reembolsable' ? reembolsado : false),
       es_adelanto: tipo === 'adelanto',
       cuenta_id: cuentaId ? Number(cuentaId) : null,
       actualizado_en: new Date().toISOString(),
     }
-    const q = editar
-      ? supabase.from('gastos').update(payload).eq('id', editar.id)
-      : supabase.from('gastos').insert(payload)
-    const { error } = await q
+    if (editar) {
+      const { error } = await supabase.from('gastos').update(payload).eq('id', editar.id)
+      setGuardando(false)
+      if (error) { setError(error.message); return }
+      onOk()
+      return
+    }
+    // Nuevo gasto: insertar y, si corresponde, descontarlo de la cuenta corriente del distribuidor.
+    const { data: nuevoG, error } = await supabase.from('gastos').insert(payload).select('id').single()
+    if (error || !nuevoG) { setGuardando(false); setError(error?.message ?? 'No se pudo crear el gasto'); return }
+    if (descCC && ctacteCliente && perfil) {
+      const { error: ePago } = await supabase.from('pagos').insert({
+        cliente_id: ctacteCliente.id, fecha, monto: Number(monto) || 0, moneda,
+        medio_pago: 'especie', cuenta_id: null, socio_id: perfil.id,
+        nota: `Gasto cubierto por el distribuidor · ${descripcion.trim() || 'gasto'} [gasto #${nuevoG.id}]`,
+        actualizado_en: new Date().toISOString(),
+      })
+      if (ePago) { setGuardando(false); setError('El gasto se creo, pero fallo el descuento en cuenta corriente: ' + ePago.message); return }
+    }
     setGuardando(false)
-    if (error) { setError(error.message); return }
-    if (!editar) {
-      borrarKey('borrador:nuevo-gasto')
-      if (correoId) {
-        await supabase.from('correos_sincronizados').update({ estado_manual: 'pagada' }).eq('id', correoId)
-      }
+    borrarKey('borrador:nuevo-gasto')
+    if (correoId) {
+      await supabase.from('correos_sincronizados').update({ estado_manual: 'pagada' }).eq('id', correoId)
     }
     onOk()
   }
@@ -858,7 +878,18 @@ function GastoDialog({
           </div>
         )}
 
-        {/* Descontar de cuenta corriente: solo si el socio del gasto es tambien cliente distribuidor */}
+        {/* Descontar de cuenta corriente al crear: si el socio es tambien cliente distribuidor */}
+        {!editar && ctacteCliente && tipo !== 'adelanto' && !soloLectura && (
+          <label className="flex items-start gap-2 cursor-pointer rounded-xl border border-oliva-200 bg-oliva-50 p-3">
+            <input type="checkbox" className="h-4 w-4 mt-0.5 accent-oliva-700" checked={descCtaCteNuevo} onChange={(e) => setDescCtaCteNuevo(e.target.checked)} />
+            <div>
+              <div className="text-sm text-oliva-800 font-medium">📂 Lo cubrió {ctacteCliente.nombre} → descontar de su cuenta corriente</div>
+              <div className="text-[11px] text-oliva-600">Al guardar, el gasto se le descuenta de su deuda (pago en especie) y no queda como reembolsable. Sigue contando como costo de la empresa.</div>
+            </div>
+          </label>
+        )}
+
+        {/* Descontar de cuenta corriente al editar: boton directo */}
         {editar && ctacteCliente && !editar.es_adelanto && !soloLectura && (
           <div className="rounded-xl border border-oliva-200 bg-oliva-50 p-3 space-y-2">
             {yaDescontado ? (
