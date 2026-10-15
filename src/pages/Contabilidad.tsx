@@ -1309,8 +1309,9 @@ async function fetchCandidatosConc(esEgreso: boolean, monedaCta: string, cliente
   if (incluirPagos) {
     // Pagos a cuenta ya registrados (p.ej. desde Cuentas corrientes) sin conciliar: para enlazar
     // el credito del banco a ese pago en vez de crear uno nuevo (evita duplicar el ingreso).
-    const { data: pR } = await supabase.from('pagos').select('id,fecha,monto,moneda,cliente_id,nota').eq('moneda', monedaCta).gte('fecha', piso).order('fecha', { ascending: false })
-    ps = ((pR ?? []) as Record<string, any>[]).filter((p) => !pRef.has(p.id)).map((p) => ({ tipo: 'pago' as const, id: p.id, fecha: p.fecha, monto: Number(p.monto), etiqueta: `Pago · ${p.cliente_id ? (clientePorId.get(p.cliente_id)?.nombre ?? '') : ''}${p.nota ? ` (${p.nota})` : ''}` }))
+    const { data: pR } = await supabase.from('pagos').select('id,fecha,monto,moneda,cliente_id,nota,medio_pago').eq('moneda', monedaCta).gte('fecha', piso).order('fecha', { ascending: false })
+    // Los pagos en especie no movieron dinero: no se concilian contra un movimiento bancario.
+    ps = ((pR ?? []) as Record<string, any>[]).filter((p) => !pRef.has(p.id) && p.medio_pago !== 'especie').map((p) => ({ tipo: 'pago' as const, id: p.id, fecha: p.fecha, monto: Number(p.monto), etiqueta: `Pago · ${p.cliente_id ? (clientePorId.get(p.cliente_id)?.nombre ?? '') : ''}${p.nota ? ` (${p.nota})` : ''}` }))
   }
   return [...vs, ...is, ...ps]
 }
@@ -1901,8 +1902,10 @@ function RegistrarPagoDialog({ cliente, onCerrar, onOk }: { cliente: Cliente | n
 
   // Cuentas de la moneda elegida (la plata entra a una cuenta de esa moneda).
   const cuentasMoneda = cuentas.filter((c) => c.moneda === moneda)
+  // 'especie' = pago sin dinero (p.ej. el cliente cubrió un gasto de la empresa): no toca cuenta ni efectivo.
+  const sinDinero = medio === 'efectivo' || medio === 'especie'
   useEffect(() => {
-    if (medio === 'efectivo') return
+    if (sinDinero) return
     if (!cuentasMoneda.some((c) => String(c.id) === cuentaId)) setCuentaId(cuentasMoneda[0] ? String(cuentasMoneda[0].id) : '')
   }, [moneda, medio])
 
@@ -1915,7 +1918,7 @@ function RegistrarPagoDialog({ cliente, onCerrar, onOk }: { cliente: Cliente | n
     // 1) Pago a cuenta (baja el saldo, cuenta como ingreso)
     const { error: e } = await supabase.from('pagos').insert({
       cliente_id: cliente.id, fecha, monto: m, moneda, medio_pago: medio,
-      cuenta_id: medio === 'efectivo' ? null : (cuentaId ? Number(cuentaId) : null),
+      cuenta_id: sinDinero ? null : (cuentaId ? Number(cuentaId) : null),
       nota: nota.trim() || null, socio_id: perfil.id, actualizado_en: new Date().toISOString(),
     })
     if (e) { setGuardando(false); setError(e.message); return }
@@ -1961,10 +1964,11 @@ function RegistrarPagoDialog({ cliente, onCerrar, onOk }: { cliente: Cliente | n
             <select className="input" value={medio} onChange={(e) => setMedio(e.target.value)}>
               <option value="transferencia">Transferencia</option>
               <option value="efectivo">Efectivo</option>
+              <option value="especie">Especie (sin dinero)</option>
               <option value="otro">Otro</option>
             </select>
           </div>
-          {medio !== 'efectivo' && (
+          {!sinDinero && (
             <div className="col-span-2">
               <label className="label">Cuenta que recibe</label>
               <select className="input" value={cuentaId} onChange={(e) => setCuentaId(e.target.value)}>
@@ -1975,9 +1979,17 @@ function RegistrarPagoDialog({ cliente, onCerrar, onOk }: { cliente: Cliente | n
           )}
           <div className="col-span-2">
             <label className="label">Nota (opcional)</label>
-            <input className="input" value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Pago a cuenta" />
+            <input className="input" value={nota} onChange={(e) => setNota(e.target.value)} placeholder={medio === 'especie' ? 'p.ej. cubrió gasto portera 12/10' : 'Pago a cuenta'} />
           </div>
         </div>
+
+        {medio === 'especie' && (
+          <div className="rounded-lg border border-oliva-200 bg-oliva-50 p-3">
+            <p className="text-xs text-oliva-700">
+              Pago <b>en especie</b> (sin dinero): el cliente saldó parte de su deuda cubriendo algo a nombre de la empresa (p.ej. un gasto). <b>Baja el saldo</b> y cuenta como cobro, pero <b>no</b> toca ninguna cuenta ni efectivo y no entra en la conciliación bancaria. El gasto que haya cubierto, cargalo aparte como gasto normal de la empresa.
+            </p>
+          </div>
+        )}
 
         {medio === 'efectivo' && (
           <div className="rounded-lg border border-aceite-500/30 bg-aceite-500/5 p-3 space-y-3">
