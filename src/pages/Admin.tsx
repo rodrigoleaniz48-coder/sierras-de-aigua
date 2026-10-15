@@ -350,7 +350,7 @@ export function Admin() {
       <NuevoProductoDialog abierto={nuevoProd} onCerrar={() => setNuevoProd(false)} onOk={() => { setNuevoProd(false); cargar() }} />
       <PresentacionDialog abierto={nuevaPresProd !== null} productoId={nuevaPresProd} onCerrar={() => setNuevaPresProd(null)} onOk={() => { setNuevaPresProd(null); cargar() }} />
       <PresentacionDialog abierto={editandoPres !== null} productoId={editandoPres?.producto_id ?? null} editar={editandoPres} onCerrar={() => setEditandoPres(null)} onOk={() => { setEditandoPres(null); cargar() }} />
-      <EditorListasDialog abierto={editorListas} onCerrar={() => setEditorListas(false)} onOk={() => { setEditorListas(false); cargar() }} listas={listas} listaItems={listaItems} presentaciones={presentaciones} productos={productos} />
+      <EditorListasDialog abierto={editorListas} onCerrar={() => setEditorListas(false)} onOk={() => { setEditorListas(false); cargar() }} onRecargar={cargar} listas={listas} listaItems={listaItems} presentaciones={presentaciones} productos={productos} />
       <BackupDialog abierto={backupAbierto} onCerrar={() => setBackupAbierto(false)} />
       <RevisionDatosDialog abierto={revisionAbierto} onCerrar={() => setRevisionAbierto(false)} />
     </div>
@@ -666,8 +666,8 @@ interface FilaGrupo {
   esAceiteMultiVariedad: boolean
 }
 
-function EditorListasDialog({ abierto, onCerrar, onOk, listas, listaItems, presentaciones, productos }: {
-  abierto: boolean; onCerrar: () => void; onOk: () => void
+function EditorListasDialog({ abierto, onCerrar, onOk, onRecargar, listas, listaItems, presentaciones, productos }: {
+  abierto: boolean; onCerrar: () => void; onOk: () => void; onRecargar: () => void
   listas: Lista[]; listaItems: ListaItem[]; presentaciones: Presentacion[]; productos: Producto[]
 }) {
   const [listaSel, setListaSel] = useState<number | null>(null)
@@ -677,10 +677,20 @@ function EditorListasDialog({ abierto, onCerrar, onOk, listas, listaItems, prese
 
   useEffect(() => {
     if (!abierto) return
-    const id = listas[0]?.id ?? null
-    setListaSel(id)
+    // Preservar la lista seleccionada si sigue existiendo (p.ej. tras crear una nueva).
+    setListaSel((cur) => (cur != null && listas.some((l) => l.id === cur)) ? cur : (listas[0]?.id ?? null))
     setMensaje(null)
   }, [abierto, listas])
+
+  async function nuevaLista() {
+    const nombre = window.prompt('Nombre de la lista (p.ej. "Jenjibre" o "Distribuidor Cermasa"):')?.trim()
+    if (!nombre) return
+    const { data, error } = await supabase.from('listas_precios').insert({ nombre }).select('id').single()
+    if (error || !data) { setMensaje('Error creando la lista: ' + (error?.message ?? '')); return }
+    setListaSel(data.id)
+    onRecargar()
+    setMensaje(`Lista "${nombre}" creada. Cargá los precios que quieras (los vacíos caen a consumidor) y Guardá.`)
+  }
 
   const prodPorId = useMemo(() => new Map(productos.map((p) => [p.id, p])), [productos])
 
@@ -763,8 +773,9 @@ function EditorListasDialog({ abierto, onCerrar, onOk, listas, listaItems, prese
           <select className="input w-56" value={listaSel ?? ''} onChange={(e) => setListaSel(Number(e.target.value))}>
             {listas.map((l) => <option key={l.id} value={l.id}>{l.nombre}</option>)}
           </select>
+          <button type="button" className="btn-secondary text-xs whitespace-nowrap" onClick={nuevaLista}>➕ Nueva lista</button>
           <div className="text-xs text-oliva-600 flex-1">
-            Los aceites se agrupan por tamaño (mismo precio para todas las variedades). Vacío = cae al precio consumidor.
+            Los aceites se agrupan por tamaño. Vacío = cae al precio consumidor. Creá una lista personalizada y asignala al cliente en su ficha.
           </div>
         </div>
         <div className="overflow-x-auto border border-oliva-100 rounded-lg">
