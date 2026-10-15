@@ -598,7 +598,6 @@ function GastoDialog({
   const [yaDescontado, setYaDescontado] = useState(false)
   const [descontando, setDescontando] = useState(false)
   const [confirmDesc, setConfirmDesc] = useState(false)
-  const [descCtaCteNuevo, setDescCtaCteNuevo] = useState(false)  // checkbox en modo "nuevo gasto"
 
   // Cargar categorias
   useEffect(() => {
@@ -632,7 +631,7 @@ function GastoDialog({
 
   // Clientes de cuenta corriente (distribuidor/mayorista) para cruzar con el socio del gasto.
   useEffect(() => {
-    setConfirmDesc(false); setDescCtaCteNuevo(false)
+    setConfirmDesc(false)
     if (!abierto || !veTodos) return
     supabase.from('clientes').select('id,nombre').in('tipo', ['distribuidor', 'mayorista']).then(({ data }) => {
       setCcClientes((data as { id: number; nombre: string }[]) ?? [])
@@ -646,6 +645,12 @@ function GastoDialog({
     if (!n) return null
     return ccClientes.find((c) => c.nombre.toLowerCase().includes(n)) ?? null
   }, [ccClientes, socios, socioGastoId])
+
+  // Para un socio-distribuidor (Gonzalo) no aplica reembolsable/adelanto: el gasto es siempre
+  // costo de la empresa que el cubrio. Forzamos tipo normal al crear.
+  useEffect(() => {
+    if (ctacteCliente && !editar) setTipo('normal')
+  }, [ctacteCliente, editar])
 
   // Al editar: ver si este gasto ya fue descontado de su cuenta (para no duplicar).
   useEffect(() => {
@@ -723,8 +728,9 @@ function GastoDialog({
   async function guardar(e: React.FormEvent) {
     e.preventDefault()
     setGuardando(true); setError(null)
-    // Si se marca "descontar de cuenta corriente", el gasto NO es reembolsable (lo salda el distribuidor).
-    const descCC = !editar && descCtaCteNuevo && ctacteCliente != null && tipo !== 'adelanto'
+    // Gasto de un socio-distribuidor (Gonzalo): siempre es costo de la empresa que el cubrio
+    // y se descuenta de su cuenta corriente. NO es reembolsable ni adelanto.
+    const descCC = !editar && ctacteCliente != null
     const payload = {
       fecha,
       // Admin puede cargar/reasignar a otro socio via el selector; si no, cae a soyYo (o al que ya tenia el gasto editado).
@@ -790,7 +796,8 @@ function GastoDialog({
           </div>
         )}
 
-        {/* TIPO — primero */}
+        {/* TIPO — primero. Oculto para socio-distribuidor (Gonzalo): su gasto siempre se descuenta de su cuenta corriente. */}
+        {!ctacteCliente && (
         <div className="rounded-xl border border-oliva-100 bg-oliva-50/60 p-3 space-y-2">
           <div className="text-[11px] uppercase tracking-wide text-oliva-600 font-semibold mb-1">Tipo</div>
           <label className="flex items-start gap-2 cursor-pointer">
@@ -821,6 +828,7 @@ function GastoDialog({
             </div>
           </label>
         </div>
+        )}
 
         <div className="grid grid-cols-2 gap-3">
           <div>
@@ -878,15 +886,12 @@ function GastoDialog({
           </div>
         )}
 
-        {/* Descontar de cuenta corriente al crear: si el socio es tambien cliente distribuidor */}
-        {!editar && ctacteCliente && tipo !== 'adelanto' && !soloLectura && (
-          <label className="flex items-start gap-2 cursor-pointer rounded-xl border border-oliva-200 bg-oliva-50 p-3">
-            <input type="checkbox" className="h-4 w-4 mt-0.5 accent-oliva-700" checked={descCtaCteNuevo} onChange={(e) => setDescCtaCteNuevo(e.target.checked)} />
-            <div>
-              <div className="text-sm text-oliva-800 font-medium">📂 Lo cubrió {ctacteCliente.nombre} → descontar de su cuenta corriente</div>
-              <div className="text-[11px] text-oliva-600">Al guardar, el gasto se le descuenta de su deuda (pago en especie) y no queda como reembolsable. Sigue contando como costo de la empresa.</div>
-            </div>
-          </label>
+        {/* Descontar de cuenta corriente al crear: el socio es tambien cliente distribuidor (Gonzalo) */}
+        {!editar && ctacteCliente && !soloLectura && (
+          <div className="rounded-xl border border-oliva-200 bg-oliva-50 p-3">
+            <div className="text-sm text-oliva-800 font-medium">📂 Gasto cubierto por {ctacteCliente.nombre}</div>
+            <div className="text-[11px] text-oliva-600">Al guardar se le descuenta de su cuenta corriente (pago en especie). Cuenta como costo de la empresa; no es reembolsable ni adelanto.</div>
+          </div>
         )}
 
         {/* Descontar de cuenta corriente al editar: boton directo */}
