@@ -559,6 +559,12 @@ function CampoDetalle({ label, valor, destaca, color, small }: {
 interface VentaMon { id: number; fecha: string; total: number; con_factura: boolean; ubicacion_id: number; cliente_id: number | null; moneda?: 'UYU' | 'USD' | null; cotizacion?: number | null }
 interface IngresoMan { id: number; fecha: string; monto: number; moneda: 'UYU' | 'USD'; categoria_id: number | null; socio_id: string | null }
 
+// Clasificacion de ingresos/egresos para el analisis de sostenibilidad (por slug, estable).
+const INGRESO_NEGOCIO_SLUGS = new Set(['ventas_aceite', 'venta_feria']) // nucleo: aceite y productos
+const INGRESO_EXTRA_SLUGS = new Set(['venta_maquinaria', 'aportes_capital']) // no operativo (venta de activo / financiacion)
+// El resto de categorias de ingreso se consideran "paralelos" (campo/otros operativos).
+const GASTO_CAPEX_SLUGS = new Set(['olivos_inversion', 'inversion_-_almazara', 'inersion_-_casas', 'inversion_-_mejoras_fijas_alambrados_etc', 'inversion_-_maquinaria']) // inversiones (no operativo)
+
 // Barra horizontal simple para el resumen visual (magnitud; una sola escala por grupo).
 function FilaBarra({ label, valor, max, clase, moneda = 'UYU' }: { label: string; valor: number; max: number; clase: string; moneda?: 'UYU' | 'USD' }) {
   const pct = max > 0 && valor > 0 ? Math.max(2, (valor / max) * 100) : 0
@@ -584,6 +590,7 @@ function EstadoResultados() {
   const [gastos, setGastos] = useState<Gasto[]>([])
   const [ccIds, setCcIds] = useState<Set<number>>(new Set())
   const [pagos, setPagos] = useState<{ cliente_id: number | null; monto: number; moneda: string }[]>([])
+  const [catIng, setCatIng] = useState<Map<number, { slug: string; nombre: string }>>(new Map())
   const [cargando, setCargando] = useState(true)
 
   const desde = `${anio}-${mes}-01`
@@ -601,12 +608,14 @@ function EstadoResultados() {
       // Clientes de cuenta corriente: su ingreso se reconoce por el PAGO a cuenta, no por la venta.
       supabase.from('clientes').select('id').in('tipo', ['distribuidor', 'mayorista']),
       supabase.from('pagos').select('cliente_id,monto,moneda').gte('fecha', desde).lte('fecha', hasta),
-    ]).then(([v, g, i, cc, p]) => {
+      supabase.from('categorias_ingreso').select('id,slug,nombre'),
+    ]).then(([v, g, i, cc, p, ci]) => {
       setVentas((v.data as VentaMon[]) ?? [])
       setGastos((g.data as Gasto[]) ?? [])
       setIngresos((i.data as IngresoMan[]) ?? [])
       setCcIds(new Set(((cc.data as { id: number }[]) ?? []).map((c) => c.id)))
       setPagos((p.data as { cliente_id: number | null; monto: number; moneda: string }[]) ?? [])
+      setCatIng(new Map(((ci.data as { id: number; slug: string; nombre: string }[]) ?? []).map((c) => [c.id, { slug: c.slug, nombre: c.nombre }])))
       setCargando(false)
     })
   }, [desde, hasta])
@@ -638,6 +647,42 @@ function EstadoResultados() {
   const gastosUSD = gastos.filter((g) => g.moneda === 'USD').reduce((s, g) => s + Number(g.monto), 0)
   const margenUYU = totalIngresosUYU - gastosUYU
   const margenUSD = totalIngresosUSD - gastosUSD
+
+  // --- Analisis de sostenibilidad (en pesos): separar negocio / paralelos / no operativo ---
+  const grupoIngreso = (categoriaId: number | null): 'negocio' | 'paralelo' | 'extra' => {
+    const slug = categoriaId != null ? catIng.get(categoriaId)?.slug : undefined
+    if (slug && INGRESO_NEGOCIO_SLUGS.has(slug)) return 'negocio'
+    if (slug && INGRESO_EXTRA_SLUGS.has(slug)) return 'extra'
+    return 'paralelo'
+  }
+  let ingNegocioManUYU = 0, ingExtraUYU = 0
+  const paraleloPorCat = new Map<string, number>()
+  const extraPorCat = new Map<string, number>()
+  for (const i of ingresos) {
+    if (i.moneda !== 'UYU') continue
+    const monto = Number(i.monto)
+    const nom = (i.categoria_id != null ? catIng.get(i.categoria_id)?.nombre : null) ?? 'Otros'
+    const g = grupoIngreso(i.categoria_id)
+    if (g === 'negocio') ingNegocioManUYU += monto
+    else if (g === 'extra') { ingExtraUYU += monto; extraPorCat.set(nom, (extraPorCat.get(nom) ?? 0) + monto) }
+    else { paraleloPorCat.set(nom, (paraleloPorCat.get(nom) ?? 0) + monto) }
+  }
+  // Negocio (productos) = ventas minoristas + cobros a cuenta de distribuidores + ingresos de categoria producto.
+  const negocioVentasUYU = ventasUYU
+  const negocioDistribUYU = pagosCCUYU
+  const ingNegocioUYU = negocioVentasUYU + negocioDistribUYU + ingNegocioManUYU
+  const ingParaleloUYU = [...paraleloPorCat.values()].reduce((s, v) => s + v, 0)
+  // Egresos: operativos vs inversiones (capex).
+  let egCapexUYU = 0, egOpexUYU = 0
+  for (const g of gastos) {
+    if (g.moneda !== 'UYU') continue
+    if (GASTO_CAPEX_SLUGS.has(g.categoria)) egCapexUYU += Number(g.monto); else egOpexUYU += Number(g.monto)
+  }
+  const ingOperativoUYU = ingNegocioUYU + ingParaleloUYU
+  const resultadoOperativoUYU = ingOperativoUYU - egOpexUYU
+  const hayNoOperativo = ingExtraUYU > 0 || egCapexUYU > 0
+  const paraleloArr = [...paraleloPorCat.entries()].sort((a, b) => b[1] - a[1])
+  const extraArr = [...extraPorCat.entries()].sort((a, b) => b[1] - a[1])
 
   // Egresos por categoría (UYU + USD separados)
   const porCatUYU = new Map<string, number>()
@@ -746,6 +791,53 @@ function EstadoResultados() {
               </div>
             </div>
           )}
+
+          {/* Analisis operativo / sostenibilidad (pesos) */}
+          <div className="card p-5 space-y-4">
+            <div className="text-xs uppercase tracking-wide text-oliva-600">¿Se sostiene? · Análisis operativo (pesos)</div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              {/* Ingresos operativos */}
+              <div className="space-y-1.5">
+                <div className="text-[11px] uppercase tracking-wide text-oliva-500">Ingresos operativos</div>
+                <div className="flex justify-between text-sm"><span className="text-oliva-800">🫒 Negocio (aceite/productos)</span><b className="tabular-nums">{money(ingNegocioUYU)}</b></div>
+                <div className="pl-4 text-xs text-oliva-600 space-y-0.5">
+                  <div className="flex justify-between"><span>Ventas directas</span><span className="tabular-nums">{money(negocioVentasUYU)}</span></div>
+                  {negocioDistribUYU > 0 && <div className="flex justify-between"><span>Cobros a distribuidores</span><span className="tabular-nums">{money(negocioDistribUYU)}</span></div>}
+                  {ingNegocioManUYU > 0 && <div className="flex justify-between"><span>Ingresos cargados (producto)</span><span className="tabular-nums">{money(ingNegocioManUYU)}</span></div>}
+                </div>
+                <div className="flex justify-between text-sm pt-1"><span className="text-oliva-800">🌾 Paralelos (campo/otros)</span><b className="tabular-nums">{money(ingParaleloUYU)}</b></div>
+                {paraleloArr.length > 0 && (
+                  <div className="pl-4 text-xs text-oliva-600 space-y-0.5">
+                    {paraleloArr.map(([nom, val]) => (
+                      <div key={nom} className="flex justify-between"><span>{nom}</span><span className="tabular-nums">{money(val)}</span></div>
+                    ))}
+                  </div>
+                )}
+                <div className="flex justify-between text-sm pt-1.5 border-t border-oliva-100"><span className="font-medium text-oliva-800">Total ingresos operativos</span><b className="tabular-nums">{money(ingOperativoUYU)}</b></div>
+              </div>
+              {/* Egresos operativos + resultado */}
+              <div className="space-y-1.5">
+                <div className="text-[11px] uppercase tracking-wide text-oliva-500">Egresos operativos</div>
+                <div className="flex justify-between text-sm"><span className="text-oliva-800">Gastos operativos</span><b className="tabular-nums">{money(egOpexUYU)}</b></div>
+                <div className="text-[11px] text-oliva-500">No incluye inversiones (se muestran abajo).</div>
+                <div className={`mt-2 rounded-lg p-3 ${resultadoOperativoUYU >= 0 ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
+                  <div className="text-[11px] uppercase tracking-wide text-oliva-600">Resultado operativo</div>
+                  <div className={`text-2xl font-semibold tabular-nums ${resultadoOperativoUYU >= 0 ? 'text-green-700' : 'text-red-700'}`}>{money(resultadoOperativoUYU)}</div>
+                  <div className="text-[11px] text-oliva-600">{resultadoOperativoUYU >= 0 ? 'Ingresos operativos cubren el gasto operativo.' : 'El gasto operativo supera a los ingresos operativos.'}</div>
+                </div>
+              </div>
+            </div>
+            {hayNoOperativo && (
+              <div className="rounded-lg border border-oliva-100 bg-oliva-50/50 p-3 text-xs text-oliva-700 space-y-1">
+                <div className="text-[11px] uppercase tracking-wide text-oliva-500">No operativo (no cuenta para la sostenibilidad)</div>
+                {extraArr.map(([nom, val]) => (
+                  <div key={nom} className="flex justify-between"><span>+ {nom}</span><span className="tabular-nums">{money(val)}</span></div>
+                ))}
+                {egCapexUYU > 0 && <div className="flex justify-between"><span>− Inversiones (capex)</span><span className="tabular-nums">{money(egCapexUYU)}</span></div>}
+                <div className="flex justify-between pt-1 border-t border-oliva-100"><span className="font-medium">Resultado neto del mes (incluye todo)</span><b className={`tabular-nums ${margenUYU >= 0 ? 'text-green-700' : 'text-red-700'}`}>{money(margenUYU)}</b></div>
+              </div>
+            )}
+          </div>
         </>
       )}
 
