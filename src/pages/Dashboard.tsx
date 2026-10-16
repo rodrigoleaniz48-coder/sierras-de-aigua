@@ -2,8 +2,7 @@ import { useEffect, useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
-import { money } from '../lib/format'
-import { ReporteSemanalCard } from '../components/ReporteSemanalCard'
+import { money, num } from '../lib/format'
 import { AlertasStockBajo } from '../components/AlertasStockBajo'
 import { AlertasTareas } from '../components/AlertasTareas'
 
@@ -274,12 +273,30 @@ export function Dashboard() {
         </div>
       )}
 
-      {/* Reporte semanal + KPIs del mes integrados */}
-      <ReporteSemanalCard compact kpisMes={{
-        totalMes: r.totalMes, cantVentasMes: r.cantVentasMes,
-        litrosAceiteMes: r.litrosAceiteMes, totalMesAnterior: r.totalMesAnterior,
-        deltaPct: deltaMes, cargando,
-      }} />
+      {/* KPIs del mes (dinero cobrado en el mes) */}
+      <div className="rounded-lg border border-oliva-100 bg-white overflow-hidden">
+        <div className="grid grid-cols-3 gap-px bg-oliva-100/60">
+          <div className="bg-white px-3 py-2.5 text-center">
+            <div className="text-[10px] uppercase tracking-wide text-oliva-500">Ventas mes</div>
+            <div className="text-sm font-bold text-oliva-900 tabular-nums">{cargando ? '…' : money(r.totalMes)}</div>
+            <div className="text-[10px] text-oliva-500">{cargando ? '' : `${r.cantVentasMes} op.`}</div>
+          </div>
+          <div className="bg-white px-3 py-2.5 text-center">
+            <div className="text-[10px] uppercase tracking-wide text-oliva-500">Aceite</div>
+            <div className="text-sm font-bold text-oliva-900 tabular-nums">{cargando ? '…' : `${num(r.litrosAceiteMes)} L`}</div>
+            <div className="text-[10px] text-oliva-500">mes</div>
+          </div>
+          <div className="bg-white px-3 py-2.5 text-center">
+            <div className="text-[10px] uppercase tracking-wide text-oliva-500">Mes anterior</div>
+            <div className="text-sm font-bold text-oliva-900 tabular-nums">{cargando ? '…' : money(r.totalMesAnterior)}</div>
+            {!cargando && deltaMes !== null && (
+              <div className={`text-[10px] font-semibold ${deltaMes >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                {deltaMes >= 0 ? '↑' : '↓'} {Math.abs(deltaMes).toFixed(0)}%
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
 
       {/* Mini gráfica ingresos vs egresos */}
       {meses.length > 0 && <GraficaMeses meses={meses} />}

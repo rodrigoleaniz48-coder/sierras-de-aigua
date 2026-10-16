@@ -709,6 +709,7 @@ Deno.serve(async (req) => {
         .upsert(rowsMerge, { onConflict: 'thread_id,cuenta_correo_id', ignoreDuplicates: false })
 
       if (insertErr) {
+        await admin.from('cuentas_correo').update({ error_detalle: `guardar: ${insertErr.message}` }).eq('id', cuenta.id)
         return json({ error: `Error guardando correos: ${insertErr.message}` }, 500)
       }
     }
@@ -730,6 +731,7 @@ Deno.serve(async (req) => {
     })
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
+    await admin.from('cuentas_correo').update({ error_detalle: `sync: ${msg}` }).eq('id', cuenta.id)
     return json({ error: `Error en sincronizacion: ${msg}` }, 500)
   }
 })

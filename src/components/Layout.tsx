@@ -1,9 +1,8 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useAuth } from '../lib/auth'
 import type { Rol } from '../lib/types'
 import { useTema, type Tema } from '../lib/tema'
-import { rangoSemanal, reporteVisto } from '../lib/reporte'
 import { CambiarPasswordDialog } from './CambiarPasswordDialog'
 import { BottomNav } from './BottomNav'
 import { Fab } from './Fab'
@@ -103,13 +102,6 @@ export function Layout() {
   // Cerrar sheet al cambiar de ruta
   useEffect(() => { setMasOpen(false) }, [loc.pathname])
 
-  const semanaISOPasada = useMemo(() => {
-    const s = new Date(); s.setDate(s.getDate() - 7)
-    return rangoSemanal(s).semanaISO
-  }, [])
-  const [reporteNuevo, setReporteNuevo] = useState(() => !reporteVisto(semanaISOPasada))
-  useEffect(() => { setReporteNuevo(!reporteVisto(semanaISOPasada)) }, [loc.pathname, semanaISOPasada])
-
   const iniciales = (perfil?.nombre ?? '?').trim().charAt(0).toUpperCase()
 
   const linkCls = ({ isActive }: { isActive: boolean }) =>
@@ -154,11 +146,6 @@ export function Layout() {
                 <NavLink key={n.to} to={n.to} end={n.to === '/'} onClick={() => setOpenSidebar(false)} className={linkCls}>
                   <Ico>{n.icon}</Ico>
                   <span className="flex-1">{n.label}</span>
-                  {n.to === '/' && reporteNuevo && (
-                    <span className="text-[9px] font-bold uppercase tracking-wide rounded-full bg-aceite-500 text-white px-1.5 py-0.5">
-                      nuevo
-                    </span>
-                  )}
                 </NavLink>
               ))}
             </div>

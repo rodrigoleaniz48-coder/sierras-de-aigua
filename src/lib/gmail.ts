@@ -1,5 +1,22 @@
 import { supabase } from './supabase'
 
+// Las edge functions, ante un error, devuelven { error: "..." } con status != 2xx.
+// supabase-js reporta solo "Edge Function returned a non-2xx status code"; el detalle
+// real viaja en el cuerpo de la respuesta (error.context). Lo extraemos para mostrarlo.
+async function detalleErrorFn(error: unknown): Promise<string> {
+  const ctx = (error as { context?: Response } | null)?.context
+  if (ctx && typeof ctx.text === 'function') {
+    try {
+      const txt = await ctx.text()
+      if (txt) {
+        try { const j = JSON.parse(txt); if (j?.error) return String(j.error) } catch { /* no era JSON */ }
+        if (txt.trim()) return txt.slice(0, 500)
+      }
+    } catch { /* cuerpo ya consumido */ }
+  }
+  return (error as { message?: string } | null)?.message ?? 'Error desconocido'
+}
+
 export interface CuentaCorreo {
   id: number
   email: string
@@ -23,7 +40,7 @@ export async function conectarGmail(): Promise<{ url?: string; error?: string }>
   const { data, error } = await supabase.functions.invoke('gmail-auth', {
     body: { action: 'connect' },
   })
-  if (error) return { error: error.message }
+  if (error) return { error: await detalleErrorFn(error) }
   return data as { url?: string; error?: string }
 }
 
@@ -34,7 +51,7 @@ export async function intercambiarCodigoGmail(
   const { data, error } = await supabase.functions.invoke('gmail-auth', {
     body: { action: 'exchange', code, state },
   })
-  if (error) return { error: error.message }
+  if (error) return { error: await detalleErrorFn(error) }
   return data as { ok?: boolean; email?: string; error?: string }
 }
 
@@ -42,7 +59,7 @@ export async function desconectarGmail(): Promise<{ ok?: boolean; error?: string
   const { data, error } = await supabase.functions.invoke('gmail-auth', {
     body: { action: 'disconnect' },
   })
-  if (error) return { error: error.message }
+  if (error) return { error: await detalleErrorFn(error) }
   return data as { ok?: boolean; error?: string }
 }
 
@@ -71,7 +88,7 @@ export async function sincronizarGmail(): Promise<{
   const { data, error } = await supabase.functions.invoke('gmail-sync', {
     body: { action: 'sync' },
   })
-  if (error) return { error: error.message }
+  if (error) return { error: await detalleErrorFn(error) }
   return data as { ok?: boolean; correos_nuevos?: number; primera_sync?: boolean; error?: string }
 }
 
