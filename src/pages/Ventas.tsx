@@ -52,6 +52,10 @@ export function Ventas() {
   const usaCadete = !(perfil?.nombre ?? '').toLowerCase().includes('gonzalo')
   const [ventas, setVentas] = useState<Venta[]>([])
   const [clientes, setClientes] = useState<Cliente[]>([])
+  // Para el total "cobrado del periodo" (igual criterio que Inicio): pagos a cuenta de
+  // distribuidores + cotizacion para convertir USD a pesos.
+  const [pagos, setPagos] = useState<{ cliente_id: number | null; fecha: string; monto: number; moneda: string }[]>([])
+  const [tcUsd, setTcUsd] = useState(42)
   const [socios, setSocios] = useState<Socio[]>([])
   const [ubicaciones, setUbicaciones] = useState<Ubicacion[]>([])
   const [cargando, setCargando] = useState(true)
@@ -90,13 +94,17 @@ export function Ventas() {
 
   async function cargar() {
     setCargando(true)
-    const [v, c, s, u] = await Promise.all([
+    const [v, c, s, u, p, cot] = await Promise.all([
       supabase.from('ventas').select('*').order('fecha', { ascending: false }).order('id', { ascending: false }),
       supabase.from('clientes').select('*').order('nombre'),
       supabase.from('perfiles').select('id,nombre').eq('activo', true).neq('rol', 'campo').order('nombre'),
       supabase.from('ubicaciones').select('id,nombre,activo').eq('activo', true).order('id'),
+      supabase.from('pagos').select('cliente_id,fecha,monto,moneda'),
+      import('../lib/bcu').then((m) => m.fetchCotizacionBCU()),
     ])
     setVentas((v.data as Venta[]) ?? [])
+    setPagos((p.data as { cliente_id: number | null; fecha: string; monto: number; moneda: string }[]) ?? [])
+    setTcUsd((cot as { cotizacion?: number } | null)?.cotizacion ?? 42)
     // Gonzalo solo ve sus contactos (asignados a el). Los demas ven todos.
     const esGonzalo = (perfil?.nombre ?? '').toLowerCase().includes('gonzalo')
     const cAll = (c.data as Cliente[]) ?? []
@@ -160,10 +168,27 @@ export function Ventas() {
     })
   }, [ventas, filtroSocio, filtroDesde, filtroHasta, soloEnvio])
 
-  const totalPeriodo = useMemo(
-    () => filtradas.reduce((s, v) => (v.estado === 'cancelado' || v.promocion_comercial || v.a_confirmar ? s : s + Number(v.total ?? 0)), 0),
-    [filtradas],
-  )
+  // Cobrado del periodo: mismo criterio que "Ventas del mes" de Inicio (dinero efectivamente
+  // cobrado). Ventas directas por fecha_cobro + pagos a cuenta de distribuidores en el rango.
+  // Asi el numero coincide con Inicio y no confunde.
+  // Global (igual que Inicio, no depende del filtro de socio); solo sigue el rango de fechas.
+  const cobradoPeriodo = useMemo(() => {
+    const ccSet = new Set(clientes.filter((c) => c.tipo === 'distribuidor' || c.tipo === 'mayorista').map((c) => c.id))
+    const enRango = (f: string | null | undefined) => !!f && (!filtroDesde || f >= filtroDesde) && (!filtroHasta || f <= filtroHasta)
+    // Ventas directas (no distribuidores) cobradas en el rango, por fecha_cobro.
+    const directas = ventas.reduce((s, v) => {
+      if (v.estado === 'cancelado' || v.promocion_comercial || v.a_confirmar) return s
+      if (!v.cobrado || !enRango(v.fecha_cobro)) return s
+      if (v.cliente_id && ccSet.has(v.cliente_id)) return s // distribuidor: cuenta por el pago
+      return s + Number(v.total ?? 0)
+    }, 0)
+    // Pagos a cuenta de distribuidores en el rango (convertidos a pesos).
+    const pagosCC = pagos.reduce((s, p) => {
+      if (!p.cliente_id || !ccSet.has(p.cliente_id) || !enRango(p.fecha)) return s
+      return s + (p.moneda === 'USD' ? Number(p.monto) * tcUsd : Number(p.monto))
+    }, 0)
+    return directas + pagosCC
+  }, [ventas, clientes, pagos, tcUsd, filtroDesde, filtroHasta])
 
   // Ventas pendientes de entrega o cobro (siempre visibles arriba, sin filtros)
   // Pendientes: entrega, cobro o "a_confirmar" (potenciales). Las promos no tienen cobro.
@@ -298,9 +323,9 @@ export function Ventas() {
             </label>
           </div>
           <div className="rounded-lg bg-oliva-100 border border-oliva-200 p-3 text-right">
-            <div className="text-[11px] uppercase tracking-wide text-oliva-700">Total del período</div>
-            <div className="text-lg font-semibold text-oliva-900 tabular-nums">{money(totalPeriodo)}</div>
-            <div className="text-[11px] text-oliva-600">{filtradas.length} venta(s)</div>
+            <div className="text-[11px] uppercase tracking-wide text-oliva-700">Cobrado del período</div>
+            <div className="text-lg font-semibold text-oliva-900 tabular-nums">{money(cobradoPeriodo)}</div>
+            <div className="text-[11px] text-oliva-600">dinero cobrado · igual que Inicio</div>
           </div>
         </div>
       </div>
