@@ -1089,20 +1089,28 @@ async function guardar(e: React.FormEvent) {
     const fechaCobroSync = cobrado
       ? (ventaAEditar?.fecha_cobro ?? hoy)
       : null
+    // Promoción comercial = regalo: no genera ingreso ni cobro (su costo real queda como
+    // gasto automatico en 'promociones_comerciales'). Totales en 0 para no inflar ingresos.
+    const cobradoFinal = promocion ? false : cobrado
+    const estadoFinal = promocion ? (entregado ? 'entregado' : 'pendiente') : estadoSync
+    const fechaCobroFinal = promocion ? null : fechaCobroSync
+    const subtotalFinal = promocion ? 0 : subtotalUyu
+    const ivaFinal = promocion ? 0 : ivaUyu
+    const totalFinal = promocion ? 0 : totalUyu
     const cabecera = {
       fecha,
       cliente_id: clienteId ? Number(clienteId) : null,
       socio_id: socioId,
-      canal, estado: estadoSync, forma_pago: formaPago,
+      canal, estado: estadoFinal, forma_pago: formaPago,
       con_factura: conFactura,
       promocion_comercial: promocion,
       envio, costo_envio: cEnvioUyu, // envío siempre se ingresa en pesos
       horario_entrega: envio ? (horarioEntrega.trim() || null) : null,
       ubicacion_id: Number(ubicacionId),
-      entregado, cobrado,
-      fecha_cobro: fechaCobroSync,
+      entregado, cobrado: cobradoFinal,
+      fecha_cobro: fechaCobroFinal,
       a_confirmar: aConfirmar,
-      subtotal: subtotalUyu, descuento: 0, iva: ivaUyu, total: totalUyu,
+      subtotal: subtotalFinal, descuento: 0, iva: ivaFinal, total: totalFinal,
       notas: notas.trim() || null,
       moneda: monedaVenta,
       cotizacion: monedaVenta === 'USD' ? cotVenta : null,
@@ -1474,7 +1482,7 @@ async function guardar(e: React.FormEvent) {
                 onChange={(e) => {
                   const on = e.target.checked
                   setPromocion(on)
-                  if (on) { setCobrado(true); setConFactura(false); setAConfirmar(false) }
+                  if (on) { setCobrado(false); setConFactura(false); setAConfirmar(false) }
                 }}
                 className="h-4 w-4 accent-oliva-700"
               />
