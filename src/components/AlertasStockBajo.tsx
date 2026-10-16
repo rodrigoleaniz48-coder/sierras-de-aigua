@@ -9,13 +9,13 @@ interface Producto { id: number; nombre: string; categoria: string }
 interface StockRow { presentacion_id: number; unidades: number; ubicacion_id: number }
 interface Ubicacion { id: number; nombre: string }
 
-/** Ubicaciones que le interesan al socio según su rol/lugar. Almazara siempre. */
+/** Ubicaciones que le interesan al socio según su rol/lugar. Almazara siempre.
+ *  Maldonado (id 2) queda excluido: es stock en poder de Gonzalo (distribuidor), no de la empresa. */
 function ubicacionesRelevantes(nombre: string | null | undefined): number[] {
   const n = (nombre ?? '').toLowerCase()
   const base = [1] // Almazara siempre
-  if (n.includes('gonzalo')) return [...base, 2] // Maldonado
   if (n.includes('rodrigo') || n.includes('santi')) return [...base, 3] // Montevideo
-  return base // Ayelén y demás: solo Almazara
+  return base // Gonzalo, Ayelén y demás: solo Almazara
 }
 
 export function AlertasStockBajo() {

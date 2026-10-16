@@ -52,6 +52,8 @@ export function Stock() {
   const [perfiles, setPerfiles] = useState<Perfil[]>([])
   const [movsGranel, setMovsGranel] = useState<MovGranel[]>([])
   const [ubicaciones, setUbicaciones] = useState<Ubicacion[]>([])
+  // Todas las ubicaciones (incluye las ocultas como Maldonado) solo para resolver nombres en el historial.
+  const [ubicacionesAll, setUbicacionesAll] = useState<Ubicacion[]>([])
   const [traslados, setTraslados] = useState<Traslado[]>([])
   const [itemsTraslado, setItemsTraslado] = useState<ItemTraslado[]>([])
   const [cargando, setCargando] = useState(true)
@@ -86,8 +88,9 @@ export function Stock() {
     setStock(((s.data as StockRow[]) ?? []).filter((x) => ubicIdsVisibles.includes(x.ubicacion_id)))
     setMovsStock((mS.data as MovStock[]) ?? [])
     setMovsGranel((mG.data as MovGranel[]) ?? [])
-    // Filtrar ubicaciones que el socio puede ver (Gonzalo no ve Mvd)
+    // Filtrar ubicaciones que el socio puede ver (Maldonado queda excluido del stock de empresa)
     const allUbic = (u.data as Ubicacion[]) ?? []
+    setUbicacionesAll(allUbic)
     setUbicaciones(allUbic.filter((x) => ubicIdsVisibles.includes(x.id)))
     setTraslados((tr.data as Traslado[]) ?? [])
     setItemsTraslado((it.data as ItemTraslado[]) ?? [])
@@ -99,7 +102,7 @@ export function Stock() {
   const prodPorId = useMemo(() => new Map(productos.map((x) => [x.id, x])), [productos])
   const presPorId = useMemo(() => new Map(presentaciones.map((x) => [x.id, x])), [presentaciones])
   const tanquePorId = useMemo(() => new Map(tanques.map((x) => [x.id, x])), [tanques])
-  const ubicPorId = useMemo(() => new Map(ubicaciones.map((x) => [x.id, x])), [ubicaciones])
+  const ubicPorId = useMemo(() => new Map(ubicacionesAll.map((x) => [x.id, x])), [ubicacionesAll])
 
   // KPI: aceite total (granel + envasado equivalente en litros)
   const litrosGranelTotal = useMemo(() => tanques.reduce((s, t) => s + Number(t.litros_actuales), 0), [tanques])
