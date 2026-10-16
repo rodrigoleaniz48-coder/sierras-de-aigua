@@ -555,6 +555,22 @@ function CampoDetalle({ label, valor, destaca, color, small }: {
 interface VentaMon { id: number; fecha: string; total: number; con_factura: boolean; ubicacion_id: number; cliente_id: number | null; moneda?: 'UYU' | 'USD' | null; cotizacion?: number | null }
 interface IngresoMan { id: number; fecha: string; monto: number; moneda: 'UYU' | 'USD'; categoria_id: number | null; socio_id: string | null }
 
+// Barra horizontal simple para el resumen visual (magnitud; una sola escala por grupo).
+function FilaBarra({ label, valor, max, clase, moneda = 'UYU' }: { label: string; valor: number; max: number; clase: string; moneda?: 'UYU' | 'USD' }) {
+  const pct = max > 0 && valor > 0 ? Math.max(2, (valor / max) * 100) : 0
+  return (
+    <div>
+      <div className="flex justify-between text-sm">
+        <span className="text-oliva-800">{label}</span>
+        <span className="tabular-nums text-oliva-700">{money(valor, moneda)}</span>
+      </div>
+      <div className="h-2.5 bg-oliva-100 rounded overflow-hidden">
+        <div className={`h-full ${clase} rounded`} style={{ width: pct + '%' }} />
+      </div>
+    </div>
+  )
+}
+
 function EstadoResultados() {
   const hoy = new Date()
   const [mes, setMes] = useState<string>(String(hoy.getMonth() + 1).padStart(2, '0'))
@@ -632,6 +648,14 @@ function EstadoResultados() {
     uyu: porCatUYU.get(cat) ?? 0,
     usd: porCatUSD.get(cat) ?? 0,
   })).sort((a, b) => b.uyu - a.uyu || b.usd - a.usd)
+
+  // Datos para el resumen visual (pesos): ingresos vs egresos y fuentes de ingreso.
+  const maxIE = Math.max(totalIngresosUYU, gastosUYU, 1)
+  const ingresoFuentes = [
+    { label: 'Ventas', valor: ventasUYU },
+    { label: 'Cobros a cuenta (distrib.)', valor: pagosCCUYU },
+    { label: 'Otros ingresos', valor: ingresosManUYU },
+  ].filter((f) => f.valor > 0)
 
   return (
     <div className="space-y-4">
@@ -711,6 +735,30 @@ function EstadoResultados() {
             </div>
           )}
         </>
+      )}
+
+      {!cargando && (totalIngresosUYU > 0 || gastosUYU > 0) && (
+        <div className="card p-4 space-y-5">
+          <div className="text-xs uppercase tracking-wide text-oliva-600">Resumen visual del mes (pesos)</div>
+          {/* Ingresos vs Egresos + resultado */}
+          <div className="space-y-2">
+            <FilaBarra label="Ingresos" valor={totalIngresosUYU} max={maxIE} clase="bg-green-600" />
+            <FilaBarra label="Egresos" valor={gastosUYU} max={maxIE} clase="bg-rose-500" />
+            <div className="flex justify-between text-sm pt-2 border-t border-oliva-100">
+              <span className="text-oliva-800 font-medium">Resultado (margen)</span>
+              <span className={`tabular-nums font-semibold ${margenUYU >= 0 ? 'text-green-700' : 'text-red-700'}`}>{money(margenUYU)}</span>
+            </div>
+          </div>
+          {/* Ingresos por fuente */}
+          {ingresoFuentes.length > 0 && (
+            <div className="space-y-1.5">
+              <div className="text-[11px] uppercase tracking-wide text-oliva-500">Ingresos por fuente</div>
+              {ingresoFuentes.map((f) => (
+                <FilaBarra key={f.label} label={f.label} valor={f.valor} max={totalIngresosUYU} clase="bg-green-500" />
+              ))}
+            </div>
+          )}
+        </div>
       )}
 
       <div className="card p-4">

@@ -30,6 +30,46 @@ function mesLabel(k: string): string {
   return `${MESES[m - 1]} ${y}`
 }
 
+// Renderiza en canvas un grafico de barras "Ingresos vs Egresos por mes" y lo
+// devuelve como PNG (dataURL) + dimensiones, para incrustarlo en el Excel
+// (ExcelJS no soporta graficos nativos, pero si imagenes).
+function renderResumenChart(rows: { mes: string; ingresos: number; egresos: number }[]): { dataUrl: string; width: number; height: number } | null {
+  const data = rows.slice(0, 12)
+  if (data.length === 0) return null
+  const W = 620, rowH = 40, padTop = 58, padLeft = 120, padRight = 100, padBottom = 14
+  const H = padTop + data.length * rowH + padBottom
+  const canvas = document.createElement('canvas')
+  const dpr = 2
+  canvas.width = W * dpr; canvas.height = H * dpr
+  const ctx = canvas.getContext('2d'); if (!ctx) return null
+  ctx.scale(dpr, dpr)
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H)
+  ctx.textBaseline = 'alphabetic'
+  ctx.fillStyle = '#2f3d2a'; ctx.font = 'bold 15px sans-serif'; ctx.textAlign = 'left'
+  ctx.fillText('Ingresos vs Egresos por mes (pesos)', 16, 24)
+  // leyenda
+  ctx.font = '11px sans-serif'
+  ctx.fillStyle = '#16a34a'; ctx.fillRect(16, 36, 11, 11); ctx.fillStyle = '#555'; ctx.fillText('Ingresos', 32, 45)
+  ctx.fillStyle = '#f43f5e'; ctx.fillRect(104, 36, 11, 11); ctx.fillStyle = '#555'; ctx.fillText('Egresos', 120, 45)
+  const max = Math.max(1, ...data.flatMap((d) => [d.ingresos, d.egresos]))
+  const barMaxW = W - padLeft - padRight
+  const fmt = (n: number) => '$' + Math.round(n).toLocaleString('es-UY')
+  data.forEach((d, i) => {
+    const y = padTop + i * rowH
+    ctx.fillStyle = '#555'; ctx.font = '11px sans-serif'; ctx.textAlign = 'right'
+    ctx.fillText(d.mes, padLeft - 8, y + 13)
+    ctx.textAlign = 'left'
+    const wi = Math.max(0, (d.ingresos / max) * barMaxW)
+    ctx.fillStyle = '#16a34a'; ctx.fillRect(padLeft, y, wi, 11)
+    const we = Math.max(0, (d.egresos / max) * barMaxW)
+    ctx.fillStyle = '#f43f5e'; ctx.fillRect(padLeft, y + 15, we, 11)
+    ctx.fillStyle = '#333'; ctx.font = '10px sans-serif'
+    ctx.fillText(fmt(d.ingresos), padLeft + wi + 5, y + 10)
+    ctx.fillText(fmt(d.egresos), padLeft + we + 5, y + 25)
+  })
+  return { dataUrl: canvas.toDataURL('image/png'), width: W, height: H }
+}
+
 // Hoja "foto" (una sola tabla): Clientes, Stock, etc.
 function addSheet(wb: ExcelJS.Workbook, nombre: string, rows: Record<string, unknown>[], cols: ColSpec[]) {
   const ws = wb.addWorksheet(nombre.slice(0, 31))
@@ -213,6 +253,72 @@ export async function generarBackupExcel(datasets: Set<BackupDataset>): Promise<
     conc: m.conciliado_gasto_id ? `Gasto #${m.conciliado_gasto_id}` : m.conciliado_venta_id ? `Venta #${m.conciliado_venta_id}` : m.conciliado_ingreso_id ? `Ingreso #${m.conciliado_ingreso_id}` : m.conciliado_pago_id ? `Pago #${m.conciliado_pago_id}` : m.es_transferencia_interna ? 'Interna' : 'Sin conciliar',
     interna: m.es_transferencia_interna,
   })
+
+  // --- Hoja "Resumen": estado de resultado por mes (base cobro) + gastos por categoria ---
+  // Siempre se incluye. Mismo criterio que el Estado de Resultados de la app:
+  // ingresos = ventas cobradas (por fecha_cobro) no-distribuidor + cobros a cuenta de
+  // distribuidores + ingresos manuales; egresos = gastos (sin adelantos). En pesos.
+  {
+    const [rv, rg, ri, rp, rcc] = await Promise.all([
+      supabase.from('ventas').select('fecha_cobro,total,cliente_id,moneda,estado,promocion_comercial,a_confirmar').neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
+      supabase.from('gastos').select('fecha,monto,moneda,categoria,es_adelanto').eq('es_adelanto', false),
+      supabase.from('ingresos').select('fecha,monto,moneda'),
+      supabase.from('pagos').select('cliente_id,fecha,monto,moneda'),
+      supabase.from('clientes').select('id,tipo').in('tipo', ['distribuidor', 'mayorista']),
+    ])
+    const distribSet = new Set(((rcc.data ?? []) as Record<string, any>[]).map((c) => c.id as number))
+    const rVentas = (rv.data ?? []) as Record<string, any>[]
+    const rGastos = (rg.data ?? []) as Record<string, any>[]
+    const rIngresos = (ri.data ?? []) as Record<string, any>[]
+    const rPagos = (rp.data ?? []) as Record<string, any>[]
+    const esUYU = (m: string | null | undefined) => (m ?? 'UYU') !== 'USD'
+
+    const mesesR = new Set<string>()
+    for (const v of rVentas) { const k = mesKey(v.fecha_cobro); if (k) mesesR.add(k) }
+    for (const g of rGastos) { const k = mesKey(g.fecha); if (k) mesesR.add(k) }
+    for (const i of rIngresos) { const k = mesKey(i.fecha); if (k) mesesR.add(k) }
+    for (const p of rPagos) { const k = mesKey(p.fecha); if (k) mesesR.add(k) }
+    const mesesRArr = [...mesesR].sort().reverse()
+
+    const resumenRows = mesesRArr.map((k) => {
+      const ventas = rVentas.filter((v) => mesKey(v.fecha_cobro) === k && esUYU(v.moneda) && !(v.cliente_id && distribSet.has(v.cliente_id))).reduce((s, v) => s + Number(v.total || 0), 0)
+      const cobros = rPagos.filter((p) => mesKey(p.fecha) === k && p.cliente_id && distribSet.has(p.cliente_id) && esUYU(p.moneda)).reduce((s, p) => s + Number(p.monto || 0), 0)
+      const otros = rIngresos.filter((i) => mesKey(i.fecha) === k && esUYU(i.moneda)).reduce((s, i) => s + Number(i.monto || 0), 0)
+      const ingresos = ventas + cobros + otros
+      const egresos = rGastos.filter((g) => mesKey(g.fecha) === k && esUYU(g.moneda)).reduce((s, g) => s + Number(g.monto || 0), 0)
+      return { mes: mesLabel(k), ventas, cobros, otros, ingresos, egresos, margen: ingresos - egresos }
+    })
+
+    const catRows: Record<string, unknown>[] = []
+    for (const k of mesesRArr) {
+      const porCat = new Map<string, number>()
+      for (const g of rGastos) { if (mesKey(g.fecha) !== k || !esUYU(g.moneda)) continue; porCat.set(g.categoria, (porCat.get(g.categoria) ?? 0) + Number(g.monto || 0)) }
+      for (const [cat, monto] of [...porCat.entries()].sort((a, b) => b[1] - a[1])) {
+        catRows.push({ mes: mesLabel(k), categoria: catGNombre.get(cat) ?? cat, monto })
+      }
+    }
+
+    if (resumenRows.length > 0) {
+      addSheetMes(wb, 'Resumen', [
+        { titulo: 'RESUMEN MENSUAL (PESOS)', cols: [
+          { header: 'Mes', key: 'mes', width: 16 }, { header: 'Ventas', key: 'ventas', width: 14 },
+          { header: 'Cobros distrib.', key: 'cobros', width: 15 }, { header: 'Otros ingresos', key: 'otros', width: 14 },
+          { header: 'Ingresos', key: 'ingresos', width: 14 }, { header: 'Egresos', key: 'egresos', width: 14 },
+          { header: 'Margen', key: 'margen', width: 14 },
+        ], rows: resumenRows },
+        { titulo: 'GASTOS POR CATEGORIA (PESOS)', cols: [
+          { header: 'Mes', key: 'mes', width: 16 }, { header: 'Categoría', key: 'categoria', width: 28 }, { header: 'Monto', key: 'monto', width: 14 },
+        ], rows: catRows },
+      ])
+      // Grafico incrustado (imagen) a la derecha de las tablas.
+      const chart = renderResumenChart(resumenRows)
+      const ws = wb.getWorksheet('Resumen')
+      if (chart && ws) {
+        const imgId = wb.addImage({ base64: chart.dataUrl.replace(/^data:image\/png;base64,/, ''), extension: 'png' })
+        ws.addImage(imgId, { tl: { col: 8, row: 1 }, ext: { width: chart.width, height: chart.height } })
+      }
+    }
+  }
 
   // --- Armar pestañas por mes ---
   const mesesSet = new Set<string>()
