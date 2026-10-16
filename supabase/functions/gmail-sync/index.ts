@@ -2,7 +2,8 @@
 // Agrupa por thread, lee adjuntos PDF para detectar montos con unpdf + fallback basico.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7'
-import { getDocumentProxy, extractText as unpdfExtract } from 'https://esm.sh/unpdf@0.12.1'
+// NOTA: no usamos unpdf/pdfjs: es demasiado pesado para el runtime de edge functions
+// (agota CPU/memoria -> WORKER_RESOURCE_LIMIT). Usamos solo el extractor basico de abajo.
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!
@@ -12,7 +13,7 @@ const CLIENT_SECRET = Deno.env.get('GMAIL_CLIENT_SECRET')!
 const ENC_KEY = Deno.env.get('GMAIL_ENCRYPTION_KEY')!
 
 const DIAS_PRIMERA_SYNC = 30
-const MAX_MENSAJES = 100
+const MAX_MENSAJES = 60
 
 const GMAIL_QUERY_FILTER = [
   'from:dgi.gub.uy',
@@ -227,14 +228,7 @@ async function downloadAdjunto(accessToken: string, msgId: string, attId: string
 // ---- PDF: extraccion con unpdf (pdfjs) + fallback basico ----
 
 async function extraerTextoPdf(data: Uint8Array): Promise<string> {
-  // unpdf: parser completo basado en pdfjs-dist
-  try {
-    const pdf = await getDocumentProxy(new Uint8Array(data))
-    const { text } = await unpdfExtract(pdf, { mergePages: true })
-    if (text && text.trim().length > 10) return text
-  } catch {
-    // Si unpdf falla, intentar extraccion basica
-  }
+  // Solo extraccion basica (liviana): evita el parser pesado que agota el worker.
   return extraerTextoPdfBasico(data)
 }
 
@@ -331,8 +325,8 @@ async function extraerTextoAdjuntos(
         n.endsWith('.html') || n.endsWith('.htm')
       )
     })
-    .filter((a) => a.size < 5_000_000)
-    .slice(0, 3)
+    .filter((a) => a.size < 2_000_000)
+    .slice(0, 2)
 
   const textos: string[] = []
   for (const att of relevantes) {
