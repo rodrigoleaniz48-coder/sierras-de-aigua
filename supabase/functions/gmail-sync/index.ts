@@ -13,7 +13,7 @@ const CLIENT_SECRET = Deno.env.get('GMAIL_CLIENT_SECRET')!
 const ENC_KEY = Deno.env.get('GMAIL_ENCRYPTION_KEY')!
 
 const DIAS_PRIMERA_SYNC = 30
-const MAX_MENSAJES = 60
+const MAX_MENSAJES = 40
 
 const GMAIL_QUERY_FILTER = [
   'from:dgi.gub.uy',
@@ -243,27 +243,36 @@ function decodePdfStr(s: string): string {
   })
 }
 
+// Extrae operadores de texto PDF (Tj / TJ) de un fragmento. Acotado para no agotar
+// el worker: input limitado, cuantificadores limitados (anti-backtracking) y tope de salida.
+const MAX_OPS = 4000
 function extraerOpsTexto(stream: string, out: string[]) {
+  if (out.length >= MAX_OPS) return
+  const s = stream.length > 150_000 ? stream.slice(0, 150_000) : stream
   let match
-  const tjRe = /\(([^)]*)\)\s*Tj/g
-  while ((match = tjRe.exec(stream)) !== null) {
+  const tjRe = /\(([^)]{0,500}?)\)\s*Tj/g
+  while ((match = tjRe.exec(s)) !== null) {
     const t = decodePdfStr(match[1])
     if (t.trim()) out.push(t)
+    if (out.length >= MAX_OPS) return
   }
-  const tjArrRe = /\[((?:\([^)]*\)|[^[\]])*)\]\s*TJ/gi
-  while ((match = tjArrRe.exec(stream)) !== null) {
-    const parts = [...match[1].matchAll(/\(([^)]*)\)/g)]
+  const tjArrRe = /\[((?:\([^)]{0,500}\)|[^[\]]){0,2000})\]\s*TJ/gi
+  while ((match = tjArrRe.exec(s)) !== null) {
+    const parts = [...match[1].matchAll(/\(([^)]{0,500})\)/g)]
     const combined = parts.map((p) => decodePdfStr(p[1])).join('')
     if (combined.trim()) out.push(combined)
+    if (out.length >= MAX_OPS) return
   }
 }
 
 async function extraerTextoPdfBasico(data: Uint8Array): Promise<string> {
+  // PDF muy grande: no arriesgar el worker (WORKER_RESOURCE_LIMIT).
+  if (data.length > 1_500_000) return ''
   const raw = new TextDecoder('latin1').decode(data)
   const textos: string[] = []
 
-  let pos = 0
-  while (pos < raw.length) {
+  let pos = 0, streams = 0
+  while (pos < raw.length && streams < 30 && textos.length < MAX_OPS) {
     const idx = raw.indexOf('stream', pos)
     if (idx === -1) break
     let start = idx + 6
@@ -271,8 +280,11 @@ async function extraerTextoPdfBasico(data: Uint8Array): Promise<string> {
     if (raw[start] === '\n') start++
     const end = raw.indexOf('endstream', start)
     if (end === -1) break
+    streams++
 
     const content = raw.substring(start, end)
+    // Streams grandes (imagenes/fuentes) no son texto: saltarlos para no gastar CPU/memoria.
+    if (content.length > 400_000) { pos = end + 9; continue }
     const bytes = new Uint8Array(content.length)
     for (let i = 0; i < content.length; i++) bytes[i] = content.charCodeAt(i)
 
@@ -285,10 +297,11 @@ async function extraerTextoPdfBasico(data: Uint8Array): Promise<string> {
         w.close().catch(() => {})
         const r = ds.readable.getReader()
         const chunks: Uint8Array[] = []
+        let acc = 0
         while (true) {
           const { value, done } = await r.read()
           if (done) break
-          if (value) chunks.push(value)
+          if (value) { chunks.push(value); acc += value.length; if (acc > 600_000) break }
         }
         const total = chunks.reduce((a, c) => a + c.length, 0)
         const merged = new Uint8Array(total)
@@ -303,8 +316,9 @@ async function extraerTextoPdfBasico(data: Uint8Array): Promise<string> {
     pos = end + 9
   }
 
-  extraerOpsTexto(raw, textos)
-  return textos.join(' ').replace(/\s+/g, ' ').trim()
+  // Si no se obtuvo texto de streams, escanear solo el inicio del raw (acotado).
+  if (textos.length < 50) extraerOpsTexto(raw.slice(0, 300_000), textos)
+  return textos.join(' ').replace(/\s+/g, ' ').trim().slice(0, 20_000)
 }
 
 // ---- Extraer texto de adjuntos ----
@@ -325,8 +339,8 @@ async function extraerTextoAdjuntos(
         n.endsWith('.html') || n.endsWith('.htm')
       )
     })
-    .filter((a) => a.size < 2_000_000)
-    .slice(0, 2)
+    .filter((a) => a.size < 1_200_000)
+    .slice(0, 1)
 
   const textos: string[] = []
   for (const att of relevantes) {
@@ -506,8 +520,8 @@ async function listarYProcesar(
 
   // Fetch full messages en lotes de 5
   const allRows: CorreoRow[] = []
-  for (let i = 0; i < allIds.length; i += 5) {
-    const batch = allIds.slice(i, i + 5)
+  for (let i = 0; i < allIds.length; i += 3) {
+    const batch = allIds.slice(i, i + 3)
     const results = await Promise.all(
       batch.map((id) =>
         gmailGet(accessToken, `messages/${id}?format=full`) as Promise<GmailMessage>,
