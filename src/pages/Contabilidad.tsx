@@ -648,41 +648,51 @@ function EstadoResultados() {
   const margenUYU = totalIngresosUYU - gastosUYU
   const margenUSD = totalIngresosUSD - gastosUSD
 
-  // --- Analisis de sostenibilidad (en pesos): separar negocio / paralelos / no operativo ---
+  // --- Analisis de sostenibilidad: separar negocio / paralelos / no operativo (pesos y dolares) ---
+  type Par = { uyu: number; usd: number }
   const grupoIngreso = (categoriaId: number | null): 'negocio' | 'paralelo' | 'extra' => {
     const slug = categoriaId != null ? catIng.get(categoriaId)?.slug : undefined
     if (slug && INGRESO_NEGOCIO_SLUGS.has(slug)) return 'negocio'
     if (slug && INGRESO_EXTRA_SLUGS.has(slug)) return 'extra'
     return 'paralelo'
   }
-  let ingNegocioManUYU = 0, ingExtraUYU = 0
-  const paraleloPorCat = new Map<string, number>()
-  const extraPorCat = new Map<string, number>()
+  let ingNegocioManUYU = 0, ingNegocioManUSD = 0
+  const paraleloPorCat = new Map<string, Par>()
+  const extraPorCat = new Map<string, Par>()
   for (const i of ingresos) {
-    if (i.moneda !== 'UYU') continue
+    const usd = i.moneda === 'USD'
     const monto = Number(i.monto)
     const nom = (i.categoria_id != null ? catIng.get(i.categoria_id)?.nombre : null) ?? 'Otros'
     const g = grupoIngreso(i.categoria_id)
-    if (g === 'negocio') ingNegocioManUYU += monto
-    else if (g === 'extra') { ingExtraUYU += monto; extraPorCat.set(nom, (extraPorCat.get(nom) ?? 0) + monto) }
-    else { paraleloPorCat.set(nom, (paraleloPorCat.get(nom) ?? 0) + monto) }
+    if (g === 'negocio') { if (usd) ingNegocioManUSD += monto; else ingNegocioManUYU += monto; continue }
+    const map = g === 'extra' ? extraPorCat : paraleloPorCat
+    const cur = map.get(nom) ?? { uyu: 0, usd: 0 }
+    if (usd) cur.usd += monto; else cur.uyu += monto
+    map.set(nom, cur)
   }
   // Negocio (productos) = ventas minoristas + cobros a cuenta de distribuidores + ingresos de categoria producto.
-  const negocioVentasUYU = ventasUYU
-  const negocioDistribUYU = pagosCCUYU
+  const negocioVentasUYU = ventasUYU, negocioVentasUSD = ventasUSD
+  const negocioDistribUYU = pagosCCUYU, negocioDistribUSD = pagosCCUSD
   const ingNegocioUYU = negocioVentasUYU + negocioDistribUYU + ingNegocioManUYU
-  const ingParaleloUYU = [...paraleloPorCat.values()].reduce((s, v) => s + v, 0)
+  const ingNegocioUSD = negocioVentasUSD + negocioDistribUSD + ingNegocioManUSD
+  const sum = (m: Map<string, Par>, k: 'uyu' | 'usd') => [...m.values()].reduce((s, v) => s + v[k], 0)
+  const ingParaleloUYU = sum(paraleloPorCat, 'uyu'), ingParaleloUSD = sum(paraleloPorCat, 'usd')
+  const ingExtraUYU = sum(extraPorCat, 'uyu'), ingExtraUSD = sum(extraPorCat, 'usd')
   // Egresos: operativos vs inversiones (capex).
-  let egCapexUYU = 0, egOpexUYU = 0
+  let egCapexUYU = 0, egCapexUSD = 0, egOpexUYU = 0, egOpexUSD = 0
   for (const g of gastos) {
-    if (g.moneda !== 'UYU') continue
-    if (GASTO_CAPEX_SLUGS.has(g.categoria)) egCapexUYU += Number(g.monto); else egOpexUYU += Number(g.monto)
+    const usd = g.moneda === 'USD', m = Number(g.monto), capex = GASTO_CAPEX_SLUGS.has(g.categoria)
+    if (capex) { if (usd) egCapexUSD += m; else egCapexUYU += m } else { if (usd) egOpexUSD += m; else egOpexUYU += m }
   }
-  const ingOperativoUYU = ingNegocioUYU + ingParaleloUYU
+  const ingOperativoUYU = ingNegocioUYU + ingParaleloUYU, ingOperativoUSD = ingNegocioUSD + ingParaleloUSD
   const resultadoOperativoUYU = ingOperativoUYU - egOpexUYU
-  const hayNoOperativo = ingExtraUYU > 0 || egCapexUYU > 0
-  const paraleloArr = [...paraleloPorCat.entries()].sort((a, b) => b[1] - a[1])
-  const extraArr = [...extraPorCat.entries()].sort((a, b) => b[1] - a[1])
+  const resultadoOperativoUSD = ingOperativoUSD - egOpexUSD
+  const hayNoOperativo = ingExtraUYU > 0 || ingExtraUSD > 0 || egCapexUYU > 0 || egCapexUSD > 0
+  const analisisUSD = ingNegocioUSD !== 0 || ingParaleloUSD !== 0 || ingExtraUSD !== 0 || egOpexUSD !== 0 || egCapexUSD !== 0
+  const paraleloArr = [...paraleloPorCat.entries()].sort((a, b) => (b[1].uyu + b[1].usd) - (a[1].uyu + a[1].usd))
+  const extraArr = [...extraPorCat.entries()].sort((a, b) => (b[1].uyu + b[1].usd) - (a[1].uyu + a[1].usd))
+  // Muestra "$pesos", "US$dolares" o "$pesos · US$dolares" segun corresponda.
+  const parMonto = (uyu: number, usd: number) => usd !== 0 && uyu === 0 ? money(usd, 'USD') : usd !== 0 ? `${money(uyu)} · ${money(usd, 'USD')}` : money(uyu)
 
   // Egresos por categoría (UYU + USD separados)
   const porCatUYU = new Map<string, number>()
@@ -831,37 +841,38 @@ function EstadoResultados() {
             </div>
           )}
 
-          {/* Analisis operativo / sostenibilidad (pesos) */}
+          {/* Analisis operativo / sostenibilidad (pesos y dolares) */}
           <div className="card p-5 space-y-4">
-            <div className="text-xs uppercase tracking-wide text-oliva-600">¿Se sostiene? · Análisis operativo (pesos)</div>
+            <div className="text-xs uppercase tracking-wide text-oliva-600">¿Se sostiene? · Análisis operativo{analisisUSD ? ' (pesos y dólares)' : ' (pesos)'}</div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               {/* Ingresos operativos */}
               <div className="space-y-1.5">
                 <div className="text-[11px] uppercase tracking-wide text-oliva-500">Ingresos operativos</div>
-                <div className="flex justify-between text-sm"><span className="text-oliva-800">🫒 Negocio (aceite/productos)</span><b className="tabular-nums">{money(ingNegocioUYU)}</b></div>
+                <div className="flex justify-between gap-3 text-sm"><span className="text-oliva-800">🫒 Negocio (aceite/productos)</span><b className="tabular-nums text-right">{parMonto(ingNegocioUYU, ingNegocioUSD)}</b></div>
                 <div className="pl-4 text-xs text-oliva-600 space-y-0.5">
-                  <div className="flex justify-between"><span>Ventas directas</span><span className="tabular-nums">{money(negocioVentasUYU)}</span></div>
-                  {negocioDistribUYU > 0 && <div className="flex justify-between"><span>Cobros a distribuidores</span><span className="tabular-nums">{money(negocioDistribUYU)}</span></div>}
-                  {ingNegocioManUYU > 0 && <div className="flex justify-between"><span>Ingresos cargados (producto)</span><span className="tabular-nums">{money(ingNegocioManUYU)}</span></div>}
+                  <div className="flex justify-between gap-3"><span>Ventas directas</span><span className="tabular-nums text-right">{parMonto(negocioVentasUYU, negocioVentasUSD)}</span></div>
+                  {(negocioDistribUYU > 0 || negocioDistribUSD > 0) && <div className="flex justify-between gap-3"><span>Cobros a distribuidores</span><span className="tabular-nums text-right">{parMonto(negocioDistribUYU, negocioDistribUSD)}</span></div>}
+                  {(ingNegocioManUYU > 0 || ingNegocioManUSD > 0) && <div className="flex justify-between gap-3"><span>Ingresos cargados (producto)</span><span className="tabular-nums text-right">{parMonto(ingNegocioManUYU, ingNegocioManUSD)}</span></div>}
                 </div>
-                <div className="flex justify-between text-sm pt-1"><span className="text-oliva-800">🌾 Paralelos (campo/otros)</span><b className="tabular-nums">{money(ingParaleloUYU)}</b></div>
+                <div className="flex justify-between gap-3 text-sm pt-1"><span className="text-oliva-800">🌾 Paralelos (campo/otros)</span><b className="tabular-nums text-right">{parMonto(ingParaleloUYU, ingParaleloUSD)}</b></div>
                 {paraleloArr.length > 0 && (
                   <div className="pl-4 text-xs text-oliva-600 space-y-0.5">
                     {paraleloArr.map(([nom, val]) => (
-                      <div key={nom} className="flex justify-between"><span>{nom}</span><span className="tabular-nums">{money(val)}</span></div>
+                      <div key={nom} className="flex justify-between gap-3"><span>{nom}</span><span className="tabular-nums text-right">{parMonto(val.uyu, val.usd)}</span></div>
                     ))}
                   </div>
                 )}
-                <div className="flex justify-between text-sm pt-1.5 border-t border-oliva-100"><span className="font-medium text-oliva-800">Total ingresos operativos</span><b className="tabular-nums">{money(ingOperativoUYU)}</b></div>
+                <div className="flex justify-between gap-3 text-sm pt-1.5 border-t border-oliva-100"><span className="font-medium text-oliva-800">Total ingresos operativos</span><b className="tabular-nums text-right">{parMonto(ingOperativoUYU, ingOperativoUSD)}</b></div>
               </div>
               {/* Egresos operativos + resultado */}
               <div className="space-y-1.5">
                 <div className="text-[11px] uppercase tracking-wide text-oliva-500">Egresos operativos</div>
-                <div className="flex justify-between text-sm"><span className="text-oliva-800">Gastos operativos</span><b className="tabular-nums">{money(egOpexUYU)}</b></div>
+                <div className="flex justify-between gap-3 text-sm"><span className="text-oliva-800">Gastos operativos</span><b className="tabular-nums text-right">{parMonto(egOpexUYU, egOpexUSD)}</b></div>
                 <div className="text-[11px] text-oliva-500">No incluye inversiones (se muestran abajo).</div>
                 <div className={`mt-2 rounded-lg p-3 ${resultadoOperativoUYU >= 0 ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
                   <div className="text-[11px] uppercase tracking-wide text-oliva-600">Resultado operativo</div>
                   <div className={`text-2xl font-semibold tabular-nums ${resultadoOperativoUYU >= 0 ? 'text-green-700' : 'text-red-700'}`}>{money(resultadoOperativoUYU)}</div>
+                  {analisisUSD && <div className={`text-sm font-semibold tabular-nums ${resultadoOperativoUSD >= 0 ? 'text-green-700' : 'text-red-700'}`}>{money(resultadoOperativoUSD, 'USD')}</div>}
                   <div className="text-[11px] text-oliva-600">{resultadoOperativoUYU >= 0 ? 'Ingresos operativos cubren el gasto operativo.' : 'El gasto operativo supera a los ingresos operativos.'}</div>
                 </div>
               </div>
@@ -870,10 +881,10 @@ function EstadoResultados() {
               <div className="rounded-lg border border-oliva-100 bg-oliva-50/50 p-3 text-xs text-oliva-700 space-y-1">
                 <div className="text-[11px] uppercase tracking-wide text-oliva-500">No operativo (no cuenta para la sostenibilidad)</div>
                 {extraArr.map(([nom, val]) => (
-                  <div key={nom} className="flex justify-between"><span>+ {nom}</span><span className="tabular-nums">{money(val)}</span></div>
+                  <div key={nom} className="flex justify-between gap-3"><span>+ {nom}</span><span className="tabular-nums text-right">{parMonto(val.uyu, val.usd)}</span></div>
                 ))}
-                {egCapexUYU > 0 && <div className="flex justify-between"><span>− Inversiones (capex)</span><span className="tabular-nums">{money(egCapexUYU)}</span></div>}
-                <div className="flex justify-between pt-1 border-t border-oliva-100"><span className="font-medium">Resultado neto del mes (incluye todo)</span><b className={`tabular-nums ${margenUYU >= 0 ? 'text-green-700' : 'text-red-700'}`}>{money(margenUYU)}</b></div>
+                {(egCapexUYU > 0 || egCapexUSD > 0) && <div className="flex justify-between gap-3"><span>− Inversiones (capex)</span><span className="tabular-nums text-right">{parMonto(egCapexUYU, egCapexUSD)}</span></div>}
+                <div className="flex justify-between gap-3 pt-1 border-t border-oliva-100"><span className="font-medium">Resultado neto del mes (incluye todo)</span><b className="tabular-nums text-right text-oliva-900">{parMonto(margenUYU, margenUSD)}</b></div>
               </div>
             )}
           </div>
