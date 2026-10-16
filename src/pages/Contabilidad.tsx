@@ -660,6 +660,14 @@ function EstadoResultados() {
     { label: 'Cobros a cuenta (distrib.)', valor: pagosCCUYU },
     { label: 'Otros ingresos', valor: ingresosManUYU },
   ].filter((f) => f.valor > 0)
+  // Mismo resumen visual en dólares (solo si hay movimiento en USD).
+  const maxIEUsd = Math.max(totalIngresosUSD, gastosUSD, 1)
+  const ingresoFuentesUsd = [
+    { label: 'Ventas', valor: ventasUSD },
+    { label: 'Cobros a cuenta (distrib.)', valor: pagosCCUSD },
+    { label: 'Otros ingresos', valor: ingresosManUSD },
+  ].filter((f) => f.valor > 0)
+  const hayUSD = totalIngresosUSD > 0 || gastosUSD > 0
 
   return (
     <div className="space-y-4">
@@ -759,6 +767,30 @@ function EstadoResultados() {
               <div className="text-[11px] uppercase tracking-wide text-oliva-500">Ingresos por fuente</div>
               {ingresoFuentes.map((f) => (
                 <FilaBarra key={f.label} label={f.label} valor={f.valor} max={totalIngresosUYU} clase="bg-green-500" />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {!cargando && hayUSD && (
+        <div className="card p-4 space-y-5">
+          <div className="text-xs uppercase tracking-wide text-oliva-600">Resumen visual del mes (dólares)</div>
+          {/* Ingresos vs Egresos + resultado */}
+          <div className="space-y-2">
+            <FilaBarra label="Ingresos" valor={totalIngresosUSD} max={maxIEUsd} clase="bg-green-600" moneda="USD" />
+            <FilaBarra label="Egresos" valor={gastosUSD} max={maxIEUsd} clase="bg-rose-500" moneda="USD" />
+            <div className="flex justify-between text-sm pt-2 border-t border-oliva-100">
+              <span className="text-oliva-800 font-medium">Resultado (margen)</span>
+              <span className={`tabular-nums font-semibold ${margenUSD >= 0 ? 'text-green-700' : 'text-red-700'}`}>{money(margenUSD, 'USD')}</span>
+            </div>
+          </div>
+          {/* Ingresos por fuente */}
+          {ingresoFuentesUsd.length > 0 && (
+            <div className="space-y-1.5">
+              <div className="text-[11px] uppercase tracking-wide text-oliva-500">Ingresos por fuente</div>
+              {ingresoFuentesUsd.map((f) => (
+                <FilaBarra key={f.label} label={f.label} valor={f.valor} max={totalIngresosUSD} clase="bg-green-500" moneda="USD" />
               ))}
             </div>
           )}
