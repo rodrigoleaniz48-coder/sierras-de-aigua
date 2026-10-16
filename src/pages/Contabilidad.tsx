@@ -1793,7 +1793,6 @@ export function CuentasCorrientes() {
     window.open(wa ? `https://wa.me/${wa}?text=${texto}` : `https://wa.me/?text=${texto}`, '_blank')
   }
 
-  const selData = sel ? filas.find((f) => f.c.id === sel) : null
   const ledger = useMemo(() => {
     type L = { fecha: string; tipo: 'inicial' | 'venta' | 'pago'; detalle: string; debe: number; haber: number; moneda: string }
     if (!sel) return [] as L[]
@@ -1837,76 +1836,80 @@ export function CuentasCorrientes() {
               {filas.map((f) => {
                 const fEnt = ultimaEntrega.get(f.c.id)
                 const debe = f.saldoUYU > 0.01 || f.saldoUSD > 0.01
-                return (
-                <tr key={f.c.id} className={`border-b border-oliva-100/70 last:border-0 ${sel === f.c.id ? 'bg-oliva-50/60' : ''}`}>
+                const abierto = sel === f.c.id
+                const nCols = hayUSD ? 5 : 4
+                return [
+                <tr
+                  key={f.c.id}
+                  className={`border-b border-oliva-100/70 last:border-0 cursor-pointer hover:bg-oliva-50/60 ${abierto ? 'bg-oliva-50/60' : ''}`}
+                  onClick={() => setSel(abierto ? null : f.c.id)}
+                >
                   <td className="py-2 px-3 text-oliva-900">
+                    <span className="text-oliva-400 mr-1">{abierto ? '▾' : '▸'}</span>
                     {f.c.nombre}
                     <span className="text-[10px] uppercase tracking-wide text-aceite-600 ml-1.5">{f.c.tipo}</span>
-                    {(f.iniUYU !== 0 || f.iniUSD !== 0) && <span className="block text-[10px] text-oliva-500">inicial {money(f.iniUYU)}{f.iniUSD !== 0 ? ` · ${money(f.iniUSD, 'USD')}` : ''}{f.c.saldo_inicial_fecha ? ` (${f.c.saldo_inicial_fecha})` : ''}</span>}
+                    {(f.iniUYU !== 0 || f.iniUSD !== 0) && <span className="block text-[10px] text-oliva-500 pl-4">inicial {money(f.iniUYU)}{f.iniUSD !== 0 ? ` · ${money(f.iniUSD, 'USD')}` : ''}{f.c.saldo_inicial_fecha ? ` (${f.c.saldo_inicial_fecha})` : ''}</span>}
                   </td>
                   <td className={`py-2 px-3 text-right tabular-nums font-semibold ${f.saldoUYU > 0.01 ? 'text-red-700' : f.saldoUYU < -0.01 ? 'text-green-700' : 'text-oliva-500'}`}>{money(f.saldoUYU)}</td>
                   {hayUSD && <td className={`py-2 px-3 text-right tabular-nums font-semibold ${f.saldoUSD > 0.01 ? 'text-red-700' : f.saldoUSD < -0.01 ? 'text-green-700' : 'text-oliva-400'}`}>{Math.abs(f.saldoUSD) > 0.01 ? money(f.saldoUSD, 'USD') : '—'}</td>}
                   <td className="py-2 px-3 text-right tabular-nums text-oliva-600 whitespace-nowrap">{fEnt ?? '—'}</td>
                   <td className="py-2 px-3 text-right whitespace-nowrap">
                     <div className="flex gap-2 justify-end items-center">
-                      <button className="text-xs rounded-md bg-oliva-800 hover:bg-oliva-900 text-oliva-50 px-2 py-0.5 font-medium" title="Registrar un pago a cuenta" onClick={() => setPagarCliente(f.c)}>+ Pago</button>
+                      <button className="text-xs rounded-md bg-oliva-800 hover:bg-oliva-900 text-oliva-50 px-2 py-0.5 font-medium" title="Registrar un pago a cuenta" onClick={(e) => { e.stopPropagation(); setPagarCliente(f.c) }}>+ Pago</button>
                       {debe && (
-                        <button className="text-xs rounded-md bg-green-600 hover:bg-green-700 text-white px-2 py-0.5 font-medium" title="Recordar saldo por WhatsApp" onClick={() => recordar(f.c, f.saldoUYU, f.saldoUSD)}>Recordar</button>
+                        <button className="text-xs rounded-md bg-green-600 hover:bg-green-700 text-white px-2 py-0.5 font-medium" title="Recordar saldo por WhatsApp" onClick={(e) => { e.stopPropagation(); recordar(f.c, f.saldoUYU, f.saldoUSD) }}>Recordar</button>
                       )}
-                      <button className="text-xs text-oliva-700 underline" onClick={() => setSel(sel === f.c.id ? null : f.c.id)}>{sel === f.c.id ? 'ocultar' : 'ver'}</button>
+                    </div>
+                  </td>
+                </tr>,
+                abierto ? (
+                <tr key={f.c.id + '-exp'} className="bg-oliva-50/40 border-b border-oliva-100">
+                  <td colSpan={nCols} className="p-0">
+                    <div className="px-4 py-2.5 flex items-center justify-between gap-2 flex-wrap border-b border-oliva-100">
+                      <button className="text-xs text-oliva-700 underline" onClick={(e) => { e.stopPropagation(); setEditSaldo(f.c) }}>Editar saldo inicial</button>
+                      <span className="text-sm font-semibold tabular-nums">
+                        <span className={f.saldoUYU > 0.01 ? 'text-red-700' : f.saldoUYU < -0.01 ? 'text-green-700' : 'text-oliva-500'}>Saldo {money(f.saldoUYU)}</span>
+                        {Math.abs(f.saldoUSD) > 0.01 && <span className={`ml-2 ${f.saldoUSD > 0.01 ? 'text-red-700' : 'text-green-700'}`}>· {money(f.saldoUSD, 'USD')}</span>}
+                      </span>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-left text-xs uppercase tracking-wide text-oliva-600 border-b border-oliva-100">
+                            <th className="py-2 px-3">Fecha</th>
+                            <th className="py-2 px-3">Detalle</th>
+                            <th className="py-2 px-3 text-right">Debe</th>
+                            <th className="py-2 px-3 text-right">Haber</th>
+                            <th className="py-2 px-3 text-right">Saldo</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(() => {
+                            let runUYU = 0, runUSD = 0
+                            return ledger.map((l, i) => {
+                              const esUSD = l.moneda === 'USD'
+                              if (esUSD) runUSD += l.debe - l.haber; else runUYU += l.debe - l.haber
+                              return (
+                                <tr key={i} className="border-b border-oliva-100/70 last:border-0">
+                                  <td className="py-1.5 px-3 tabular-nums text-oliva-600 whitespace-nowrap">{l.fecha}</td>
+                                  <td className="py-1.5 px-3 text-oliva-800">{l.tipo === 'pago' ? '💵 ' : l.tipo === 'inicial' ? '⚖️ ' : '🧾 '}{l.detalle}{esUSD ? ' (USD)' : ''}</td>
+                                  <td className="py-1.5 px-3 text-right tabular-nums text-oliva-700">{l.debe > 0 ? money(l.debe, esUSD ? 'USD' : 'UYU') : ''}</td>
+                                  <td className="py-1.5 px-3 text-right tabular-nums text-green-700">{l.haber > 0 ? money(l.haber, esUSD ? 'USD' : 'UYU') : ''}</td>
+                                  <td className="py-1.5 px-3 text-right tabular-nums font-medium text-oliva-900">{money(esUSD ? runUSD : runUYU, esUSD ? 'USD' : 'UYU')}</td>
+                                </tr>
+                              )
+                            })
+                          })()}
+                        </tbody>
+                      </table>
                     </div>
                   </td>
                 </tr>
-                )
+                ) : null,
+                ]
               })}
             </tbody>
           </table>
-        </div>
-      )}
-
-      {selData && (
-        <div className="card p-0 overflow-hidden">
-          <div className="px-4 py-3 border-b border-oliva-100 bg-oliva-50 flex items-center justify-between gap-2 flex-wrap">
-            <div className="flex items-center gap-3">
-              <span className="text-sm font-semibold text-oliva-900">Estado de cuenta · {selData.c.nombre}</span>
-              <button className="text-xs text-oliva-700 underline" onClick={() => setEditSaldo(selData.c)}>Editar saldo inicial</button>
-            </div>
-            <span className="text-sm font-semibold tabular-nums">
-              <span className={selData.saldoUYU > 0.01 ? 'text-red-700' : selData.saldoUYU < -0.01 ? 'text-green-700' : 'text-oliva-500'}>Saldo {money(selData.saldoUYU)}</span>
-              {Math.abs(selData.saldoUSD) > 0.01 && <span className={`ml-2 ${selData.saldoUSD > 0.01 ? 'text-red-700' : 'text-green-700'}`}>· {money(selData.saldoUSD, 'USD')}</span>}
-            </span>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[520px]">
-              <thead>
-                <tr className="text-left text-xs uppercase tracking-wide text-oliva-600 border-b border-oliva-100">
-                  <th className="py-2 px-3">Fecha</th>
-                  <th className="py-2 px-3">Detalle</th>
-                  <th className="py-2 px-3 text-right">Debe</th>
-                  <th className="py-2 px-3 text-right">Haber</th>
-                  <th className="py-2 px-3 text-right">Saldo</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(() => {
-                  let runUYU = 0, runUSD = 0
-                  return ledger.map((l, i) => {
-                    const esUSD = l.moneda === 'USD'
-                    if (esUSD) runUSD += l.debe - l.haber; else runUYU += l.debe - l.haber
-                    return (
-                      <tr key={i} className="border-b border-oliva-100/70 last:border-0">
-                        <td className="py-1.5 px-3 tabular-nums text-oliva-600 whitespace-nowrap">{l.fecha}</td>
-                        <td className="py-1.5 px-3 text-oliva-800">{l.tipo === 'pago' ? '💵 ' : l.tipo === 'inicial' ? '⚖️ ' : '🧾 '}{l.detalle}{esUSD ? ' (USD)' : ''}</td>
-                        <td className="py-1.5 px-3 text-right tabular-nums text-oliva-700">{l.debe > 0 ? money(l.debe, esUSD ? 'USD' : 'UYU') : ''}</td>
-                        <td className="py-1.5 px-3 text-right tabular-nums text-green-700">{l.haber > 0 ? money(l.haber, esUSD ? 'USD' : 'UYU') : ''}</td>
-                        <td className="py-1.5 px-3 text-right tabular-nums font-medium text-oliva-900">{money(esUSD ? runUSD : runUYU, esUSD ? 'USD' : 'UYU')}</td>
-                      </tr>
-                    )
-                  })
-                })()}
-              </tbody>
-            </table>
-          </div>
         </div>
       )}
 
