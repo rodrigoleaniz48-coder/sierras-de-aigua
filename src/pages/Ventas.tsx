@@ -481,6 +481,7 @@ function TablaVentas({
     <table className="w-full text-sm min-w-[860px]">
       <thead>
         <tr className="text-left text-xs uppercase tracking-wide text-oliva-600 border-b border-oliva-100 bg-oliva-50">
+          <th className="py-2 px-4">#</th>
           <th className="py-2 px-4">Fecha</th>
           <th className="py-2 px-4">Cliente</th>
           <th className="py-2 px-4">Socio</th>
@@ -500,6 +501,7 @@ function TablaVentas({
             className="border-b border-oliva-100/70 last:border-0 hover:bg-oliva-50/60 cursor-pointer"
             onClick={() => onClic(v)}
           >
+            <td className="py-2 px-4 tabular-nums text-oliva-500 text-xs">#{v.id}</td>
             <td className="py-2 px-4 tabular-nums text-oliva-700">{v.fecha}</td>
             <td className="py-2 px-4 text-oliva-900">
               <div className="flex items-center gap-2">
