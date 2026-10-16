@@ -18,6 +18,7 @@ interface Presentacion {
   es_pack: boolean
   moneda_default?: 'UYU' | 'USD' | null
   costo_envasado?: number | null
+  costo_envasado_usd?: number | null
 }
 interface Componente { presentacion_pack_id: number; presentacion_componente_id: number; unidades: number }
 interface StockRow { id: number; tanque_id: number | null; presentacion_id: number; unidades: number; ubicacion_id: number }
@@ -816,7 +817,7 @@ function NuevaVentaDialog({
     setDatosCargados(false)
     Promise.all([
       supabase.from('productos').select('id,nombre,categoria'),
-      supabase.from('presentaciones').select('id,producto_id,nombre,volumen_ml,precio_minorista,precio_mayorista,iva_pct,activo,es_pack,moneda_default,costo_envasado').eq('activo', true),
+      supabase.from('presentaciones').select('id,producto_id,nombre,volumen_ml,precio_minorista,precio_mayorista,iva_pct,activo,es_pack,moneda_default,costo_envasado,costo_envasado_usd').eq('activo', true),
       supabase.from('stock').select('id,tanque_id,presentacion_id,unidades,ubicacion_id').gt('unidades', 0),
       supabase.from('presentacion_componente').select('*'),
       supabase.from('tanques').select('id,nombre,producto_id,variedad_libre,campana,litros_actuales,activo').eq('activo', true).order('id'),
@@ -1251,19 +1252,34 @@ async function guardar(e: React.FormEvent) {
         const { fetchCotizacionBCU } = await import('../lib/bcu')
         const cotBcu = await fetchCotizacionBCU()
         const tipoCambio = cotBcu?.cotizacion ?? 42
+        // Costo real de una presentacion = envasado propio + aceite proporcional (si el producto
+        // es aceite) + costo de sus componentes (recursivo, para packs). Mismo criterio que la
+        // tabla de margenes de Admin: un pack suma la caja + cada botella con su aceite.
+        const presPorIdCosto = new Map(presentaciones.map((p) => [p.id, p]))
+        const costoEnvasadoUyu = (pres: Presentacion): number =>
+          pres.costo_envasado_usd != null && Number(pres.costo_envasado_usd) > 0
+            ? Number(pres.costo_envasado_usd) * tipoCambio
+            : Number(pres.costo_envasado ?? 0)
+        const costoUnitPres = (pres: Presentacion, visto = new Set<number>()): number => {
+          if (visto.has(pres.id)) return 0 // guarda contra ciclos
+          visto.add(pres.id)
+          const prod = prodPorId.get(pres.producto_id)
+          let c = costoEnvasadoUyu(pres)
+          if (prod?.categoria === 'aceite') c += costoAceiteUsdL * tipoCambio * ((pres.volumen_ml ?? 0) / 1000)
+          if (pres.es_pack) {
+            for (const cp of componentes.filter((x) => x.presentacion_pack_id === pres.id)) {
+              const comp = presPorIdCosto.get(cp.presentacion_componente_id)
+              if (comp) c += costoUnitPres(comp, visto) * Number(cp.unidades)
+            }
+          }
+          return c
+        }
         let montoPromo = 0
         const detalle: string[] = []
         for (const f of itemsPromo) {
           if (!f.p) continue
           const prod = prodPorId.get(f.p.producto_id)
-          const costoEnvasado = Number(f.p.costo_envasado ?? 0)
-          let costoUnit = costoEnvasado
-          if (prod?.categoria === 'aceite') {
-            const litros = (f.p.volumen_ml ?? 0) / 1000
-            costoUnit = costoEnvasado + costoAceiteUsdL * tipoCambio * litros
-          }
-          const costoLinea = costoUnit * Number(f.it.unidades)
-          montoPromo += costoLinea
+          montoPromo += costoUnitPres(f.p) * Number(f.it.unidades)
           detalle.push(`${f.it.unidades}× ${prod?.nombre ?? ''} ${f.p.nombre} (${promocion ? 'promo' : 'regalo'})`)
         }
         if (montoPromo > 0) {
