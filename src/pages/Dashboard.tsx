@@ -342,29 +342,95 @@ function PendientesBar({ cargando, entrega, cobro, cobroMonto, onClick }: {
 }
 
 function GraficaMeses({ meses }: { meses: MesDato[] }) {
+  const [modo, setModo] = useState<'linea' | 'barras'>('linea')
+  const [hover, setHover] = useState<number | null>(null)
   const max = Math.max(...meses.flatMap(m => [m.ingresos, m.egresos]), 1)
+  const n = meses.length
+  // Coordenadas del SVG (se estira al ancho; el trazo queda fijo con non-scaling-stroke).
+  const W = 1000, H = 300, padTop = 24, padBot = 20, plotH = H - padTop - padBot
+  const xi = (i: number) => (n === 1 ? W / 2 : ((i + 0.5) / n) * W)
+  const yv = (v: number) => padTop + (1 - v / max) * plotH
+  const pts = (key: 'ingresos' | 'egresos') => meses.map((m, i) => `${xi(i).toFixed(1)},${yv(m[key]).toFixed(1)}`).join(' ')
+  const leftPct = (i: number) => ((i + 0.5) / n) * 100
+  const topPct = (v: number) => (yv(v) / H) * 100
+
   return (
     <div className="card p-3">
-      <div className="text-[10px] uppercase tracking-wide text-oliva-600 mb-2">Ingresos vs Egresos (UYU)</div>
-      <div className="flex items-end gap-1.5 sm:gap-3 h-28">
-        {meses.map((m) => {
-          const hIng = Math.max((m.ingresos / max) * 100, 2)
-          const hEg = Math.max((m.egresos / max) * 100, 2)
-          const margen = m.ingresos - m.egresos
-          return (
-            <div key={m.label} className="flex-1 flex flex-col items-center gap-0.5 min-w-0">
-              <div className="flex items-end gap-[2px] w-full justify-center h-20">
-                <div className="w-[40%] max-w-[18px] rounded-t bg-green-500/80" style={{ height: hIng + '%' }} title={`Ingresos: ${money(m.ingresos)}`} />
-                <div className="w-[40%] max-w-[18px] rounded-t bg-red-400/70" style={{ height: hEg + '%' }} title={`Egresos: ${money(m.egresos)}`} />
-              </div>
-              <div className={`text-[9px] font-semibold tabular-nums ${margen >= 0 ? 'text-green-700' : 'text-red-600'}`}>
-                {m.ingresos > 0 || m.egresos > 0 ? (margen >= 0 ? '+' : '') + (margen / 1000).toFixed(0) + 'k' : ''}
-              </div>
-              <div className="text-[10px] text-oliva-600 capitalize truncate w-full text-center">{m.label}</div>
-            </div>
-          )
-        })}
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-[10px] uppercase tracking-wide text-oliva-600">Ingresos vs Egresos (UYU)</div>
+        <div className="flex gap-1">
+          {(['linea', 'barras'] as const).map((mo) => (
+            <button key={mo} type="button" onClick={() => setModo(mo)}
+              className={`text-[10px] px-2 py-0.5 rounded ${modo === mo ? 'bg-oliva-800 text-oliva-50' : 'bg-oliva-100 text-oliva-700 hover:bg-oliva-200'}`}>
+              {mo === 'linea' ? 'Línea' : 'Barras'}
+            </button>
+          ))}
+        </div>
       </div>
+
+      {modo === 'barras' ? (
+        <div className="flex items-end gap-1.5 sm:gap-3 h-28">
+          {meses.map((m) => {
+            const hIng = Math.max((m.ingresos / max) * 100, 2)
+            const hEg = Math.max((m.egresos / max) * 100, 2)
+            const margen = m.ingresos - m.egresos
+            return (
+              <div key={m.label} className="flex-1 flex flex-col items-center gap-0.5 min-w-0">
+                <div className="flex items-end gap-[2px] w-full justify-center h-20">
+                  <div className="w-[40%] max-w-[18px] rounded-t bg-green-500/80" style={{ height: hIng + '%' }} title={`Ingresos: ${money(m.ingresos)}`} />
+                  <div className="w-[40%] max-w-[18px] rounded-t bg-red-400/70" style={{ height: hEg + '%' }} title={`Egresos: ${money(m.egresos)}`} />
+                </div>
+                <div className={`text-[9px] font-semibold tabular-nums ${margen >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+                  {m.ingresos > 0 || m.egresos > 0 ? (margen >= 0 ? '+' : '') + (margen / 1000).toFixed(0) + 'k' : ''}
+                </div>
+                <div className="text-[10px] text-oliva-600 capitalize truncate w-full text-center">{m.label}</div>
+              </div>
+            )
+          })}
+        </div>
+      ) : (
+        <>
+          <div className="relative h-28" onMouseLeave={() => setHover(null)}>
+            <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-full" preserveAspectRatio="none">
+              <line x1="0" y1={yv(0)} x2={W} y2={yv(0)} className="text-oliva-200" stroke="currentColor" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+              {n > 1 && <polyline fill="none" points={pts('ingresos')} stroke="#16a34a" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />}
+              {n > 1 && <polyline fill="none" points={pts('egresos')} stroke="#f43f5e" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />}
+            </svg>
+            {/* crosshair + puntos del mes activo */}
+            {hover !== null && (
+              <>
+                <div className="absolute top-0 bottom-0 w-px bg-oliva-300 pointer-events-none" style={{ left: leftPct(hover) + '%' }} />
+                <div className="absolute w-2.5 h-2.5 rounded-full bg-green-600 ring-2 ring-white -translate-x-1/2 -translate-y-1/2 pointer-events-none" style={{ left: leftPct(hover) + '%', top: topPct(meses[hover].ingresos) + '%' }} />
+                <div className="absolute w-2.5 h-2.5 rounded-full bg-rose-500 ring-2 ring-white -translate-x-1/2 -translate-y-1/2 pointer-events-none" style={{ left: leftPct(hover) + '%', top: topPct(meses[hover].egresos) + '%' }} />
+              </>
+            )}
+            {/* columnas de interacción (hover / toque) */}
+            <div className="absolute inset-0 flex">
+              {meses.map((m, i) => (
+                <div key={m.label} className="flex-1" onMouseEnter={() => setHover(i)} onTouchStart={() => setHover(i)} />
+              ))}
+            </div>
+            {/* tooltip */}
+            {hover !== null && (
+              <div className="absolute top-0 z-10 -translate-x-1/2 pointer-events-none rounded-lg bg-oliva-900 text-oliva-50 px-2 py-1 text-[10px] leading-tight whitespace-nowrap shadow-lg"
+                style={{ left: Math.min(Math.max(leftPct(hover), 16), 84) + '%' }}>
+                <div className="font-semibold capitalize">{meses[hover].label}</div>
+                <div>Ing: {money(meses[hover].ingresos)}</div>
+                <div>Egr: {money(meses[hover].egresos)}</div>
+                <div className={meses[hover].ingresos - meses[hover].egresos >= 0 ? 'text-green-300' : 'text-red-300'}>
+                  Result: {money(meses[hover].ingresos - meses[hover].egresos)}
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="flex mt-1">
+            {meses.map((m) => (
+              <div key={m.label} className="flex-1 text-[10px] text-oliva-600 capitalize truncate text-center">{m.label}</div>
+            ))}
+          </div>
+        </>
+      )}
+
       <div className="flex justify-center gap-4 mt-1.5 text-[10px] text-oliva-600">
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-green-500/80 inline-block" /> Ingresos</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-red-400/70 inline-block" /> Egresos</span>
