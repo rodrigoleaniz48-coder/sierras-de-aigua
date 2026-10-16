@@ -842,8 +842,15 @@ function EstadoResultados() {
           )}
 
           {/* Analisis operativo / sostenibilidad (pesos y dolares) */}
-          <div className="card p-5 space-y-4">
-            <div className="text-xs uppercase tracking-wide text-oliva-600">¿Se sostiene? · Análisis operativo{analisisUSD ? ' (pesos y dólares)' : ' (pesos)'}</div>
+          <details className="card p-0 overflow-hidden" open>
+            <summary className="cursor-pointer select-none px-5 py-3 text-sm font-medium text-oliva-800 hover:bg-oliva-50 flex items-center justify-between gap-3">
+              <span>⚖️ ¿Se sostiene? · Análisis operativo</span>
+              <span className="flex items-center gap-2 text-xs font-normal text-oliva-500 whitespace-nowrap">
+                <span>Result. op.</span>
+                <b className={`tabular-nums ${resultadoOperativoUYU >= 0 ? 'text-green-700' : 'text-red-700'}`}>{money(resultadoOperativoUYU)}{analisisUSD ? ` · ${money(resultadoOperativoUSD, 'USD')}` : ''}</b>
+              </span>
+            </summary>
+            <div className="px-5 pb-5 pt-3 border-t border-oliva-100 space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               {/* Ingresos operativos */}
               <div className="space-y-1.5">
@@ -887,7 +894,8 @@ function EstadoResultados() {
                 <div className="flex justify-between gap-3 pt-1 border-t border-oliva-100"><span className="font-medium">Resultado neto del mes (incluye todo)</span><b className="tabular-nums text-right text-oliva-900">{parMonto(margenUYU, margenUSD)}</b></div>
               </div>
             )}
-          </div>
+            </div>
+          </details>
         </>
       )}
 
@@ -943,36 +951,43 @@ function EstadoResultados() {
         </details>
       )}
 
-      <div className="card p-4">
-        <div className="text-xs uppercase tracking-wide text-oliva-600 mb-3">Gastos por categoría</div>
-        {catArr.length === 0 ? (
-          <div className="text-sm text-oliva-600 italic">Sin gastos en el período.</div>
-        ) : (
-          <div className="space-y-1.5">
-            {catArr.map(({ cat, uyu, usd }) => {
-              const pct = gastosUYU > 0 && uyu > 0 ? (uyu / gastosUYU) * 100 : 0
-              return (
-                <div key={cat}>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-oliva-800 capitalize">{cat.replace(/_/g, ' ')}</span>
-                    <span className="tabular-nums text-oliva-700">
-                      {uyu > 0 && <>{money(uyu)}</>}
-                      {uyu > 0 && usd > 0 && ' + '}
-                      {usd > 0 && <>{money(usd, 'USD')}</>}
-                      {pct > 0 && <span className="text-xs text-oliva-500 ml-1">({pct.toFixed(0)}%)</span>}
-                    </span>
-                  </div>
-                  {pct > 0 && (
-                    <div className="h-2 bg-oliva-100 rounded overflow-hidden">
-                      <div className="h-full bg-oliva-500" style={{ width: pct + '%' }} />
+      {!cargando && (
+        <details className="card p-0 overflow-hidden">
+          <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium text-oliva-800 hover:bg-oliva-50 flex items-center justify-between gap-3">
+            <span>Gastos por categoría</span>
+            <span className="text-xs font-normal text-oliva-500 tabular-nums whitespace-nowrap">{parMonto(gastosUYU, gastosUSD)}</span>
+          </summary>
+          <div className="px-4 pb-4 pt-3 border-t border-oliva-100">
+            {catArr.length === 0 ? (
+              <div className="text-sm text-oliva-600 italic">Sin gastos en el período.</div>
+            ) : (
+              <div className="space-y-1.5">
+                {catArr.map(({ cat, uyu, usd }) => {
+                  const pct = gastosUYU > 0 && uyu > 0 ? (uyu / gastosUYU) * 100 : 0
+                  return (
+                    <div key={cat}>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-oliva-800 capitalize">{cat.replace(/_/g, ' ')}</span>
+                        <span className="tabular-nums text-oliva-700">
+                          {uyu > 0 && <>{money(uyu)}</>}
+                          {uyu > 0 && usd > 0 && ' + '}
+                          {usd > 0 && <>{money(usd, 'USD')}</>}
+                          {pct > 0 && <span className="text-xs text-oliva-500 ml-1">({pct.toFixed(0)}%)</span>}
+                        </span>
+                      </div>
+                      {pct > 0 && (
+                        <div className="h-2 bg-oliva-100 rounded overflow-hidden">
+                          <div className="h-full bg-oliva-500" style={{ width: pct + '%' }} />
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              )
-            })}
+                  )
+                })}
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        </details>
+      )}
     </div>
   )
 }
