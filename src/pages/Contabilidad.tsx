@@ -434,14 +434,14 @@ function DetalleObligacion({ ob, onCerrar, onCambiarEstado }: {
   function formatFecha(f: string) { return new Date(f + 'T12:00:00').toLocaleDateString('es-UY') }
 
   function cargarComoGasto() {
-    if (!perfil || ob.importe == null) return
+    if (!perfil) return
     const desc = [ob.organismo, ob.concepto, ob.periodo ? `Per. ${ob.periodo}` : null, ob.numero_documento ? `Doc ${ob.numero_documento}` : null]
       .filter(Boolean).join(' - ')
     const esUTE = ob.organismo?.toUpperCase() === 'UTE'
     guardarObj('borrador:nuevo-gasto', {
       fecha: new Date().toISOString().slice(0, 10),
       categoria: 'impuestos_aportes',
-      monto: String(ob.importe),
+      monto: ob.importe != null ? String(ob.importe) : '',
       moneda: ob.moneda ?? 'UYU',
       descripcion: desc,
       metodoPago: esUTE ? 'debito_automatico' : 'transferencia',
@@ -493,20 +493,24 @@ function DetalleObligacion({ ob, onCerrar, onCambiarEstado }: {
           Ver correo original en Gmail
         </a>
 
-        {ob.importe != null && (
-          <div className="border-t border-oliva-100 pt-3">
-            <button
-              className="btn-primary w-full"
-              onClick={cargarComoGasto}
-              disabled={yaCargado}
-            >
-              {yaCargado ? 'Ya cargada como gasto' : `Pago realizado — cargar a gastos (${ob.moneda === 'USD' ? 'US$ ' : '$ '}${ob.importe.toLocaleString('es-UY')})`}
-            </button>
-            <div className="text-[10px] text-oliva-500 mt-1 text-center">
-              Se abre el formulario de gastos pre-llenado para revisar antes de guardar
-            </div>
+        <div className="border-t border-oliva-100 pt-3">
+          <button
+            className="btn-primary w-full"
+            onClick={cargarComoGasto}
+            disabled={yaCargado}
+          >
+            {yaCargado
+              ? 'Ya cargada como gasto'
+              : ob.importe != null
+                ? `Pago realizado — cargar a gastos (${ob.moneda === 'USD' ? 'US$ ' : '$ '}${ob.importe.toLocaleString('es-UY')})`
+                : 'Pago realizado — cargar a gastos (ingresar monto)'}
+          </button>
+          <div className="text-[10px] text-oliva-500 mt-1 text-center">
+            {ob.importe != null
+              ? 'Se abre el formulario de gastos pre-llenado para revisar antes de guardar'
+              : 'No se detectó el monto (p.ej. PDF de BSE/BPS). Se abre el formulario pre-llenado para que ingreses el importe.'}
           </div>
-        )}
+        </div>
 
         <div className="border-t border-oliva-100 pt-3">
           <div className="text-[10px] uppercase tracking-wide text-oliva-500 mb-2">Cambiar estado manualmente</div>
