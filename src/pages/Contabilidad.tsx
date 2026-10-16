@@ -735,6 +735,45 @@ function EstadoResultados() {
         </div>
       </div>
 
+      {/* Metodología — referencia para el contador. Desplegable para no estorbar. */}
+      <details className="card p-0 overflow-hidden">
+        <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium text-oliva-800 hover:bg-oliva-50">
+          ℹ️ Metodología contable (cómo se arman estos números)
+        </summary>
+        <div className="px-4 pb-4 pt-1 text-sm text-oliva-700 space-y-3 border-t border-oliva-100">
+          <p><b>Criterio general: base caja.</b> Un ingreso o egreso cuenta en el mes en que efectivamente <b>se cobró o se pagó</b>, no en el mes de la venta o de la factura. Las ventas usan la <b>fecha de cobro</b>; los gastos, la fecha del gasto.</p>
+          <div>
+            <div className="font-semibold text-oliva-800">Ingresos — se agrupan en tres:</div>
+            <ul className="list-disc pl-5 space-y-0.5 mt-1">
+              <li><b>Negocio (aceite y productos):</b> ventas directas del catálogo + cobros a distribuidores + ingresos cargados en categorías de producto.</li>
+              <li><b>Paralelos (campo y otros):</b> lana, venta ovina, arrendamientos, alquileres de casas, eventos. Son operativos pero no del core de aceite.</li>
+              <li><b>No operativo:</b> venta de maquinaria (venta de un activo) y aportes de capital/préstamos (financiación). <b>No</b> se consideran resultado del negocio.</li>
+            </ul>
+          </div>
+          <div>
+            <div className="font-semibold text-oliva-800">Distribuidores / mayoristas (cuenta corriente):</div>
+            <p>La <b>venta</b> a un distribuidor no se cuenta como ingreso: solo arma su <b>deuda</b>. El ingreso se reconoce cuando el distribuidor <b>paga</b> (efectivo, transferencia o en especie), en el mes del pago.</p>
+          </div>
+          <div>
+            <div className="font-semibold text-oliva-800">Egresos:</div>
+            <ul className="list-disc pl-5 space-y-0.5 mt-1">
+              <li><b>Operativos (opex):</b> gastos corrientes del mes.</li>
+              <li><b>Inversiones (capex):</b> mejoras fijas, maquinaria, obras en casas. Se muestran aparte, no restan al resultado operativo.</li>
+              <li>Los <b>adelantos de sueldo</b> no son gasto (se descuentan del sueldo del socio). Los <b>reembolsables</b> sí son gasto, una sola vez.</li>
+              <li><b>Promociones/regalos:</b> ingreso $0; solo se registra su <b>costo</b> (envasado + aceite) como gasto.</li>
+            </ul>
+          </div>
+          <div>
+            <div className="font-semibold text-oliva-800">Resultados que se muestran:</div>
+            <ul className="list-disc pl-5 space-y-0.5 mt-1">
+              <li><b>Resultado operativo</b> = (Negocio + Paralelos) − Egresos operativos. Es la métrica de si el negocio se sostiene.</li>
+              <li><b>Resultado neto</b> = incluye además lo no operativo (ventas de activos, aportes) y las inversiones.</li>
+            </ul>
+          </div>
+          <p className="text-xs text-oliva-500"><b>Nota para el contador:</b> es un resultado de <b>gestión</b> (criterio caja, montos con IVA incluido). No separa IVA débito/crédito ni es el resultado fiscal/devengado. Pesos y dólares se muestran por separado (sin convertir).</p>
+        </div>
+      </details>
+
       {cargando ? (
         <div className="card p-6 text-sm text-oliva-700">Cargando…</div>
       ) : (
