@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { Dialog } from '../components/Dialog'
 import { EditorCategoriasDialog } from '../components/EditorCategoriasDialog'
-import { money } from '../lib/format'
+import { money, fFecha } from '../lib/format'
 
 function esAdmin(nombre: string | null | undefined): boolean {
   const n = (nombre ?? '').toLowerCase()
@@ -168,7 +168,7 @@ export function IngresosPanel() {
             <tbody>
               {filtrados.map((g) => (
                 <tr key={g.id} className="border-t border-oliva-100 hover:bg-oliva-50/50">
-                  <td className="py-2 px-4 text-oliva-700 tabular-nums">{g.fecha}</td>
+                  <td className="py-2 px-4 text-oliva-700 tabular-nums">{fFecha(g.fecha)}</td>
                   <td className="py-2 px-4 text-oliva-800">{catPorId.get(g.categoria_id ?? -1)?.nombre ?? '—'}</td>
                   <td className="py-2 px-4 text-oliva-700">{g.descripcion || <span className="text-oliva-400">—</span>}</td>
                   <td className="py-2 px-4 text-oliva-700">{socioPorId.get(g.socio_id ?? '')?.nombre ?? '—'}</td>

@@ -4,7 +4,7 @@ import { guardarObj, guardarFlag } from '../lib/persistencia'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { Dialog } from '../components/Dialog'
-import { money } from '../lib/format'
+import { money, fFecha } from '../lib/format'
 import { normalizarTelWA, usuarioDatosBancarios } from '../lib/config'
 import { parsearExtractoBROU } from '../lib/parserBROU'
 import { parsearExcelBanco, type ResultadoParseo } from '../lib/parserExcelBanco'
@@ -1090,7 +1090,7 @@ function Conciliacion() {
                 const pg = m.conciliado_pago_id ? pagoPorId.get(m.conciliado_pago_id) : null
                 return (
                   <tr key={m.id} className={`border-b border-oliva-100/70 last:border-0 ${m.es_transferencia_interna ? 'bg-blue-50/40' : conciliado ? 'bg-oliva-50/40' : ''}`}>
-                    <td className="py-2 px-3 tabular-nums text-oliva-700 whitespace-nowrap">{m.fecha}</td>
+                    <td className="py-2 px-3 tabular-nums text-oliva-700 whitespace-nowrap">{fFecha(m.fecha)}</td>
                     <td className="py-2 px-3 text-oliva-800 text-xs">{m.descripcion}</td>
                     <td className="py-2 px-3 text-oliva-700 text-xs truncate max-w-[220px]">{m.asunto ?? ''}</td>
                     <td className="py-2 px-3 text-right tabular-nums text-red-700">{Number(m.debito) > 0 ? money(m.debito) : ''}</td>
@@ -1888,7 +1888,7 @@ export function CuentasCorrientes() {
                   </td>
                   <td className={`py-2 px-3 text-right tabular-nums font-semibold ${f.saldoUYU > 0.01 ? 'text-red-700' : f.saldoUYU < -0.01 ? 'text-green-700' : 'text-oliva-500'}`}>{money(f.saldoUYU)}</td>
                   {hayUSD && <td className={`py-2 px-3 text-right tabular-nums font-semibold ${f.saldoUSD > 0.01 ? 'text-red-700' : f.saldoUSD < -0.01 ? 'text-green-700' : 'text-oliva-400'}`}>{Math.abs(f.saldoUSD) > 0.01 ? money(f.saldoUSD, 'USD') : '—'}</td>}
-                  <td className="py-2 px-3 text-right tabular-nums text-oliva-600 whitespace-nowrap">{fEnt ?? '—'}</td>
+                  <td className="py-2 px-3 text-right tabular-nums text-oliva-600 whitespace-nowrap">{fEnt ? fFecha(fEnt) : '—'}</td>
                   <td className="py-2 px-3 text-right whitespace-nowrap">
                     <div className="flex gap-2 justify-end items-center">
                       <button className="text-xs rounded-md bg-oliva-800 hover:bg-oliva-900 text-oliva-50 px-2 py-0.5 font-medium" title="Registrar un pago a cuenta" onClick={(e) => { e.stopPropagation(); setPagarCliente(f.c) }}>+ Pago</button>
@@ -1927,7 +1927,7 @@ export function CuentasCorrientes() {
                               if (esUSD) runUSD += l.debe - l.haber; else runUYU += l.debe - l.haber
                               return (
                                 <tr key={i} className="border-b border-oliva-100/70 last:border-0">
-                                  <td className="py-1.5 px-3 tabular-nums text-oliva-600 whitespace-nowrap">{l.fecha}</td>
+                                  <td className="py-1.5 px-3 tabular-nums text-oliva-600 whitespace-nowrap">{fFecha(l.fecha)}</td>
                                   <td className="py-1.5 px-3 text-oliva-800">{l.tipo === 'pago' ? '💵 ' : l.tipo === 'inicial' ? '⚖️ ' : '🧾 '}{l.detalle}{esUSD ? ' (USD)' : ''}</td>
                                   <td className="py-1.5 px-3 text-right tabular-nums text-oliva-700">{l.debe > 0 ? money(l.debe, esUSD ? 'USD' : 'UYU') : ''}</td>
                                   <td className="py-1.5 px-3 text-right tabular-nums text-green-700">{l.haber > 0 ? money(l.haber, esUSD ? 'USD' : 'UYU') : ''}</td>
@@ -2320,7 +2320,7 @@ function CargarMovimientosDialog({
                   <tbody>
                     {preview.movimientos.slice(0, 60).map((m, i) => (
                       <tr key={i} className="border-b border-oliva-100/70 last:border-0">
-                        <td className="py-1 px-2 tabular-nums">{m.fecha}</td>
+                        <td className="py-1 px-2 tabular-nums">{fFecha(m.fecha)}</td>
                         <td className="py-1 px-2">{m.descripcion} {m.asunto ? `· ${m.asunto}` : ''}</td>
                         <td className="py-1 px-2 text-right tabular-nums text-red-700">{m.debito > 0 ? money(m.debito) : ''}</td>
                         <td className="py-1 px-2 text-right tabular-nums text-green-700">{m.credito > 0 ? money(m.credito) : ''}</td>

@@ -6,7 +6,7 @@ import { Dialog } from '../components/Dialog'
 import { ClienteDialog, type Cliente, type Socio } from '../components/ClienteDialog'
 import { CuentasCorrientes } from './Contabilidad'
 import { ClienteCombo } from '../components/ClienteCombo'
-import { money, ordenarPresentaciones } from '../lib/format'
+import { money, ordenarPresentaciones, fFecha } from '../lib/format'
 import { CADETE_MVD_WA, normalizarTelWA, usuarioDatosBancarios } from '../lib/config'
 import { guardarFlag, leerFlag } from '../lib/persistencia'
 
@@ -528,7 +528,7 @@ function TablaVentas({
             onClick={() => onClic(v)}
           >
             <td className="py-2 px-4 tabular-nums text-oliva-500 text-xs">#{v.id}</td>
-            <td className="py-2 px-4 tabular-nums text-oliva-700">{v.fecha}</td>
+            <td className="py-2 px-4 tabular-nums text-oliva-700">{fFecha(v.fecha)}</td>
             <td className="py-2 px-4 text-oliva-900">
               <div className="flex items-center gap-2">
                 <span>{clientePorId.get(v.cliente_id ?? 0)?.nombre ?? <span className="italic text-oliva-500">sin cliente</span>}</span>
@@ -2266,7 +2266,7 @@ function VentaDetalleDialog({
   }
 
   return (
-    <Dialog abierto={venta !== null} onCerrar={onCerrar} titulo={`Venta #${venta.id} · ${venta.fecha}`} ancho="lg">
+    <Dialog abierto={venta !== null} onCerrar={onCerrar} titulo={`Venta #${venta.id} · ${fFecha(venta.fecha)}`} ancho="lg">
       <div className="space-y-4">
         {anulada && (
           <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-800">
@@ -2654,7 +2654,7 @@ function ResumenMensualCadeteDialog({
                   return (
                     <tr key={v.id} className="border-t border-oliva-100">
                       <td className="py-2 px-3 tabular-nums font-semibold text-oliva-900">{i + 1}</td>
-                      <td className="py-2 px-3 text-oliva-700">{v.fecha}</td>
+                      <td className="py-2 px-3 text-oliva-700">{fFecha(v.fecha)}</td>
                       <td className="py-2 px-3 text-oliva-800">{v.cliente_nombre ?? '—'}</td>
                       <td className="py-2 px-3 text-oliva-600 text-xs">{v.socio_nombre?.split(' ')[0] ?? '—'}</td>
                       <td className="py-2 px-3 text-right tabular-nums font-medium">{money(p)}</td>

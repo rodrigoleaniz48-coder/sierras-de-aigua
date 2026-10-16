@@ -3,6 +3,14 @@ export const money = (n: number | string | null | undefined, moneda: 'UYU' | 'US
   return simbolo + Number(n ?? 0).toLocaleString('es-UY', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
 }
 
+// Formatea una fecha ISO (YYYY-MM-DD o timestamp) a DD/MM/AAAA para mostrar en tablas.
+export function fFecha(f: string | null | undefined): string {
+  if (!f) return ''
+  const s = String(f).slice(0, 10)
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s)
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : String(f)
+}
+
 export const num = (n: number | string | null | undefined) =>
   Number(n ?? 0).toLocaleString('es-UY', { maximumFractionDigits: 2 })
 

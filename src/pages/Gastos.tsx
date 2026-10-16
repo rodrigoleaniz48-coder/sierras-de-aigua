@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { Dialog } from '../components/Dialog'
 import { EditorCategoriasDialog } from '../components/EditorCategoriasDialog'
-import { money } from '../lib/format'
+import { money, fFecha } from '../lib/format'
 import { fetchCotizacionBilleteMes } from '../lib/bcu'
 
 function esAdminGastos(nombre: string | null | undefined): boolean {
@@ -494,7 +494,7 @@ export function Gastos() {
                   className={`border-b border-oliva-100/70 last:border-0 hover:bg-oliva-50/60 cursor-pointer ${g.socio_id !== soyYo ? 'bg-oliva-50/30' : ''}`}
                   onClick={() => setEditando(g)}
                 >
-                  <td className="py-2 px-4 tabular-nums text-oliva-700 whitespace-nowrap">{g.fecha}</td>
+                  <td className="py-2 px-4 tabular-nums text-oliva-700 whitespace-nowrap">{fFecha(g.fecha)}</td>
                   <td className="py-2 px-4 text-oliva-800">{catLabel(g.categoria)}</td>
                   {veTodos && <td className="py-2 px-4 text-oliva-700 text-xs">{socioPorId.get(g.socio_id)?.nombre ?? '—'}</td>}
                   <td className="py-2 px-4 text-oliva-700 text-xs truncate max-w-[280px]">{g.descripcion ?? '—'}</td>
@@ -774,7 +774,7 @@ function GastoDialog({
   }
 
   return (
-    <Dialog abierto={abierto} onCerrar={onCerrar} titulo={editar ? `${tipo === 'adelanto' ? 'Adelanto' : 'Gasto'} del ${editar.fecha}` : (tipo === 'adelanto' ? 'Nuevo adelanto' : 'Nuevo gasto')} ancho="md">
+    <Dialog abierto={abierto} onCerrar={onCerrar} titulo={editar ? `${tipo === 'adelanto' ? 'Adelanto' : 'Gasto'} del ${fFecha(editar.fecha)}` : (tipo === 'adelanto' ? 'Nuevo adelanto' : 'Nuevo gasto')} ancho="md">
       <form onSubmit={guardar} className="space-y-4">
         {/* Selector de socio — solo admins (veTodos) pueden cargar/editar en nombre de otro */}
         {veTodos && (
