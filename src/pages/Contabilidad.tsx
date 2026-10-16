@@ -891,52 +891,56 @@ function EstadoResultados() {
         </>
       )}
 
-      {!cargando && (totalIngresosUYU > 0 || gastosUYU > 0) && (
-        <div className="card p-4 space-y-5">
-          <div className="text-xs uppercase tracking-wide text-oliva-600">Resumen visual del mes (pesos)</div>
-          {/* Ingresos vs Egresos + resultado */}
-          <div className="space-y-2">
-            <FilaBarra label="Ingresos" valor={totalIngresosUYU} max={maxIE} clase="bg-green-600" />
-            <FilaBarra label="Egresos" valor={gastosUYU} max={maxIE} clase="bg-rose-500" />
-            <div className="flex justify-between text-sm pt-2 border-t border-oliva-100">
-              <span className="text-oliva-800 font-medium">Resultado (margen)</span>
-              <span className={`tabular-nums font-semibold ${margenUYU >= 0 ? 'text-green-700' : 'text-red-700'}`}>{money(margenUYU)}</span>
-            </div>
+      {!cargando && (totalIngresosUYU > 0 || gastosUYU > 0 || hayUSD) && (
+        <details className="card p-0 overflow-hidden">
+          <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium text-oliva-800 hover:bg-oliva-50">
+            📊 Resumen visual del mes (ingresos, egresos y fuentes)
+          </summary>
+          <div className="px-4 pb-4 pt-3 border-t border-oliva-100 space-y-5">
+            {(totalIngresosUYU > 0 || gastosUYU > 0) && (
+              <div className="space-y-4">
+                {hayUSD && <div className="text-[11px] uppercase tracking-wide text-oliva-500">Pesos</div>}
+                <div className="space-y-2">
+                  <FilaBarra label="Ingresos" valor={totalIngresosUYU} max={maxIE} clase="bg-green-600" />
+                  <FilaBarra label="Egresos" valor={gastosUYU} max={maxIE} clase="bg-rose-500" />
+                  <div className="flex justify-between text-sm pt-2 border-t border-oliva-100">
+                    <span className="text-oliva-800 font-medium">Resultado (margen)</span>
+                    <span className={`tabular-nums font-semibold ${margenUYU >= 0 ? 'text-green-700' : 'text-red-700'}`}>{money(margenUYU)}</span>
+                  </div>
+                </div>
+                {ingresoFuentes.length > 0 && (
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] uppercase tracking-wide text-oliva-500">Ingresos por fuente</div>
+                    {ingresoFuentes.map((f) => (
+                      <FilaBarra key={f.label} label={f.label} valor={f.valor} max={totalIngresosUYU} clase="bg-green-500" />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            {hayUSD && (
+              <div className="space-y-4">
+                <div className="text-[11px] uppercase tracking-wide text-oliva-500">Dólares</div>
+                <div className="space-y-2">
+                  <FilaBarra label="Ingresos" valor={totalIngresosUSD} max={maxIEUsd} clase="bg-green-600" moneda="USD" />
+                  <FilaBarra label="Egresos" valor={gastosUSD} max={maxIEUsd} clase="bg-rose-500" moneda="USD" />
+                  <div className="flex justify-between text-sm pt-2 border-t border-oliva-100">
+                    <span className="text-oliva-800 font-medium">Resultado (margen)</span>
+                    <span className={`tabular-nums font-semibold ${margenUSD >= 0 ? 'text-green-700' : 'text-red-700'}`}>{money(margenUSD, 'USD')}</span>
+                  </div>
+                </div>
+                {ingresoFuentesUsd.length > 0 && (
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] uppercase tracking-wide text-oliva-500">Ingresos por fuente</div>
+                    {ingresoFuentesUsd.map((f) => (
+                      <FilaBarra key={f.label} label={f.label} valor={f.valor} max={totalIngresosUSD} clase="bg-green-500" moneda="USD" />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
-          {/* Ingresos por fuente */}
-          {ingresoFuentes.length > 0 && (
-            <div className="space-y-1.5">
-              <div className="text-[11px] uppercase tracking-wide text-oliva-500">Ingresos por fuente</div>
-              {ingresoFuentes.map((f) => (
-                <FilaBarra key={f.label} label={f.label} valor={f.valor} max={totalIngresosUYU} clase="bg-green-500" />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {!cargando && hayUSD && (
-        <div className="card p-4 space-y-5">
-          <div className="text-xs uppercase tracking-wide text-oliva-600">Resumen visual del mes (dólares)</div>
-          {/* Ingresos vs Egresos + resultado */}
-          <div className="space-y-2">
-            <FilaBarra label="Ingresos" valor={totalIngresosUSD} max={maxIEUsd} clase="bg-green-600" moneda="USD" />
-            <FilaBarra label="Egresos" valor={gastosUSD} max={maxIEUsd} clase="bg-rose-500" moneda="USD" />
-            <div className="flex justify-between text-sm pt-2 border-t border-oliva-100">
-              <span className="text-oliva-800 font-medium">Resultado (margen)</span>
-              <span className={`tabular-nums font-semibold ${margenUSD >= 0 ? 'text-green-700' : 'text-red-700'}`}>{money(margenUSD, 'USD')}</span>
-            </div>
-          </div>
-          {/* Ingresos por fuente */}
-          {ingresoFuentesUsd.length > 0 && (
-            <div className="space-y-1.5">
-              <div className="text-[11px] uppercase tracking-wide text-oliva-500">Ingresos por fuente</div>
-              {ingresoFuentesUsd.map((f) => (
-                <FilaBarra key={f.label} label={f.label} valor={f.valor} max={totalIngresosUSD} clase="bg-green-500" moneda="USD" />
-              ))}
-            </div>
-          )}
-        </div>
+        </details>
       )}
 
       <div className="card p-4">
