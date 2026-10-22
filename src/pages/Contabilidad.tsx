@@ -417,7 +417,7 @@ function Obligaciones({ gmailMsg }: { gmailMsg: { ok?: boolean; error?: string }
           )}
 
           {detalle && (
-            <DetalleObligacion ob={detalle} onCerrar={() => setDetalle(null)} onCambiarEstado={cambiarEstadoManual} />
+            <DetalleObligacion ob={detalle} onCerrar={() => setDetalle(null)} onCambiarEstado={cambiarEstadoManual} onEditado={(cambios) => { setDetalle((d) => d ? { ...d, ...cambios } : d); cargarDatos() }} />
           )}
         </>
       )}
@@ -425,12 +425,37 @@ function Obligaciones({ gmailMsg }: { gmailMsg: { ok?: boolean; error?: string }
   )
 }
 
-function DetalleObligacion({ ob, onCerrar, onCambiarEstado }: {
+function DetalleObligacion({ ob, onCerrar, onCambiarEstado, onEditado }: {
   ob: Obligacion; onCerrar: () => void; onCambiarEstado: (ob: Obligacion, estado: EstadoManual) => void
+  onEditado?: (cambios: { importe: number | null; moneda: 'UYU' | 'USD'; fecha_vencimiento: string | null }) => void
 }) {
   const { perfil } = useAuth()
   const navigate = useNavigate()
   const est = estadoDisplay(ob)
+  const [editando, setEditando] = useState(false)
+  const [impEdit, setImpEdit] = useState('')
+  const [monedaEdit, setMonedaEdit] = useState<'UYU' | 'USD'>('UYU')
+  const [vencEdit, setVencEdit] = useState('')
+  const [guardandoEdit, setGuardandoEdit] = useState(false)
+
+  function abrirEdicion() {
+    setImpEdit(ob.importe != null ? String(ob.importe) : '')
+    setMonedaEdit(ob.moneda === 'USD' ? 'USD' : 'UYU')
+    setVencEdit(ob.fecha_vencimiento ?? '')
+    setEditando(true)
+  }
+  async function guardarEdicion() {
+    setGuardandoEdit(true)
+    const importe = impEdit.trim() === '' ? null : Number(impEdit)
+    const cambios = { importe: importe != null && !isNaN(importe) ? importe : null, moneda: monedaEdit, fecha_vencimiento: vencEdit || null }
+    const { error } = await supabase.from('correos_sincronizados').update({
+      monto_detectado: cambios.importe, moneda_detectada: cambios.moneda, fecha_vencimiento: cambios.fecha_vencimiento,
+    }).eq('id', ob.id)
+    setGuardandoEdit(false)
+    if (error) { alert('No se pudo guardar: ' + error.message); return }
+    setEditando(false)
+    onEditado?.(cambios)
+  }
   function formatFecha(f: string) { return new Date(f + 'T12:00:00').toLocaleDateString('es-UY') }
 
   function cargarComoGasto() {
@@ -481,6 +506,40 @@ function DetalleObligacion({ ob, onCerrar, onCambiarEstado }: {
           <CampoDetalle label="Fecha deteccion" valor={new Date(ob.fecha_correo).toLocaleDateString('es-UY')} />
           <CampoDetalle label="Remitente" valor={ob.remitente} small />
         </div>
+
+        {/* Corregir importe/moneda/vencimiento si la detección salió mal */}
+        {!editando ? (
+          <button type="button" className="text-xs text-oliva-700 underline hover:text-oliva-900" onClick={abrirEdicion}>
+            ✏️ Corregir importe / vencimiento
+          </button>
+        ) : (
+          <div className="rounded-lg border border-oliva-200 bg-oliva-50 p-3 space-y-3">
+            <div className="text-[11px] uppercase tracking-wide text-oliva-500">Corregir datos detectados</div>
+            <div className="grid grid-cols-3 gap-2">
+              <div className="col-span-2">
+                <label className="label">Importe</label>
+                <input type="number" step="0.01" className="input tabular-nums" value={impEdit} onChange={(e) => setImpEdit(e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Moneda</label>
+                <select className="input" value={monedaEdit} onChange={(e) => setMonedaEdit(e.target.value as 'UYU' | 'USD')}>
+                  <option value="UYU">UYU</option>
+                  <option value="USD">USD</option>
+                </select>
+              </div>
+              <div className="col-span-3">
+                <label className="label">Vencimiento</label>
+                <input type="date" className="input" value={vencEdit} onChange={(e) => setVencEdit(e.target.value)} />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button type="button" className="btn-secondary text-xs" onClick={() => setEditando(false)} disabled={guardandoEdit}>Cancelar</button>
+              <button type="button" className="text-xs px-3 py-2 rounded-lg bg-oliva-800 text-oliva-50 hover:bg-oliva-900 disabled:opacity-50" onClick={guardarEdicion} disabled={guardandoEdit}>
+                {guardandoEdit ? 'Guardando…' : 'Guardar corrección'}
+              </button>
+            </div>
+          </div>
+        )}
 
         {ob.snippet && (
           <div>
