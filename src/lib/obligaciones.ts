@@ -245,26 +245,33 @@ export function procesarCorreos(correos: CorreoRaw[], hoy: string): Obligacion[]
     if (/^\d{1,2}\/\d{2,4}$/.test(d) || /^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(d)) return false
     return /[a-z]/i.test(d) || d.replace(/\D/g, '').length >= 5
   }
+  // El periodo evita fusionar facturas recurrentes de MESES DISTINTOS que comparten
+  // "numero de documento" (p.ej. UTE usa el mismo nro. de cuenta todos los meses).
+  // Se usa el vencimiento; si no hay, el periodo; si no, el mes del correo.
+  const periodoClave = (ob: Obligacion): string =>
+    (ob.fecha_vencimiento ?? ob.periodo ?? ob.fecha_correo.slice(0, 7)).slice(0, 7)
   const dedup = new Map<string, Obligacion>()
   for (const ob of todas) {
-    const clave = docDistintivo(ob.numero_documento)
+    const base = docDistintivo(ob.numero_documento)
       ? `doc::${ob.numero_documento!.toLowerCase()}`
       : `${ob.organismo.toLowerCase()}::${ob.concepto.toLowerCase()}`
+    const clave = `${base}::${periodoClave(ob)}`
     const existing = dedup.get(clave)
     if (!existing) {
       dedup.set(clave, ob)
     } else {
-      // Fusionar: preservar el que tiene monto, fecha mas reciente gana el resto
-      const conMonto = ob.importe != null ? ob : existing.importe != null ? existing : ob
+      // Misma factura que llega dos veces (p.ej. e-factura + proveedor): se conserva el
+      // correo MAS RECIENTE y se completan los huecos con el otro.
       const masReciente = ob.fecha_correo > existing.fecha_correo ? ob : existing
+      const otro = masReciente === ob ? existing : ob
       dedup.set(clave, {
         ...masReciente,
-        importe: conMonto.importe,
-        moneda: conMonto.moneda ?? masReciente.moneda,
-        fecha_vencimiento: conMonto.fecha_vencimiento ?? masReciente.fecha_vencimiento,
-        numero_documento: conMonto.numero_documento ?? masReciente.numero_documento,
+        importe: masReciente.importe ?? otro.importe,
+        moneda: masReciente.moneda ?? otro.moneda,
+        fecha_vencimiento: masReciente.fecha_vencimiento ?? otro.fecha_vencimiento,
+        numero_documento: masReciente.numero_documento ?? otro.numero_documento,
         confianza: Math.max(ob.confianza, existing.confianza),
-        estado_manual: masReciente.estado_manual ?? existing.estado_manual,
+        estado_manual: masReciente.estado_manual ?? otro.estado_manual,
       })
     }
   }
