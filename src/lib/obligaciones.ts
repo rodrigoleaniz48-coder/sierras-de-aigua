@@ -252,10 +252,15 @@ export function procesarCorreos(correos: CorreoRaw[], hoy: string): Obligacion[]
     (ob.fecha_vencimiento ?? ob.periodo ?? ob.fecha_correo.slice(0, 7)).slice(0, 7)
   const dedup = new Map<string, Obligacion>()
   for (const ob of todas) {
-    const base = docDistintivo(ob.numero_documento)
-      ? `doc::${ob.numero_documento!.toLowerCase()}`
+    const nd = ob.numero_documento
+    // Numero de factura UNICO = tiene letra (p.ej. "A2325"): identifica la factura por si solo,
+    // sin período (así dos mails de la misma factura se fusionan aunque lleguen distinto).
+    // Recurrentes (nro. solo-dígitos tipo cuenta, p.ej. UTE) o sin número: se separan por período.
+    const esFacturaUnica = docDistintivo(nd) && /[a-z]/i.test(nd!)
+    const base = docDistintivo(nd)
+      ? `doc::${nd!.toLowerCase()}`
       : `${ob.organismo.toLowerCase()}::${ob.concepto.toLowerCase()}`
-    const clave = `${base}::${periodoClave(ob)}`
+    const clave = esFacturaUnica ? base : `${base}::${periodoClave(ob)}`
     const existing = dedup.get(clave)
     if (!existing) {
       dedup.set(clave, ob)
