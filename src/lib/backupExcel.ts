@@ -260,7 +260,7 @@ export async function generarBackupExcel(datasets: Set<BackupDataset>): Promise<
   // distribuidores + ingresos manuales; egresos = gastos (sin adelantos). En pesos.
   {
     const [rv, rg, ri, rp, rcc] = await Promise.all([
-      supabase.from('ventas').select('fecha_cobro,total,cliente_id,moneda,estado,promocion_comercial,a_confirmar').neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
+      supabase.from('ventas').select('fecha_cobro,total,iva,cliente_id,moneda,estado,promocion_comercial,a_confirmar').neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
       supabase.from('gastos').select('fecha,monto,moneda,categoria,es_adelanto').eq('es_adelanto', false),
       supabase.from('ingresos').select('fecha,monto,moneda'),
       supabase.from('pagos').select('cliente_id,fecha,monto,moneda'),
@@ -281,7 +281,7 @@ export async function generarBackupExcel(datasets: Set<BackupDataset>): Promise<
     const mesesRArr = [...mesesR].sort().reverse()
 
     const resumenRows = mesesRArr.map((k) => {
-      const ventas = rVentas.filter((v) => mesKey(v.fecha_cobro) === k && esUYU(v.moneda) && !(v.cliente_id && distribSet.has(v.cliente_id))).reduce((s, v) => s + Number(v.total || 0), 0)
+      const ventas = rVentas.filter((v) => mesKey(v.fecha_cobro) === k && esUYU(v.moneda) && !(v.cliente_id && distribSet.has(v.cliente_id))).reduce((s, v) => s + Number(v.total || 0) - Number(v.iva || 0), 0) // neto de IVA
       const cobros = rPagos.filter((p) => mesKey(p.fecha) === k && p.cliente_id && distribSet.has(p.cliente_id) && esUYU(p.moneda)).reduce((s, p) => s + Number(p.monto || 0), 0)
       const otros = rIngresos.filter((i) => mesKey(i.fecha) === k && esUYU(i.moneda)).reduce((s, i) => s + Number(i.monto || 0), 0)
       const ingresos = ventas + cobros + otros

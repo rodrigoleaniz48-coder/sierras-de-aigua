@@ -99,9 +99,9 @@ export function Dashboard() {
 
     Promise.all([
       // Ventas del mes = cobradas en el mes (por fecha_cobro), igual criterio que el Estado de resultados.
-      supabase.from('ventas').select('id, total, entregado, cobrado, cliente_id').gte('fecha_cobro', mesInicio).lte('fecha_cobro', mesFin).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
+      supabase.from('ventas').select('id, total, iva, entregado, cobrado, cliente_id').gte('fecha_cobro', mesInicio).lte('fecha_cobro', mesFin).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
       // Total del mes anterior (tambien por fecha_cobro)
-      supabase.from('ventas').select('total, cliente_id').gte('fecha_cobro', mesAntInicio).lte('fecha_cobro', mesAntFin).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
+      supabase.from('ventas').select('total, iva, cliente_id').gte('fecha_cobro', mesAntInicio).lte('fecha_cobro', mesAntFin).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
       // Items del mes con producto y presentación, para calcular litros de aceite (envasado + granel)
       supabase.from('items_venta').select('unidades, presentacion:presentaciones(volumen_ml, producto:productos(nombre, categoria)), venta:ventas!inner(fecha, estado, a_confirmar)').gte('venta.fecha', mesInicio).neq('venta.estado', 'cancelado').eq('venta.a_confirmar', false),
       // Pendientes de entrega/cobro (todas las fechas, no filtrar por mes: siguen pendientes despues del cierre)
@@ -120,7 +120,9 @@ export function Dashboard() {
         const ventasMes = vRes.data ?? []
         const ventasDirectasMes = ventasMes.filter((v) => !(v.cliente_id && ccSet.has(v.cliente_id)))
         const pagosCCMesList = pagosCC.filter((p) => p.fecha >= mesInicio)
-        const totalMes = ventasDirectasMes.reduce((s, v) => s + Number(v.total ?? 0), 0) + pagosCCMesList.reduce((s, p) => s + pagoPesos(p), 0)
+        // Ingreso neto de IVA (las ventas con factura incluyen IVA, que no es ingreso).
+        const ventaNeto = (v: { total?: number | null; iva?: number | null }) => Number(v.total ?? 0) - Number(v.iva ?? 0)
+        const totalMes = ventasDirectasMes.reduce((s, v) => s + ventaNeto(v), 0) + pagosCCMesList.reduce((s, p) => s + pagoPesos(p), 0)
         // Pendientes: TODAS las ventas no-canceladas no-entregadas o no-cobradas (independiente del mes)
         // Las promos no tienen cobro; solo cuentan si falta entregar.
         const pendientes = pendRes.data ?? []
@@ -137,7 +139,7 @@ export function Dashboard() {
 
         const ventasDirectasAnt = (vAntRes.data ?? []).filter((v) => !(v.cliente_id && ccSet.has(v.cliente_id)))
         const pagosCCAnt = pagosCC.filter((p) => p.fecha >= mesAntInicio && p.fecha <= mesAntFin).reduce((s, p) => s + pagoPesos(p), 0)
-        const totalMesAnterior = ventasDirectasAnt.reduce((s, v) => s + Number(v.total ?? 0), 0) + pagosCCAnt
+        const totalMesAnterior = ventasDirectasAnt.reduce((s, v) => s + ventaNeto(v), 0) + pagosCCAnt
 
         let litros = 0
         for (const it of (iRes.data as any[]) ?? []) {
@@ -162,7 +164,7 @@ export function Dashboard() {
     const ahora = new Date()
     const desde = new Date(ahora.getFullYear(), ahora.getMonth() - 5, 1).toISOString().slice(0, 10)
     Promise.all([
-      supabase.from('ventas').select('fecha_cobro,total,cliente_id').gte('fecha_cobro', desde).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
+      supabase.from('ventas').select('fecha_cobro,total,iva,cliente_id').gte('fecha_cobro', desde).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
       supabase.from('gastos').select('fecha,monto,moneda').gte('fecha', desde).eq('es_adelanto', false),
       supabase.from('ingresos').select('fecha,monto,moneda').gte('fecha', desde),
       // Distribuidores/mayoristas: su ingreso se reconoce por el PAGO a cuenta, no por la venta.
@@ -174,11 +176,11 @@ export function Dashboard() {
       const ccSet = new Set(((ccR.data ?? []) as { id: number }[]).map((c) => c.id))
       const ingPorMes = new Map<string, number>()
       const egPorMes = new Map<string, number>()
-      for (const v of (vR.data ?? []) as { fecha_cobro: string; total: number; cliente_id: number | null }[]) {
+      for (const v of (vR.data ?? []) as { fecha_cobro: string; total: number; iva: number | null; cliente_id: number | null }[]) {
         if (!v.fecha_cobro) continue
         if (v.cliente_id && ccSet.has(v.cliente_id)) continue // distribuidor: cuenta por el pago
         const k = v.fecha_cobro.slice(0, 7)
-        ingPorMes.set(k, (ingPorMes.get(k) ?? 0) + Number(v.total))
+        ingPorMes.set(k, (ingPorMes.get(k) ?? 0) + (Number(v.total) - Number(v.iva ?? 0))) // neto de IVA
       }
       for (const p of (pR.data ?? []) as { fecha: string; monto: number; moneda: string; cliente_id: number | null }[]) {
         if (!(p.cliente_id && ccSet.has(p.cliente_id))) continue

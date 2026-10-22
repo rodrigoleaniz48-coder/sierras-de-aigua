@@ -181,7 +181,7 @@ export function Ventas() {
       if (v.estado === 'cancelado' || v.promocion_comercial || v.a_confirmar) return s
       if (!v.cobrado || !enRango(v.fecha_cobro)) return s
       if (v.cliente_id && ccSet.has(v.cliente_id)) return s // distribuidor: cuenta por el pago
-      return s + Number(v.total ?? 0)
+      return s + Number(v.total ?? 0) - Number(v.iva ?? 0) // neto de IVA (con factura incluye IVA, que no es ingreso)
     }, 0)
     // Pagos a cuenta de distribuidores en el rango (convertidos a pesos).
     const pagosCC = pagos.reduce((s, p) => {

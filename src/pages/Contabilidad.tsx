@@ -556,7 +556,7 @@ function CampoDetalle({ label, valor, destaca, color, small }: {
 // ============================================================
 // Estado de resultados
 // ============================================================
-interface VentaMon { id: number; fecha: string; total: number; con_factura: boolean; ubicacion_id: number; cliente_id: number | null; moneda?: 'UYU' | 'USD' | null; cotizacion?: number | null }
+interface VentaMon { id: number; fecha: string; total: number; iva: number; con_factura: boolean; ubicacion_id: number; cliente_id: number | null; moneda?: 'UYU' | 'USD' | null; cotizacion?: number | null }
 interface IngresoMan { id: number; fecha: string; monto: number; moneda: 'UYU' | 'USD'; categoria_id: number | null; socio_id: string | null }
 
 // Clasificacion de ingresos/egresos para el analisis de sostenibilidad (por slug, estable).
@@ -602,7 +602,7 @@ function EstadoResultados() {
     Promise.all([
       // Reportes mensuales: las ventas cuentan en el mes de COBRO real (no de la fecha de venta).
       // Ventas "a confirmar" (potenciales) NO se incluyen.
-      supabase.from('ventas').select('id,fecha,total,con_factura,ubicacion_id,cliente_id,moneda,cotizacion').gte('fecha_cobro', desde).lte('fecha_cobro', hasta).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
+      supabase.from('ventas').select('id,fecha,total,iva,con_factura,ubicacion_id,cliente_id,moneda,cotizacion').gte('fecha_cobro', desde).lte('fecha_cobro', hasta).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
       supabase.from('gastos').select('id,fecha,monto,moneda,descripcion,categoria,socio_id').gte('fecha', desde).lte('fecha', hasta).eq('es_adelanto', false),
       supabase.from('ingresos').select('id,fecha,monto,moneda,categoria_id,socio_id').gte('fecha', desde).lte('fecha', hasta),
       // Clientes de cuenta corriente: su ingreso se reconoce por el PAGO a cuenta, no por la venta.
@@ -620,9 +620,12 @@ function EstadoResultados() {
     })
   }, [desde, hasta])
 
-  // Los totales en BD (ventas.total) están en UYU. Si moneda=USD, el USD original = total/cotizacion.
+  // Los totales en BD (ventas.total) están en UYU e INCLUYEN IVA cuando la venta es "con factura".
+  // El IVA no es ingreso (se le paga a DGI): el ingreso real es el neto = total − iva.
+  // Ventas sin factura: iva = 0, así que neto = total.
   const ventaEsUSD = (v: VentaMon) => (v.moneda ?? 'UYU') === 'USD' && !!v.cotizacion && Number(v.cotizacion) > 0
-  const ventaUSD = (v: VentaMon) => Number(v.total) / Number(v.cotizacion)
+  const ventaNetoUyu = (v: VentaMon) => Number(v.total) - Number(v.iva ?? 0)
+  const ventaUSD = (v: VentaMon) => ventaNetoUyu(v) / Number(v.cotizacion) // neto en USD
 
   // Para distribuidores/mayoristas el ingreso NO cuenta por la venta (se cuenta por el pago a
   // cuenta), asi que se excluyen sus ventas y en su lugar se suman los pagos recibidos en el mes.
@@ -632,15 +635,18 @@ function EstadoResultados() {
   const pagosCCUYU = pagosCC.filter((p) => p.moneda !== 'USD').reduce((s, p) => s + Number(p.monto), 0)
   const pagosCCUSD = pagosCC.filter((p) => p.moneda === 'USD').reduce((s, p) => s + Number(p.monto), 0)
 
-  // Ingresos (ventas minoristas + pagos a cuenta de distribuidores + ingresos manuales) por moneda
-  const ventasUYU = ventasRev.filter((v) => !ventaEsUSD(v)).reduce((s, v) => s + Number(v.total), 0)
+  // Ingresos (ventas minoristas NETAS de IVA + pagos a cuenta de distribuidores + ingresos manuales) por moneda
+  const ventasUYU = ventasRev.filter((v) => !ventaEsUSD(v)).reduce((s, v) => s + ventaNetoUyu(v), 0)
   const ventasUSD = ventasRev.filter((v) => ventaEsUSD(v)).reduce((s, v) => s + ventaUSD(v), 0)
   const ingresosManUYU = ingresos.filter((i) => i.moneda === 'UYU').reduce((s, i) => s + Number(i.monto), 0)
   const ingresosManUSD = ingresos.filter((i) => i.moneda === 'USD').reduce((s, i) => s + Number(i.monto), 0)
   const totalIngresosUYU = ventasUYU + ingresosManUYU + pagosCCUYU
   const totalIngresosUSD = ventasUSD + ingresosManUSD + pagosCCUSD
 
-  const ventasConFactura = ventasRev.reduce((s, v) => s + (v.con_factura ? Number(v.total) : 0), 0)
+  // IVA cobrado en ventas con factura (en pesos y dólares) — NO es ingreso: se le paga a DGI.
+  const ivaCobradoUYU = ventasRev.filter((v) => !ventaEsUSD(v)).reduce((s, v) => s + Number(v.iva ?? 0), 0)
+  const ivaCobradoUSD = ventasRev.filter((v) => ventaEsUSD(v)).reduce((s, v) => s + Number(v.iva ?? 0) / Number(v.cotizacion), 0)
+  const ventasConFactura = ventasRev.reduce((s, v) => s + (v.con_factura ? ventaNetoUyu(v) : 0), 0)
 
   // Egresos por moneda
   const gastosUYU = gastos.filter((g) => g.moneda === 'UYU').reduce((s, g) => s + Number(g.monto), 0)
@@ -780,7 +786,11 @@ function EstadoResultados() {
               <li><b>Resultado neto</b> = incluye además lo no operativo (ventas de activos, aportes) y las inversiones.</li>
             </ul>
           </div>
-          <p className="text-xs text-oliva-500"><b>Nota para el contador:</b> es un resultado de <b>gestión</b> (criterio caja, montos con IVA incluido). No separa IVA débito/crédito ni es el resultado fiscal/devengado. Pesos y dólares se muestran por separado (sin convertir).</p>
+          <div>
+            <div className="font-semibold text-oliva-800">IVA:</div>
+            <p>La mayoría de las ventas son <b>sin factura (sin IVA)</b>: ahí el total es todo ingreso. Las ventas marcadas <b>“con factura”</b> llevan IVA incluido en el precio; ese IVA <b>no es ingreso</b> (se le paga a DGI). Por eso los ingresos se muestran <b>netos de IVA</b> y el <b>IVA cobrado</b> se informa aparte. (No se computa el IVA de las compras/gastos, así que no es una liquidación de IVA.)</p>
+          </div>
+          <p className="text-xs text-oliva-500"><b>Nota para el contador:</b> es un resultado de <b>gestión</b> (criterio caja). Los ingresos van <b>netos de IVA</b>; el IVA cobrado en ventas con factura se muestra por separado. No es una liquidación fiscal (no netea IVA compras). Pesos y dólares se muestran por separado (sin convertir).</p>
         </div>
       </details>
 
@@ -794,10 +804,10 @@ function EstadoResultados() {
               <div className="text-xs uppercase tracking-wide text-oliva-600">Ingresos del mes (pesos)</div>
               <div className="text-3xl font-semibold text-oliva-900 tabular-nums">{money(totalIngresosUYU, 'UYU')}</div>
               <div className="text-xs text-oliva-600 space-y-0.5">
-                <div>Ventas: <b className="tabular-nums">{money(ventasUYU, 'UYU')}</b> ({ventasRev.filter((v) => !ventaEsUSD(v)).length} vta.)</div>
+                <div>Ventas (neto): <b className="tabular-nums">{money(ventasUYU, 'UYU')}</b> ({ventasRev.filter((v) => !ventaEsUSD(v)).length} vta.)</div>
                 {pagosCCUYU > 0 && <div>Cobros a cuenta (distrib.): <b className="tabular-nums">{money(pagosCCUYU, 'UYU')}</b></div>}
                 <div>Otros ingresos: <b className="tabular-nums">{money(ingresosManUYU, 'UYU')}</b></div>
-                <div className="text-oliva-500">{money(ventasConFactura, 'UYU')} con factura</div>
+                {ivaCobradoUYU > 0 && <div className="text-oliva-500">+ IVA cobrado (para DGI, no es ingreso): {money(ivaCobradoUYU, 'UYU')} · {money(ventasConFactura, 'UYU')} facturado</div>}
               </div>
             </div>
             <div className="card p-5 space-y-2">
@@ -821,9 +831,10 @@ function EstadoResultados() {
                 <div className="text-xs uppercase tracking-wide text-oliva-600">Ingresos del mes (dólares)</div>
                 <div className="text-3xl font-semibold text-oliva-900 tabular-nums">{money(totalIngresosUSD, 'USD')}</div>
                 <div className="text-xs text-oliva-600 space-y-0.5">
-                  <div>Ventas: <b className="tabular-nums">{money(ventasUSD, 'USD')}</b> ({ventasRev.filter((v) => ventaEsUSD(v)).length} vta.)</div>
+                  <div>Ventas (neto): <b className="tabular-nums">{money(ventasUSD, 'USD')}</b> ({ventasRev.filter((v) => ventaEsUSD(v)).length} vta.)</div>
                   {pagosCCUSD > 0 && <div>Cobros a cuenta (distrib.): <b className="tabular-nums">{money(pagosCCUSD, 'USD')}</b></div>}
                   <div>Otros ingresos: <b className="tabular-nums">{money(ingresosManUSD, 'USD')}</b></div>
+                  {ivaCobradoUSD > 0 && <div className="text-oliva-500">+ IVA cobrado (para DGI, no es ingreso): {money(ivaCobradoUSD, 'USD')}</div>}
                 </div>
               </div>
               <div className="card p-5 space-y-2">
