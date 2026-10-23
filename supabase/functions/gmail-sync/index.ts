@@ -13,13 +13,32 @@ const CLIENT_SECRET = Deno.env.get('GMAIL_CLIENT_SECRET')!
 const ENC_KEY = Deno.env.get('GMAIL_ENCRYPTION_KEY')!
 
 const DIAS_PRIMERA_SYNC = 30
+const DIAS_RESCAN = 45          // re-escaneo profundo (recupera correos perdidos)
 const MAX_MENSAJES = 40
+const MAX_MENSAJES_RESCAN = 90
 
 const GMAIL_QUERY_FILTER = [
+  // Remitentes fiscales / plataformas de factura electronica
   'from:dgi.gub.uy',
   'from:bps.gub.uy',
   'from:bse.com.uy',
+  'from:ute.com.uy',
+  'from:ose.com.uy',
+  'from:antel.com.uy',
+  'from:mvdfactura.com',
+  'from:facturacion',
+  'from:efactura',
+  // Asuntos tipicos de factura/comprobante
   'subject:factura',
+  'subject:e-factura',
+  'subject:comprobante',
+  'subject:cfe',
+  'subject:e-ticket',
+  'subject:eticket',
+  'subject:recibo',
+  'subject:cobranza',
+  'subject:boleta',
+  'subject:remito',
   'subject:impuesto',
   'subject:vencimiento',
   'subject:obligacion',
@@ -27,6 +46,8 @@ const GMAIL_QUERY_FILTER = [
   'subject:DGI',
   'subject:BPS',
   'subject:BSE',
+  'subject:UTE',
+  'subject:OSE',
   'subject:IRPF',
   'subject:IVA',
   'subject:IRAE',
@@ -665,9 +686,14 @@ Deno.serve(async (req) => {
 
   try {
     const esPrimera = !cuenta.ultima_sync
+    // Re-escaneo profundo: ignora ultima_sync y busca los ultimos DIAS_RESCAN dias,
+    // para recuperar facturas que el filtro anterior no capturaba.
+    const esRescan = !!(body as Record<string, unknown>).deep
 
     const afterDate = new Date()
-    if (esPrimera) {
+    if (esRescan) {
+      afterDate.setDate(afterDate.getDate() - DIAS_RESCAN)
+    } else if (esPrimera) {
       afterDate.setDate(afterDate.getDate() - DIAS_PRIMERA_SYNC)
     } else {
       afterDate.setTime(new Date(cuenta.ultima_sync).getTime())
@@ -677,7 +703,7 @@ Deno.serve(async (req) => {
     const { rows, historyId: newHistoryId } = await listarYProcesar(
       accessToken,
       afterDate,
-      MAX_MENSAJES,
+      esRescan ? MAX_MENSAJES_RESCAN : MAX_MENSAJES,
       cuenta.id,
       cuenta.email?.toLowerCase() ?? null,
     )

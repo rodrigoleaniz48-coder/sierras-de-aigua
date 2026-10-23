@@ -79,14 +79,14 @@ export interface CorreoSincronizado {
   estado_manual: 'pagada' | 'descartada' | 'revisar' | null
 }
 
-export async function sincronizarGmail(): Promise<{
+export async function sincronizarGmail(deep = false): Promise<{
   ok?: boolean
   correos_nuevos?: number
   primera_sync?: boolean
   error?: string
 }> {
   const { data, error } = await supabase.functions.invoke('gmail-sync', {
-    body: { action: 'sync' },
+    body: { action: 'sync', deep },
   })
   if (error) return { error: await detalleErrorFn(error) }
   return data as { ok?: boolean; correos_nuevos?: number; primera_sync?: boolean; error?: string }

@@ -170,17 +170,19 @@ function Obligaciones({ gmailMsg }: { gmailMsg: { ok?: boolean; error?: string }
   useEffect(() => { cargarDatos() }, [])
   useEffect(() => { if (gmailMsg?.ok) cargarDatos() }, [gmailMsg?.ok])
 
-  async function handleSync() {
+  async function handleSync(deep = false) {
     setSincronizando(true)
     setSyncMsg(null)
     setSyncError(null)
-    const res = await sincronizarGmail()
+    const res = await sincronizarGmail(deep)
     setSincronizando(false)
     if (res.error) { setSyncError(res.error); return }
     setSyncMsg(
       res.primera_sync
         ? `Primera sincronizacion: ${res.correos_nuevos} correos fiscales importados.`
-        : `${res.correos_nuevos} correos nuevos sincronizados.`,
+        : deep
+          ? `Re-escaneo (45 dias): ${res.correos_nuevos} correos fiscales revisados.`
+          : `${res.correos_nuevos} correos nuevos sincronizados.`,
     )
     cargarDatos()
   }
@@ -261,9 +263,16 @@ function Obligaciones({ gmailMsg }: { gmailMsg: { ok?: boolean; error?: string }
                 : 'Sin sincronizar todavia'}
               {obligaciones.length > 0 && ` · ${obligaciones.length} obligacion${obligaciones.length === 1 ? '' : 'es'}`}
             </div>
-            <button className="btn-primary" onClick={handleSync} disabled={sincronizando}>
-              {sincronizando ? 'Sincronizando…' : cuenta.ultima_sync ? 'Sincronizar nuevas' : 'Primera sincronizacion'}
-            </button>
+            <div className="flex gap-2 items-center">
+              <button className="btn-primary" onClick={() => handleSync(false)} disabled={sincronizando}>
+                {sincronizando ? 'Sincronizando…' : cuenta.ultima_sync ? 'Sincronizar nuevas' : 'Primera sincronizacion'}
+              </button>
+              {cuenta.ultima_sync && (
+                <button className="btn-secondary text-xs" onClick={() => handleSync(true)} disabled={sincronizando} title="Vuelve a revisar los últimos 45 días (recupera facturas que no se habían reconocido)">
+                  🔄 Re-escanear 45 días
+                </button>
+              )}
+            </div>
           </div>
 
           {syncMsg && <div className="card p-3 text-sm text-green-700 bg-green-50 border-green-200">{syncMsg}</div>}
