@@ -253,14 +253,18 @@ export function procesarCorreos(correos: CorreoRaw[], hoy: string): Obligacion[]
   const dedup = new Map<string, Obligacion>()
   for (const ob of todas) {
     const nd = ob.numero_documento
-    // Numero de factura UNICO = tiene letra (p.ej. "A2325"): identifica la factura por si solo,
-    // sin período (así dos mails de la misma factura se fusionan aunque lleguen distinto).
-    // Recurrentes (nro. solo-dígitos tipo cuenta, p.ej. UTE) o sin número: se separan por período.
-    const esFacturaUnica = docDistintivo(nd) && /[a-z]/i.test(nd!)
-    const base = docDistintivo(nd)
-      ? `doc::${nd!.toLowerCase()}`
-      : `${ob.organismo.toLowerCase()}::${ob.concepto.toLowerCase()}`
-    const clave = esFacturaUnica ? base : `${base}::${periodoClave(ob)}`
+    let clave: string
+    if (docDistintivo(nd)) {
+      // Numero de factura con LETRA (p.ej. "A2325"): unico -> solo el numero (dos mails de la
+      // misma factura se fusionan). Solo-digitos (nro. de cuenta recurrente, UTE): + periodo.
+      clave = /[a-z]/i.test(nd!) ? `doc::${nd!.toLowerCase()}` : `doc::${nd!.toLowerCase()}::${periodoClave(ob)}`
+    } else if (ob.importe != null) {
+      // Sin numero de factura pero CON monto: mismo organismo + concepto + periodo + monto.
+      clave = `${ob.organismo.toLowerCase()}::${ob.concepto.toLowerCase()}::${periodoClave(ob)}::${ob.importe}`
+    } else {
+      // Sin numero NI monto: no hay forma de saber si es la misma factura -> no fusionar.
+      clave = `solo::${ob.id}`
+    }
     const existing = dedup.get(clave)
     if (!existing) {
       dedup.set(clave, ob)
@@ -276,16 +280,12 @@ export function procesarCorreos(correos: CorreoRaw[], hoy: string): Obligacion[]
         fecha_vencimiento: masReciente.fecha_vencimiento ?? otro.fecha_vencimiento,
         numero_documento: masReciente.numero_documento ?? otro.numero_documento,
         confianza: Math.max(ob.confianza, existing.confianza),
-        // Estado al fusionar duplicados. Prioridad SEGURA: nunca esconder una factura por el
-        // descarte de su duplicado.
-        //  1) si alguno quedo PAGADA -> pagada (la deuda esta saldada).
-        //  2) si alguno sigue ACTIVO (sin estado) -> activo: una factura sin pagar siempre se ve.
-        //  3) si no, el estado del correo mas reciente (descartada/revisar/pendiente).
+        // Estado al fusionar: vale "pagada" si alguno esta pago; si no, el del correo MAS
+        // RECIENTE (no se hereda el estado del correo viejo). Asi un descarte del correo
+        // reciente oculta la factura, y una factura reciente sin estado se ve.
         estado_manual: (ob.estado_manual === 'pagada' || existing.estado_manual === 'pagada')
           ? 'pagada'
-          : (ob.estado_manual == null || existing.estado_manual == null)
-            ? null
-            : masReciente.estado_manual,
+          : masReciente.estado_manual,
       })
     }
   }
