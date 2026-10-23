@@ -276,7 +276,12 @@ export function procesarCorreos(correos: CorreoRaw[], hoy: string): Obligacion[]
         fecha_vencimiento: masReciente.fecha_vencimiento ?? otro.fecha_vencimiento,
         numero_documento: masReciente.numero_documento ?? otro.numero_documento,
         confianza: Math.max(ob.confianza, existing.confianza),
-        estado_manual: masReciente.estado_manual ?? otro.estado_manual,
+        // Estado: si alguno quedo PAGADA, la factura esta paga. Si no, vale el del correo
+        // MAS RECIENTE (no se hereda un "descartada" de un duplicado viejo, que escondia la
+        // factura activa). Un descarte explicito del correo reciente si se respeta.
+        estado_manual: (ob.estado_manual === 'pagada' || existing.estado_manual === 'pagada')
+          ? 'pagada'
+          : masReciente.estado_manual,
       })
     }
   }
