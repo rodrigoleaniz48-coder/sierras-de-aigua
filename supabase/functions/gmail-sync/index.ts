@@ -28,6 +28,7 @@ const GMAIL_QUERY_FILTER = [
   'from:mvdfactura.com',
   'from:facturacion',
   'from:efactura',
+  'from:surproductivo1@gmail.com', // proveedor que factura desde un gmail (sin palabras clave en asunto)
   // Asuntos tipicos de factura/comprobante
   'subject:factura',
   'subject:e-factura',
