@@ -592,7 +592,10 @@ function LiquidarSueldoDialog({ socio, onCerrar, onOk }: {
   const [lineas, setLineas] = useState<{ categoria: string; monto: number }[]>([])
   const [catNombres, setCatNombres] = useState<Map<string, string>>(new Map())
   const [adel, setAdel] = useState(0)
+  const [adelUSD, setAdelUSD] = useState(0)
   const [reembPend, setReembPend] = useState<{ ids: number[]; total: number }>({ ids: [], total: 0 })
+  const [reembPendUSD, setReembPendUSD] = useState<{ ids: number[]; total: number }>({ ids: [], total: 0 })
+  const [cot, setCot] = useState<number | null>(null)
   const [yaLiquidado, setYaLiquidado] = useState(false)
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -617,16 +620,24 @@ function LiquidarSueldoDialog({ socio, onCerrar, onOk }: {
       setLineas(((cfg.data as { categoria: string; monto: number }[]) ?? []).map((x) => ({ categoria: x.categoria, monto: Number(x.monto) })))
       setCatNombres(new Map(((cats.data as { slug: string; nombre: string }[]) ?? []).map((c) => [c.slug, c.nombre])))
       const g = (gs.data as { id: number; monto: number; moneda: string; reembolsable: boolean; reembolsado: boolean; es_adelanto: boolean; descripcion: string | null }[]) ?? []
-      setAdel(g.filter((x) => x.es_adelanto && x.moneda !== 'USD').reduce((s, x) => s + Number(x.monto), 0))
-      const pend = g.filter((x) => x.reembolsable && !x.reembolsado && x.moneda !== 'USD')
+      const esUsd = (x: { moneda: string }) => x.moneda === 'USD'
+      setAdel(g.filter((x) => x.es_adelanto && !esUsd(x)).reduce((s, x) => s + Number(x.monto), 0))
+      setAdelUSD(g.filter((x) => x.es_adelanto && esUsd(x)).reduce((s, x) => s + Number(x.monto), 0))
+      const pend = g.filter((x) => x.reembolsable && !x.reembolsado && !esUsd(x))
+      const pendUSD = g.filter((x) => x.reembolsable && !x.reembolsado && esUsd(x))
       setReembPend({ ids: pend.map((x) => x.id), total: pend.reduce((s, x) => s + Number(x.monto), 0) })
+      setReembPendUSD({ ids: pendUSD.map((x) => x.id), total: pendUSD.reduce((s, x) => s + Number(x.monto), 0) })
       setYaLiquidado(g.some((x) => (x.descripcion ?? '').includes(marca)))
     })()
+    // Cotización del dólar billete del mes (BCU) para convertir adelantos/reembolsos en USD.
+    fetchCotizacionBilleteMes(`${anio}-${mes}`).then((r) => { if (!cancel && r && r.cotizacion > 0) setCot(r.cotizacion) })
     return () => { cancel = true }
-  }, [socio, desde, hasta, marca])
+  }, [socio, desde, hasta, marca, anio, mes])
 
   const nominal = lineas.reduce((s, l) => s + l.monto, 0)
-  const neto = nominal - adel + reembPend.total
+  const hayUSD = adelUSD > 0 || reembPendUSD.total > 0
+  const tc = cot ?? 0
+  const neto = nominal - adel - adelUSD * tc + reembPend.total + reembPendUSD.total * tc
 
   async function liquidar() {
     if (!socio || !perfil) return
@@ -640,8 +651,9 @@ function LiquidarSueldoDialog({ socio, onCerrar, onOk }: {
     }))
     const { error: e1 } = await supabase.from('gastos').insert(rows)
     if (e1) { setGuardando(false); setError(e1.message); return }
-    if (reembPend.ids.length > 0) {
-      const { error: e2 } = await supabase.from('gastos').update({ reembolsado: true }).in('id', reembPend.ids)
+    const idsReemb = [...reembPend.ids, ...reembPendUSD.ids]
+    if (idsReemb.length > 0) {
+      const { error: e2 } = await supabase.from('gastos').update({ reembolsado: true }).in('id', idsReemb)
       if (e2) { setGuardando(false); setError('Sueldo registrado, pero fallo marcar reembolsos: ' + e2.message); return }
     }
     setGuardando(false)
@@ -696,8 +708,12 @@ function LiquidarSueldoDialog({ socio, onCerrar, onOk }: {
           <div className="text-[11px] uppercase tracking-wide text-oliva-500 mb-1">Neto a transferir (solo caja)</div>
           <div className="flex justify-between gap-3"><span>Sueldo</span><span className="tabular-nums">{money(nominal)}</span></div>
           {adel > 0 && <div className="flex justify-between gap-3 text-red-700"><span>− Adelantos del mes</span><span className="tabular-nums">− {money(adel)}</span></div>}
+          {adelUSD > 0 && <div className="flex justify-between gap-3 text-red-700"><span>− Adelantos US$ {Number(adelUSD).toLocaleString('es-UY')} {cot ? `× ${cot}` : ''}</span><span className="tabular-nums">− {money(adelUSD * tc)}</span></div>}
           {reembPend.total > 0 && <div className="flex justify-between gap-3 text-green-700"><span>+ Reembolsos pendientes</span><span className="tabular-nums">+ {money(reembPend.total)}</span></div>}
+          {reembPendUSD.total > 0 && <div className="flex justify-between gap-3 text-green-700"><span>+ Reembolsos US$ {Number(reembPendUSD.total).toLocaleString('es-UY')} {cot ? `× ${cot}` : ''}</span><span className="tabular-nums">+ {money(reembPendUSD.total * tc)}</span></div>}
           <div className="flex justify-between gap-3 pt-1 border-t border-oliva-100 font-bold text-oliva-900"><span>A transferir</span><span className="tabular-nums">{money(neto)}</span></div>
+          {hayUSD && !cot && <div className="text-[11px] text-amber-700">Esperando cotización del BCU del mes para convertir los USD…</div>}
+          {hayUSD && cot && <div className="text-[10px] text-oliva-500">USD convertidos a la cotización BCU billete del mes ({cot}). Al liquidar vos podés transferir al tipo de cambio real del día.</div>}
         </div>
 
         <p className="text-[11px] text-oliva-500">Se registra el sueldo <b>exacto</b> ({money(nominal)}) en sus categorías; los adelantos y reembolsos quedan como están (no modifican el sueldo). El neto es solo lo que transferís.</p>
