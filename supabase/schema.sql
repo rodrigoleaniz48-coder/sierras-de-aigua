@@ -488,3 +488,27 @@ drop trigger if exists trg_nuevo_usuario on auth.users;
 create trigger trg_nuevo_usuario
   after insert on auth.users
   for each row execute function public.fn_nuevo_usuario();
+
+-- =========================================================================
+-- 11. Sueldos por socio: reparto del sueldo nominal por categoria/area.
+--     La suma de las lineas de un socio = su sueldo nominal. Se usa en
+--     "Liquidar sueldo del mes" (Finanzas) para registrar el monto exacto,
+--     sin netear adelantos ni reembolsos.
+-- =========================================================================
+create table if not exists public.sueldos_socio (
+  id bigserial primary key,
+  socio_id uuid not null references public.perfiles(id) on delete cascade,
+  categoria text not null,              -- slug de categorias_gasto
+  monto numeric not null default 0,
+  actualizado_en timestamptz not null default now()
+);
+create index if not exists sueldos_socio_socio_idx on public.sueldos_socio(socio_id);
+alter table public.sueldos_socio enable row level security;
+drop policy if exists sueldos_sel on public.sueldos_socio;
+create policy sueldos_sel on public.sueldos_socio for select using (ve_todos_gastos() or socio_id = auth.uid());
+drop policy if exists sueldos_ins on public.sueldos_socio;
+create policy sueldos_ins on public.sueldos_socio for insert with check (ve_todos_gastos());
+drop policy if exists sueldos_upd on public.sueldos_socio;
+create policy sueldos_upd on public.sueldos_socio for update using (ve_todos_gastos());
+drop policy if exists sueldos_del on public.sueldos_socio;
+create policy sueldos_del on public.sueldos_socio for delete using (ve_todos_gastos());
