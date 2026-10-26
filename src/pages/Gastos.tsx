@@ -153,6 +153,9 @@ export function Gastos() {
   const setNuevo = (v: boolean) => { setNuevoRaw(v); guardarFlag('dialog:nuevo-gasto', v) }
   const [editando, setEditando] = useState<Gasto | null>(null)
   const [editorCat, setEditorCat] = useState(false)
+  // Socios con sueldo configurado (para mostrar "Liquidar sueldo") + socio a liquidar.
+  const [sueldoSocioIds, setSueldoSocioIds] = useState<Set<string>>(new Set())
+  const [liquidar, setLiquidar] = useState<{ id: string; nombre: string } | null>(null)
 
   // Filtros
   const hoy = new Date()
@@ -172,6 +175,9 @@ export function Gastos() {
     setSocios((s.data as Socio[]) ?? [])
     setCategorias((c.data as Categoria[]) ?? [])
     setCargando(false)
+    supabase.from('sueldos_socio').select('socio_id').then(({ data }) => {
+      setSueldoSocioIds(new Set(((data as { socio_id: string }[]) ?? []).map((x) => x.socio_id)))
+    })
   }
   // Lookup slug -> nombre para mostrar label lindo
   const catLabel = useMemo(() => {
@@ -353,6 +359,24 @@ export function Gastos() {
           ) : (
             <span className="text-[11px] text-amber-700">esperando cotización del BCU…</span>
           )}
+        </div>
+      )}
+
+      {/* Sueldos del mes: liquidar el sueldo nominal (exacto) de cada socio configurado */}
+      {socios.filter((s) => sueldoSocioIds.has(s.id) && (veTodos || s.id === soyYo)).length > 0 && (
+        <div className="card p-4">
+          <div className="text-xs uppercase tracking-widest text-oliva-700 font-bold mb-2">💵 Sueldos del mes</div>
+          <div className="space-y-1.5">
+            {socios.filter((s) => sueldoSocioIds.has(s.id) && (veTodos || s.id === soyYo)).map((s) => (
+              <div key={s.id} className="flex items-center justify-between gap-3 py-1 border-b border-oliva-100/70 last:border-0">
+                <span className="text-sm text-oliva-800">{s.nombre}</span>
+                <button type="button" className="btn-secondary text-xs" onClick={() => setLiquidar({ id: s.id, nombre: s.nombre })}>
+                  Liquidar sueldo
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="text-[11px] text-oliva-500 mt-2">Registra el sueldo nominal exacto (según el reparto por área de Admin) y te dice el neto a transferir (sueldo − adelantos + reembolsos). No modifica el sueldo con esos ajustes.</div>
         </div>
       )}
 
@@ -547,7 +571,148 @@ export function Gastos() {
         onCerrar={() => setEditorCat(false)}
         onCambio={cargar}
       />
+      <LiquidarSueldoDialog socio={liquidar} onCerrar={() => setLiquidar(null)} onOk={() => { setLiquidar(null); cargar() }} />
     </div>
+  )
+}
+
+// Liquidar sueldo del mes: registra el sueldo NOMINAL exacto (repartido por area segun
+// sueldos_socio) sin netear adelantos/reembolsos, marca los reembolsables como pagados,
+// y muestra el neto a transferir (sueldo - adelantos + reembolsos), que es solo caja.
+function LiquidarSueldoDialog({ socio, onCerrar, onOk }: {
+  socio: { id: string; nombre: string } | null
+  onCerrar: () => void
+  onOk: () => void
+}) {
+  const { perfil } = useAuth()
+  const hoy = new Date()
+  const [mes, setMes] = useState(String(hoy.getMonth() + 1).padStart(2, '0'))
+  const [anio, setAnio] = useState(String(hoy.getFullYear()))
+  const [fecha, setFecha] = useState(hoy.toISOString().slice(0, 10))
+  const [lineas, setLineas] = useState<{ categoria: string; monto: number }[]>([])
+  const [catNombres, setCatNombres] = useState<Map<string, string>>(new Map())
+  const [adel, setAdel] = useState(0)
+  const [reembPend, setReembPend] = useState<{ ids: number[]; total: number }>({ ids: [], total: 0 })
+  const [yaLiquidado, setYaLiquidado] = useState(false)
+  const [guardando, setGuardando] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const desde = `${anio}-${mes}-01`
+  const ult = new Date(Number(anio), Number(mes), 0).getDate()
+  const hasta = `${anio}-${mes}-${String(ult).padStart(2, '0')}`
+  const mesNombre = new Date(Number(anio), Number(mes) - 1, 1).toLocaleString('es-UY', { month: 'long' })
+  const marca = `[sueldo ${anio}-${mes}]`
+
+  useEffect(() => {
+    if (!socio) return
+    setError(null)
+    let cancel = false
+    ;(async () => {
+      const [cfg, gs, cats] = await Promise.all([
+        supabase.from('sueldos_socio').select('categoria,monto').eq('socio_id', socio.id),
+        supabase.from('gastos').select('id,monto,moneda,reembolsable,reembolsado,es_adelanto,descripcion').eq('socio_id', socio.id).gte('fecha', desde).lte('fecha', hasta),
+        supabase.from('categorias_gasto').select('slug,nombre'),
+      ])
+      if (cancel) return
+      setLineas(((cfg.data as { categoria: string; monto: number }[]) ?? []).map((x) => ({ categoria: x.categoria, monto: Number(x.monto) })))
+      setCatNombres(new Map(((cats.data as { slug: string; nombre: string }[]) ?? []).map((c) => [c.slug, c.nombre])))
+      const g = (gs.data as { id: number; monto: number; moneda: string; reembolsable: boolean; reembolsado: boolean; es_adelanto: boolean; descripcion: string | null }[]) ?? []
+      setAdel(g.filter((x) => x.es_adelanto && x.moneda !== 'USD').reduce((s, x) => s + Number(x.monto), 0))
+      const pend = g.filter((x) => x.reembolsable && !x.reembolsado && x.moneda !== 'USD')
+      setReembPend({ ids: pend.map((x) => x.id), total: pend.reduce((s, x) => s + Number(x.monto), 0) })
+      setYaLiquidado(g.some((x) => (x.descripcion ?? '').includes(marca)))
+    })()
+    return () => { cancel = true }
+  }, [socio, desde, hasta, marca])
+
+  const nominal = lineas.reduce((s, l) => s + l.monto, 0)
+  const neto = nominal - adel + reembPend.total
+
+  async function liquidar() {
+    if (!socio || !perfil) return
+    if (lineas.length === 0) { setError('Este socio no tiene sueldo configurado (Admin → Sueldos).'); return }
+    setGuardando(true); setError(null)
+    const rows = lineas.map((l) => ({
+      fecha, socio_id: socio.id, categoria: l.categoria, monto: l.monto, moneda: 'UYU',
+      descripcion: `Sueldo ${socio.nombre} ${mesNombre} ${anio} ${marca}`,
+      metodo_pago: 'transferencia', reembolsable: false, reembolsado: false, es_adelanto: false,
+      actualizado_en: new Date().toISOString(),
+    }))
+    const { error: e1 } = await supabase.from('gastos').insert(rows)
+    if (e1) { setGuardando(false); setError(e1.message); return }
+    if (reembPend.ids.length > 0) {
+      const { error: e2 } = await supabase.from('gastos').update({ reembolsado: true }).in('id', reembPend.ids)
+      if (e2) { setGuardando(false); setError('Sueldo registrado, pero fallo marcar reembolsos: ' + e2.message); return }
+    }
+    setGuardando(false)
+    onOk()
+  }
+
+  if (!socio) return null
+  return (
+    <Dialog abierto={socio !== null} onCerrar={onCerrar} titulo={`Liquidar sueldo · ${socio.nombre}`} ancho="sm">
+      <div className="space-y-4">
+        <div className="grid grid-cols-3 gap-3">
+          <div>
+            <label className="label">Mes</label>
+            <select className="input" value={mes} onChange={(e) => setMes(e.target.value)}>
+              {['01','02','03','04','05','06','07','08','09','10','11','12'].map((m) => (
+                <option key={m} value={m}>{new Date(2000, Number(m) - 1, 1).toLocaleString('es-UY', { month: 'long' })}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="label">Año</label>
+            <select className="input" value={anio} onChange={(e) => setAnio(e.target.value)}>
+              {[hoy.getFullYear() - 1, hoy.getFullYear()].map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="label">Fecha pago</label>
+            <input type="date" className="input" value={fecha} onChange={(e) => setFecha(e.target.value)} />
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-oliva-100 bg-oliva-50/60 p-3">
+          <div className="text-[11px] uppercase tracking-wide text-oliva-600 mb-1">Sueldo (reparto por área)</div>
+          {lineas.length === 0 ? (
+            <div className="text-sm text-red-700">Sin sueldo configurado. Cargalo en Admin → Sueldos.</div>
+          ) : (
+            <div className="space-y-0.5 text-sm">
+              {lineas.map((l) => (
+                <div key={l.categoria} className="flex justify-between gap-3">
+                  <span className="text-oliva-700">{catNombres.get(l.categoria) ?? l.categoria}</span>
+                  <span className="tabular-nums">{money(l.monto)}</span>
+                </div>
+              ))}
+              <div className="flex justify-between gap-3 pt-1 border-t border-oliva-200 font-semibold">
+                <span>Sueldo nominal</span><span className="tabular-nums">{money(nominal)}</span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-lg border border-oliva-100 p-3 text-sm space-y-0.5">
+          <div className="text-[11px] uppercase tracking-wide text-oliva-500 mb-1">Neto a transferir (solo caja)</div>
+          <div className="flex justify-between gap-3"><span>Sueldo</span><span className="tabular-nums">{money(nominal)}</span></div>
+          {adel > 0 && <div className="flex justify-between gap-3 text-red-700"><span>− Adelantos del mes</span><span className="tabular-nums">− {money(adel)}</span></div>}
+          {reembPend.total > 0 && <div className="flex justify-between gap-3 text-green-700"><span>+ Reembolsos pendientes</span><span className="tabular-nums">+ {money(reembPend.total)}</span></div>}
+          <div className="flex justify-between gap-3 pt-1 border-t border-oliva-100 font-bold text-oliva-900"><span>A transferir</span><span className="tabular-nums">{money(neto)}</span></div>
+        </div>
+
+        <p className="text-[11px] text-oliva-500">Se registra el sueldo <b>exacto</b> ({money(nominal)}) en sus categorías; los adelantos y reembolsos quedan como están (no modifican el sueldo). El neto es solo lo que transferís.</p>
+
+        {yaLiquidado && <div className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">⚠ Ya hay un sueldo liquidado para {mesNombre} {anio}. Si confirmás, se registra de nuevo (duplicado).</div>}
+        {error && <div className="text-sm text-red-700">{error}</div>}
+
+        <div className="flex justify-end gap-2">
+          <button className="btn-secondary" onClick={onCerrar} disabled={guardando}>Cancelar</button>
+          <button className="btn-primary" onClick={liquidar} disabled={guardando || lineas.length === 0}>
+            {guardando ? 'Registrando…' : `Registrar sueldo ${money(nominal)}`}
+          </button>
+        </div>
+      </div>
+    </Dialog>
   )
 }
 

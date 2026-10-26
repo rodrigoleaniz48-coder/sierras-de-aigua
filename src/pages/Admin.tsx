@@ -351,12 +351,97 @@ export function Admin() {
         </div>
       )}
 
+      {puedeEditarMargenes && <SueldosEditor />}
+
       <NuevoProductoDialog abierto={nuevoProd} onCerrar={() => setNuevoProd(false)} onOk={() => { setNuevoProd(false); cargar() }} />
       <PresentacionDialog abierto={nuevaPresProd !== null} productoId={nuevaPresProd} onCerrar={() => setNuevaPresProd(null)} onOk={() => { setNuevaPresProd(null); cargar() }} />
       <PresentacionDialog abierto={editandoPres !== null} productoId={editandoPres?.producto_id ?? null} editar={editandoPres} onCerrar={() => setEditandoPres(null)} onOk={() => { setEditandoPres(null); cargar() }} />
       <EditorListasDialog abierto={editorListas} onCerrar={() => setEditorListas(false)} onOk={() => { setEditorListas(false); cargar() }} onRecargar={cargar} listas={listas} listaItems={listaItems} presentaciones={presentaciones} productos={productos} />
       <BackupDialog abierto={backupAbierto} onCerrar={() => setBackupAbierto(false)} />
       <RevisionDatosDialog abierto={revisionAbierto} onCerrar={() => setRevisionAbierto(false)} />
+    </div>
+  )
+}
+
+// Editor de sueldos por socio: reparto del sueldo nominal por categoría/área.
+// La suma de las líneas de un socio = su sueldo nominal. Se usa en "Liquidar sueldo".
+interface LineaSueldo { id?: number; categoria: string; monto: string }
+function SueldosEditor() {
+  const [socios, setSocios] = useState<{ id: string; nombre: string }[]>([])
+  const [cats, setCats] = useState<{ slug: string; nombre: string }[]>([])
+  const [porSocio, setPorSocio] = useState<Map<string, LineaSueldo[]>>(new Map())
+  const [guardando, setGuardando] = useState<string | null>(null)
+  const [msg, setMsg] = useState('')
+
+  async function cargar() {
+    const [s, c, r] = await Promise.all([
+      supabase.from('perfiles').select('id,nombre').eq('activo', true).neq('rol', 'campo').order('nombre'),
+      supabase.from('categorias_gasto').select('slug,nombre').eq('activo', true).order('orden').order('nombre'),
+      supabase.from('sueldos_socio').select('id,socio_id,categoria,monto').order('id'),
+    ])
+    setSocios((s.data as { id: string; nombre: string }[]) ?? [])
+    setCats((c.data as { slug: string; nombre: string }[]) ?? [])
+    const m = new Map<string, LineaSueldo[]>()
+    for (const row of ((r.data as { id: number; socio_id: string; categoria: string; monto: number }[]) ?? [])) {
+      const arr = m.get(row.socio_id) ?? []
+      arr.push({ id: row.id, categoria: row.categoria, monto: String(Number(row.monto)) })
+      m.set(row.socio_id, arr)
+    }
+    setPorSocio(m)
+  }
+  useEffect(() => { cargar() }, [])
+
+  function lineasDe(sid: string): LineaSueldo[] { return porSocio.get(sid) ?? [] }
+  function setLineas(sid: string, ls: LineaSueldo[]) { setPorSocio((prev) => new Map(prev).set(sid, ls)) }
+
+  async function guardar(sid: string) {
+    setGuardando(sid); setMsg('')
+    const ls = lineasDe(sid).filter((l) => l.categoria && Number(l.monto) > 0)
+    // Reemplazo total: borro las de ese socio y vuelvo a insertar.
+    await supabase.from('sueldos_socio').delete().eq('socio_id', sid)
+    if (ls.length > 0) {
+      const { error } = await supabase.from('sueldos_socio').insert(ls.map((l) => ({ socio_id: sid, categoria: l.categoria, monto: Number(l.monto), actualizado_en: new Date().toISOString() })))
+      if (error) { setGuardando(null); setMsg('Error: ' + error.message); return }
+    }
+    setGuardando(null); setMsg('Sueldo guardado.')
+    cargar()
+  }
+
+  return (
+    <div className="card p-4 space-y-4">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <h2 className="text-sm uppercase tracking-widest text-oliva-700 font-bold">💵 Sueldos por socio (reparto por área)</h2>
+        {msg && <span className="text-xs text-green-700">{msg}</span>}
+      </div>
+      <p className="text-xs text-oliva-600">El sueldo nominal se reparte en una o varias áreas (categorías de gasto). La suma es el sueldo total. Se usa en "Liquidar sueldo del mes" (Finanzas) para registrar el monto exacto.</p>
+      {socios.map((s) => {
+        const ls = lineasDe(s.id)
+        const nominal = ls.reduce((a, l) => a + (Number(l.monto) || 0), 0)
+        return (
+          <div key={s.id} className="rounded-lg border border-oliva-100 p-3 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-medium text-oliva-900">{s.nombre}</span>
+              <span className="text-sm tabular-nums text-oliva-700">Nominal: <b>{money(nominal)}</b></span>
+            </div>
+            {ls.map((l, i) => (
+              <div key={i} className="flex gap-2 items-center">
+                <select className="input flex-1" value={l.categoria} onChange={(e) => { const n = [...ls]; n[i] = { ...n[i], categoria: e.target.value }; setLineas(s.id, n) }}>
+                  <option value="">— categoría / área —</option>
+                  {cats.map((c) => <option key={c.slug} value={c.slug}>{c.nombre}</option>)}
+                </select>
+                <input type="number" className="input w-28 tabular-nums" value={l.monto} onChange={(e) => { const n = [...ls]; n[i] = { ...n[i], monto: e.target.value }; setLineas(s.id, n) }} placeholder="monto" />
+                <button type="button" className="text-red-700 text-xs underline" onClick={() => setLineas(s.id, ls.filter((_, j) => j !== i))}>quitar</button>
+              </div>
+            ))}
+            <div className="flex gap-2 items-center">
+              <button type="button" className="text-xs text-oliva-700 underline" onClick={() => setLineas(s.id, [...ls, { categoria: '', monto: '' }])}>+ agregar área</button>
+              <button type="button" className="btn-secondary text-xs ml-auto" onClick={() => guardar(s.id)} disabled={guardando === s.id}>
+                {guardando === s.id ? 'Guardando…' : 'Guardar sueldo'}
+              </button>
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }
