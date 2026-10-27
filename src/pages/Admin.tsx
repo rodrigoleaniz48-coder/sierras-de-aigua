@@ -370,17 +370,21 @@ function SueldosEditor() {
   const [socios, setSocios] = useState<{ id: string; nombre: string }[]>([])
   const [cats, setCats] = useState<{ slug: string; nombre: string }[]>([])
   const [porSocio, setPorSocio] = useState<Map<string, LineaSueldo[]>>(new Map())
+  const [jornaleros, setJornaleros] = useState<{ id: number; nombre: string; activo: boolean }[]>([])
+  const [nuevoJ, setNuevoJ] = useState('')
   const [guardando, setGuardando] = useState<string | null>(null)
   const [msg, setMsg] = useState('')
 
   async function cargar() {
-    const [s, c, r] = await Promise.all([
+    const [s, c, r, j] = await Promise.all([
       supabase.from('perfiles').select('id,nombre').eq('activo', true).neq('rol', 'campo').order('nombre'),
       supabase.from('categorias_gasto').select('slug,nombre').eq('activo', true).order('orden').order('nombre'),
       supabase.from('sueldos_socio').select('id,socio_id,categoria,monto').order('id'),
+      supabase.from('jornaleros').select('id,nombre,activo').order('nombre'),
     ])
     setSocios((s.data as { id: string; nombre: string }[]) ?? [])
     setCats((c.data as { slug: string; nombre: string }[]) ?? [])
+    setJornaleros((j.data as { id: number; nombre: string; activo: boolean }[]) ?? [])
     const m = new Map<string, LineaSueldo[]>()
     for (const row of ((r.data as { id: number; socio_id: string; categoria: string; monto: number }[]) ?? [])) {
       const arr = m.get(row.socio_id) ?? []
@@ -390,6 +394,17 @@ function SueldosEditor() {
     setPorSocio(m)
   }
   useEffect(() => { cargar() }, [])
+
+  async function agregarJornalero() {
+    const nombre = nuevoJ.trim()
+    if (!nombre) return
+    await supabase.from('jornaleros').insert({ nombre })
+    setNuevoJ(''); cargar()
+  }
+  async function toggleJornalero(id: number, activo: boolean) {
+    await supabase.from('jornaleros').update({ activo: !activo, actualizado_en: new Date().toISOString() }).eq('id', id)
+    cargar()
+  }
 
   function lineasDe(sid: string): LineaSueldo[] { return porSocio.get(sid) ?? [] }
   function setLineas(sid: string, ls: LineaSueldo[]) { setPorSocio((prev) => new Map(prev).set(sid, ls)) }
@@ -442,6 +457,21 @@ function SueldosEditor() {
           </div>
         )
       })}
+
+      <div className="rounded-lg border border-oliva-100 p-3 space-y-2">
+        <div className="text-[11px] uppercase tracking-wide text-oliva-600 font-semibold">Jornaleros (monto variable)</div>
+        <p className="text-[11px] text-oliva-500">Solo un nombre. El jornal se carga cada mes en Finanzas ("Registrar jornal"), con monto variable por área.</p>
+        {jornaleros.map((j) => (
+          <div key={j.id} className="flex items-center justify-between gap-2 text-sm">
+            <span className={j.activo ? 'text-oliva-800' : 'text-oliva-400 line-through'}>{j.nombre}</span>
+            <button type="button" className="text-xs text-oliva-700 underline" onClick={() => toggleJornalero(j.id, j.activo)}>{j.activo ? 'desactivar' : 'activar'}</button>
+          </div>
+        ))}
+        <div className="flex gap-2 items-center pt-1">
+          <input className="input flex-1" value={nuevoJ} onChange={(e) => setNuevoJ(e.target.value)} placeholder="Nombre del jornalero" />
+          <button type="button" className="btn-secondary text-xs" onClick={agregarJornalero}>+ Agregar</button>
+        </div>
+      </div>
     </div>
   )
 }

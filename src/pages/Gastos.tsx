@@ -25,6 +25,7 @@ interface Gasto {
   reembolsado: boolean
   es_adelanto: boolean
   comprobante_url: string | null
+  jornalero_id?: number | null
 }
 
 type TipoGasto = 'normal' | 'reembolsable' | 'adelanto'
@@ -156,6 +157,10 @@ export function Gastos() {
   // Socios con sueldo configurado (para mostrar "Liquidar sueldo") + socio a liquidar.
   const [sueldoSocioIds, setSueldoSocioIds] = useState<Set<string>>(new Set())
   const [liquidar, setLiquidar] = useState<{ id: string; nombre: string } | null>(null)
+  // Jornaleros (monto variable, por nombre) + diálogos de jornal/adelanto.
+  const [jornaleros, setJornaleros] = useState<{ id: number; nombre: string }[]>([])
+  const [registrarJornal, setRegistrarJornal] = useState<{ id: number; nombre: string } | null>(null)
+  const [adelantoJornal, setAdelantoJornal] = useState<{ id: number; nombre: string } | null>(null)
 
   // Filtros
   const hoy = new Date()
@@ -177,6 +182,9 @@ export function Gastos() {
     setCargando(false)
     supabase.from('sueldos_socio').select('socio_id').then(({ data }) => {
       setSueldoSocioIds(new Set(((data as { socio_id: string }[]) ?? []).map((x) => x.socio_id)))
+    })
+    supabase.from('jornaleros').select('id,nombre').eq('activo', true).order('nombre').then(({ data }) => {
+      setJornaleros((data as { id: number; nombre: string }[]) ?? [])
     })
   }
   // Lookup slug -> nombre para mostrar label lindo
@@ -244,13 +252,13 @@ export function Gastos() {
     // Todos los socios que tienen movimientos en cuenta este periodo
     const set = new Set<string>()
     for (const g of filtrados) {
-      if (g.reembolsable || g.es_adelanto) set.add(g.socio_id)
+      if ((g.reembolsable || g.es_adelanto) && !g.jornalero_id) set.add(g.socio_id)
     }
     return [...set]
   })()
 
   function cuentaDe(sid: string) {
-    const gs = filtrados.filter((g) => g.socio_id === sid)
+    const gs = filtrados.filter((g) => g.socio_id === sid && !g.jornalero_id)
     const reembUYU = gs.filter((g) => g.moneda === 'UYU' && g.reembolsable && !g.reembolsado).reduce((s, g) => s + Number(g.monto), 0)
     const reembUSD = gs.filter((g) => g.moneda === 'USD' && g.reembolsable && !g.reembolsado).reduce((s, g) => s + Number(g.monto), 0)
     const adelUYU  = gs.filter((g) => g.moneda === 'UYU' && g.es_adelanto).reduce((s, g) => s + Number(g.monto), 0)
@@ -362,21 +370,36 @@ export function Gastos() {
         </div>
       )}
 
-      {/* Sueldos del mes: liquidar el sueldo nominal (exacto) de cada socio configurado */}
-      {socios.filter((s) => sueldoSocioIds.has(s.id) && (veTodos || s.id === soyYo)).length > 0 && (
+      {/* Personal del mes: sueldos fijos (socios) + jornales variables (jornaleros) */}
+      {veTodos && (socios.filter((s) => sueldoSocioIds.has(s.id)).length > 0 || jornaleros.length > 0) && (
         <div className="card p-4">
-          <div className="text-xs uppercase tracking-widest text-oliva-700 font-bold mb-2">💵 Sueldos del mes</div>
-          <div className="space-y-1.5">
-            {socios.filter((s) => sueldoSocioIds.has(s.id) && (veTodos || s.id === soyYo)).map((s) => (
-              <div key={s.id} className="flex items-center justify-between gap-3 py-1 border-b border-oliva-100/70 last:border-0">
-                <span className="text-sm text-oliva-800">{s.nombre}</span>
-                <button type="button" className="btn-secondary text-xs" onClick={() => setLiquidar({ id: s.id, nombre: s.nombre })}>
-                  Liquidar sueldo
-                </button>
-              </div>
-            ))}
-          </div>
-          <div className="text-[11px] text-oliva-500 mt-2">Registra el sueldo nominal exacto (según el reparto por área de Admin) y te dice el neto a transferir (sueldo − adelantos + reembolsos). No modifica el sueldo con esos ajustes.</div>
+          <div className="text-xs uppercase tracking-widest text-oliva-700 font-bold mb-2">💵 Personal del mes</div>
+          {socios.filter((s) => sueldoSocioIds.has(s.id)).length > 0 && (
+            <div className="space-y-1.5">
+              <div className="text-[11px] uppercase tracking-wide text-oliva-500">Sueldos (socios)</div>
+              {socios.filter((s) => sueldoSocioIds.has(s.id)).map((s) => (
+                <div key={s.id} className="flex items-center justify-between gap-3 py-1 border-b border-oliva-100/70 last:border-0">
+                  <span className="text-sm text-oliva-800">{s.nombre}</span>
+                  <button type="button" className="btn-secondary text-xs" onClick={() => setLiquidar({ id: s.id, nombre: s.nombre })}>Liquidar sueldo</button>
+                </div>
+              ))}
+            </div>
+          )}
+          {jornaleros.length > 0 && (
+            <div className="space-y-1.5 mt-3">
+              <div className="text-[11px] uppercase tracking-wide text-oliva-500">Jornales (monto variable)</div>
+              {jornaleros.map((j) => (
+                <div key={j.id} className="flex items-center justify-between gap-3 py-1 border-b border-oliva-100/70 last:border-0">
+                  <span className="text-sm text-oliva-800">{j.nombre}</span>
+                  <div className="flex gap-2">
+                    <button type="button" className="btn-secondary text-xs" onClick={() => setAdelantoJornal(j)}>Adelanto</button>
+                    <button type="button" className="btn-secondary text-xs" onClick={() => setRegistrarJornal(j)}>Registrar jornal</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="text-[11px] text-oliva-500 mt-2">Sueldos: monto fijo por área (Admin). Jornales: monto variable que cargás cada mes por área; los adelantos se descuentan del jornal.</div>
         </div>
       )}
 
@@ -572,6 +595,8 @@ export function Gastos() {
         onCambio={cargar}
       />
       <LiquidarSueldoDialog socio={liquidar} onCerrar={() => setLiquidar(null)} onOk={() => { setLiquidar(null); cargar() }} />
+      <AdelantoJornalDialog jornalero={adelantoJornal} onCerrar={() => setAdelantoJornal(null)} onOk={() => { setAdelantoJornal(null); cargar() }} />
+      <RegistrarJornalDialog jornalero={registrarJornal} onCerrar={() => setRegistrarJornal(null)} onOk={() => { setRegistrarJornal(null); cargar() }} />
     </div>
   )
 }
@@ -726,6 +751,206 @@ function LiquidarSueldoDialog({ socio, onCerrar, onOk }: {
           <button className="btn-primary" onClick={liquidar} disabled={guardando || lineas.length === 0}>
             {guardando ? 'Registrando…' : `Registrar sueldo ${money(nominal)}`}
           </button>
+        </div>
+      </div>
+    </Dialog>
+  )
+}
+
+// Adelanto a un jornalero: anticipo del jornal. Sale de una cuenta o efectivo, queda
+// registrado (es_adelanto, jornalero_id) y se descuenta al registrar el jornal del mes.
+function AdelantoJornalDialog({ jornalero, onCerrar, onOk }: {
+  jornalero: { id: number; nombre: string } | null
+  onCerrar: () => void
+  onOk: () => void
+}) {
+  const { perfil } = useAuth()
+  const [fecha, setFecha] = useState(() => new Date().toISOString().slice(0, 10))
+  const [monto, setMonto] = useState('')
+  const [medio, setMedio] = useState<'efectivo' | 'transferencia'>('transferencia')
+  const [cuentaId, setCuentaId] = useState('')
+  const [nota, setNota] = useState('')
+  const [cuentas, setCuentas] = useState<CuentaBancariaBase[]>([])
+  const [guardando, setGuardando] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!jornalero) return
+    setFecha(new Date().toISOString().slice(0, 10)); setMonto(''); setMedio('transferencia'); setNota(''); setError(null)
+    supabase.from('cuentas_bancarias').select('id,nombre,moneda').eq('activo', true).eq('moneda', 'UYU').order('id').then(({ data }) => {
+      const arr = (data as CuentaBancariaBase[]) ?? []
+      setCuentas(arr); setCuentaId(arr[0] ? String(arr[0].id) : '')
+    })
+  }, [jornalero])
+
+  async function guardar() {
+    if (!jornalero || !perfil) return
+    const m = Number(monto)
+    if (!(m > 0)) { setError('El monto debe ser mayor a cero.'); return }
+    if (medio === 'transferencia' && !cuentaId) { setError('Elegí la cuenta de la que sale.'); return }
+    setGuardando(true); setError(null)
+    const { error: e } = await supabase.from('gastos').insert({
+      fecha, socio_id: perfil.id, jornalero_id: jornalero.id, categoria: 'varios', monto: m, moneda: 'UYU',
+      descripcion: `Adelanto jornal · ${jornalero.nombre}${nota.trim() ? ` — ${nota.trim()}` : ''}`,
+      metodo_pago: medio, cuenta_id: medio === 'efectivo' ? null : Number(cuentaId),
+      reembolsable: false, reembolsado: false, es_adelanto: true, actualizado_en: new Date().toISOString(),
+    })
+    setGuardando(false)
+    if (e) { setError(e.message); return }
+    onOk()
+  }
+
+  if (!jornalero) return null
+  return (
+    <Dialog abierto={jornalero !== null} onCerrar={onCerrar} titulo={`Adelanto · ${jornalero.nombre}`} ancho="sm">
+      <div className="space-y-4">
+        <p className="text-xs text-oliva-600">Anticipo del jornal: queda registrado y se <b>descuenta</b> al registrar el jornal del mes. No cuenta como gasto hasta ese momento.</p>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="label">Fecha</label>
+            <input type="date" className="input" value={fecha} onChange={(e) => setFecha(e.target.value)} />
+          </div>
+          <div>
+            <label className="label">Monto</label>
+            <input type="number" className="input tabular-nums" min="0" step="0.01" value={monto} onChange={(e) => setMonto(e.target.value)} />
+          </div>
+          <div>
+            <label className="label">Medio</label>
+            <select className="input" value={medio} onChange={(e) => setMedio(e.target.value as 'efectivo' | 'transferencia')}>
+              <option value="transferencia">Transferencia</option>
+              <option value="efectivo">Efectivo</option>
+            </select>
+          </div>
+          {medio === 'transferencia' && (
+            <div>
+              <label className="label">Cuenta de la que sale</label>
+              <select className="input" value={cuentaId} onChange={(e) => setCuentaId(e.target.value)}>
+                {cuentas.length === 0 && <option value="">(sin cuentas)</option>}
+                {cuentas.map((c) => <option key={c.id} value={String(c.id)}>{c.nombre}</option>)}
+              </select>
+            </div>
+          )}
+          <div className="col-span-2">
+            <label className="label">Nota (opcional)</label>
+            <input className="input" value={nota} onChange={(e) => setNota(e.target.value)} placeholder="ej: pidió para el finde" />
+          </div>
+        </div>
+        {error && <div className="text-sm text-red-700">{error}</div>}
+        <div className="flex justify-end gap-2">
+          <button className="btn-secondary" onClick={onCerrar} disabled={guardando}>Cancelar</button>
+          <button className="btn-primary" onClick={guardar} disabled={guardando}>{guardando ? 'Guardando…' : 'Registrar adelanto'}</button>
+        </div>
+      </div>
+    </Dialog>
+  )
+}
+
+// Registrar el jornal del mes de un jornalero: monto variable repartido por area (lineas
+// categoria + monto), descuenta los adelantos pendientes y da el neto a pagar.
+function RegistrarJornalDialog({ jornalero, onCerrar, onOk }: {
+  jornalero: { id: number; nombre: string } | null
+  onCerrar: () => void
+  onOk: () => void
+}) {
+  const { perfil } = useAuth()
+  const hoy = new Date()
+  const [mes, setMes] = useState(String(hoy.getMonth() + 1).padStart(2, '0'))
+  const [anio, setAnio] = useState(String(hoy.getFullYear()))
+  const [fecha, setFecha] = useState(hoy.toISOString().slice(0, 10))
+  const [lineas, setLineas] = useState<{ categoria: string; monto: string }[]>([{ categoria: '', monto: '' }])
+  const [cats, setCats] = useState<{ slug: string; nombre: string }[]>([])
+  const [adelPend, setAdelPend] = useState<{ ids: number[]; total: number }>({ ids: [], total: 0 })
+  const [guardando, setGuardando] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const mesNombre = new Date(Number(anio), Number(mes) - 1, 1).toLocaleString('es-UY', { month: 'long' })
+  const marca = `[jornal ${anio}-${mes}]`
+
+  useEffect(() => {
+    if (!jornalero) return
+    setLineas([{ categoria: '', monto: '' }]); setError(null)
+    supabase.from('categorias_gasto').select('slug,nombre').eq('activo', true).order('orden').order('nombre').then(({ data }) => setCats((data as { slug: string; nombre: string }[]) ?? []))
+    supabase.from('gastos').select('id,monto').eq('jornalero_id', jornalero.id).eq('es_adelanto', true).eq('reembolsado', false).then(({ data }) => {
+      const a = (data as { id: number; monto: number }[]) ?? []
+      setAdelPend({ ids: a.map((x) => x.id), total: a.reduce((s, x) => s + Number(x.monto), 0) })
+    })
+  }, [jornalero])
+
+  const total = lineas.reduce((s, l) => s + (Number(l.monto) || 0), 0)
+  const neto = total - adelPend.total
+
+  async function guardar() {
+    if (!jornalero || !perfil) return
+    const validas = lineas.filter((l) => l.categoria && Number(l.monto) > 0)
+    if (validas.length === 0) { setError('Cargá al menos una línea (categoría + monto).'); return }
+    setGuardando(true); setError(null)
+    const rows = validas.map((l) => ({
+      fecha, socio_id: perfil.id, jornalero_id: jornalero.id, categoria: l.categoria, monto: Number(l.monto), moneda: 'UYU',
+      descripcion: `Jornal ${jornalero.nombre} ${mesNombre} ${anio} ${marca}`,
+      metodo_pago: 'transferencia', reembolsable: false, reembolsado: false, es_adelanto: false, actualizado_en: new Date().toISOString(),
+    }))
+    const { error: e1 } = await supabase.from('gastos').insert(rows)
+    if (e1) { setGuardando(false); setError(e1.message); return }
+    if (adelPend.ids.length > 0) {
+      // Marcar adelantos como saldados (consumidos por este jornal) para no descontarlos de nuevo.
+      const { error: e2 } = await supabase.from('gastos').update({ reembolsado: true }).in('id', adelPend.ids)
+      if (e2) { setGuardando(false); setError('Jornal registrado, pero fallo saldar adelantos: ' + e2.message); return }
+    }
+    setGuardando(false)
+    onOk()
+  }
+
+  if (!jornalero) return null
+  return (
+    <Dialog abierto={jornalero !== null} onCerrar={onCerrar} titulo={`Jornal · ${jornalero.nombre}`} ancho="sm">
+      <div className="space-y-4">
+        <div className="grid grid-cols-3 gap-3">
+          <div>
+            <label className="label">Mes</label>
+            <select className="input" value={mes} onChange={(e) => setMes(e.target.value)}>
+              {['01','02','03','04','05','06','07','08','09','10','11','12'].map((m) => (
+                <option key={m} value={m}>{new Date(2000, Number(m) - 1, 1).toLocaleString('es-UY', { month: 'long' })}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="label">Año</label>
+            <select className="input" value={anio} onChange={(e) => setAnio(e.target.value)}>
+              {[hoy.getFullYear() - 1, hoy.getFullYear()].map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="label">Fecha pago</label>
+            <input type="date" className="input" value={fecha} onChange={(e) => setFecha(e.target.value)} />
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <div className="text-[11px] uppercase tracking-wide text-oliva-500">Jornal por área (monto variable)</div>
+          {lineas.map((l, i) => (
+            <div key={i} className="flex gap-2 items-center">
+              <select className="input flex-1" value={l.categoria} onChange={(e) => { const n = [...lineas]; n[i] = { ...n[i], categoria: e.target.value }; setLineas(n) }}>
+                <option value="">— categoría / área —</option>
+                {cats.map((c) => <option key={c.slug} value={c.slug}>{c.nombre}</option>)}
+              </select>
+              <input type="number" className="input w-28 tabular-nums" value={l.monto} onChange={(e) => { const n = [...lineas]; n[i] = { ...n[i], monto: e.target.value }; setLineas(n) }} placeholder="monto" />
+              {lineas.length > 1 && <button type="button" className="text-red-700 text-xs underline" onClick={() => setLineas(lineas.filter((_, j) => j !== i))}>quitar</button>}
+            </div>
+          ))}
+          <button type="button" className="text-xs text-oliva-700 underline" onClick={() => setLineas([...lineas, { categoria: '', monto: '' }])}>+ agregar área</button>
+        </div>
+
+        <div className="rounded-lg border border-oliva-100 p-3 text-sm space-y-0.5">
+          <div className="flex justify-between gap-3"><span>Jornal total</span><span className="tabular-nums">{money(total)}</span></div>
+          {adelPend.total > 0 && <div className="flex justify-between gap-3 text-red-700"><span>− Adelantos pendientes</span><span className="tabular-nums">− {money(adelPend.total)}</span></div>}
+          <div className="flex justify-between gap-3 pt-1 border-t border-oliva-100 font-bold text-oliva-900"><span>Neto a pagar</span><span className="tabular-nums">{money(neto)}</span></div>
+        </div>
+        <p className="text-[11px] text-oliva-500">Se registra el jornal por área como gasto; los adelantos pendientes se descuentan del neto y quedan saldados.</p>
+
+        {error && <div className="text-sm text-red-700">{error}</div>}
+        <div className="flex justify-end gap-2">
+          <button className="btn-secondary" onClick={onCerrar} disabled={guardando}>Cancelar</button>
+          <button className="btn-primary" onClick={guardar} disabled={guardando}>{guardando ? 'Registrando…' : `Registrar jornal ${money(total)}`}</button>
         </div>
       </div>
     </Dialog>

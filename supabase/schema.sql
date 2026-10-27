@@ -512,3 +512,25 @@ drop policy if exists sueldos_upd on public.sueldos_socio;
 create policy sueldos_upd on public.sueldos_socio for update using (ve_todos_gastos());
 drop policy if exists sueldos_del on public.sueldos_socio;
 create policy sueldos_del on public.sueldos_socio for delete using (ve_todos_gastos());
+
+-- =========================================================================
+-- 12. Jornaleros: trabajadores que cobran jornal (monto variable por mes),
+--     no son usuarios de la app (solo un nombre). El jornal y sus adelantos
+--     se registran como gastos con gastos.jornalero_id.
+-- =========================================================================
+create table if not exists public.jornaleros (
+  id bigserial primary key,
+  nombre text not null,
+  activo boolean not null default true,
+  actualizado_en timestamptz not null default now()
+);
+alter table public.jornaleros enable row level security;
+drop policy if exists jornaleros_sel on public.jornaleros;
+create policy jornaleros_sel on public.jornaleros for select using (ve_todos_gastos());
+drop policy if exists jornaleros_ins on public.jornaleros;
+create policy jornaleros_ins on public.jornaleros for insert with check (ve_todos_gastos());
+drop policy if exists jornaleros_upd on public.jornaleros;
+create policy jornaleros_upd on public.jornaleros for update using (ve_todos_gastos());
+
+alter table public.gastos add column if not exists jornalero_id bigint references public.jornaleros(id);
+create index if not exists gastos_jornalero_idx on public.gastos(jornalero_id);
