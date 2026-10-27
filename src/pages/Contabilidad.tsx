@@ -921,7 +921,7 @@ function EstadoResultados() {
           )}
 
           {/* Analisis operativo / sostenibilidad (pesos y dolares) */}
-          <details className="card p-0 overflow-hidden" open>
+          <details className="card p-0 overflow-hidden">
             <summary className="cursor-pointer select-none px-5 py-3 text-sm font-medium text-oliva-800 hover:bg-oliva-50 flex items-center justify-between gap-3">
               <span>⚖️ ¿Se sostiene? · Análisis operativo</span>
               <span className="flex items-center gap-2 text-xs font-normal text-oliva-500 whitespace-nowrap">
