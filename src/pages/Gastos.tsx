@@ -374,8 +374,9 @@ export function Gastos() {
 
       {/* Personal del mes: sueldos fijos (socios) + jornales variables (jornaleros) */}
       {veTodos && (socios.filter((s) => sueldoSocioIds.has(s.id)).length > 0 || jornaleros.length > 0) && (
-        <div className="card p-4">
-          <div className="text-xs uppercase tracking-widest text-oliva-700 font-bold mb-2">💵 Personal del mes</div>
+        <details className="card p-0 overflow-hidden">
+          <summary className="cursor-pointer select-none px-4 py-3 text-xs uppercase tracking-widest text-oliva-700 font-bold hover:bg-oliva-50">💵 Personal del mes</summary>
+          <div className="px-4 pb-4 pt-1 border-t border-oliva-100">
           {socios.filter((s) => sueldoSocioIds.has(s.id)).length > 0 && (
             <div className="space-y-1.5">
               <div className="text-[11px] uppercase tracking-wide text-oliva-500">Sueldos (socios)</div>
@@ -402,7 +403,8 @@ export function Gastos() {
             </div>
           )}
           <div className="text-[11px] text-oliva-500 mt-2">Sueldos: monto fijo por área (Admin). Jornales: monto variable que cargás cada mes por área; los adelantos se descuentan del jornal.</div>
-        </div>
+          </div>
+        </details>
       )}
 
       {/* Cuenta por socio (reembolsables vs adelantos) — una card por socio con movimientos */}
