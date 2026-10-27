@@ -161,6 +161,8 @@ export function Gastos() {
   const [jornaleros, setJornaleros] = useState<{ id: number; nombre: string }[]>([])
   const [registrarJornal, setRegistrarJornal] = useState<{ id: number; nombre: string } | null>(null)
   const [adelantoJornal, setAdelantoJornal] = useState<{ id: number; nombre: string } | null>(null)
+  // Cuentas con la empresa (por socio) colapsables.
+  const [cuentaAbierta, setCuentaAbierta] = useState<Set<string>>(new Set())
 
   // Filtros
   const hoy = new Date()
@@ -411,11 +413,30 @@ export function Gastos() {
         const pendCant = c.pendIds.length
         const esConfirm = confirmMarcarSocio === c.sid
         const marcando = marcandoReembSocio === c.sid
+        const abierta = cuentaAbierta.has(c.sid)
+        const resumenAjuste = (() => {
+          const parts: string[] = []
+          if (c.netoUYU !== 0) parts.push(`${c.netoUYU >= 0 ? '+' : '−'} ${money(Math.abs(c.netoUYU))}`)
+          if (c.netoUSD !== 0) parts.push(`${c.netoUSD >= 0 ? '+' : '−'} U$S ${Number(Math.abs(c.netoUSD)).toLocaleString('es-UY')}`)
+          return parts.length ? parts.join(' · ') : 'saldado'
+        })()
         return (
-        <div key={c.sid} className="card p-4 border-2 border-oliva-200 bg-oliva-50/40">
-          <div className="text-xs uppercase tracking-widest text-oliva-700 font-bold mb-2">
-            🧾 Cuenta con la empresa · {c.nombre}{esYo && ' (vos)'}
-          </div>
+        <div key={c.sid} className="card p-0 border-2 border-oliva-200 bg-oliva-50/40 overflow-hidden">
+          <button
+            type="button"
+            className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-oliva-50/80"
+            onClick={() => setCuentaAbierta((prev) => { const s = new Set(prev); if (s.has(c.sid)) s.delete(c.sid); else s.add(c.sid); return s })}
+          >
+            <span className="text-xs uppercase tracking-widest text-oliva-700 font-bold">
+              🧾 Cuenta con la empresa · {c.nombre}{esYo && ' (vos)'}
+            </span>
+            <span className="flex items-center gap-2 shrink-0">
+              {!abierta && <span className="text-xs tabular-nums text-oliva-600">Ajuste: {resumenAjuste}</span>}
+              <span className="text-oliva-400">{abierta ? '▾' : '▸'}</span>
+            </span>
+          </button>
+          {abierta && (
+          <div className="px-4 pb-4">
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-sm">
             <div>
               <div className="text-[11px] uppercase tracking-wide text-oliva-600">A favor {yoOSocio} (reembolsables)</div>
@@ -508,6 +529,8 @@ export function Gastos() {
                 </div>
               )}
             </div>
+          )}
+          </div>
           )}
         </div>
         )
