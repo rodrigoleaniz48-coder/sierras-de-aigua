@@ -550,6 +550,7 @@ export function Gastos() {
           <table className="w-full text-sm min-w-[720px]">
             <thead>
               <tr className="text-left text-xs uppercase tracking-wide text-oliva-600 border-b border-oliva-100 bg-oliva-50">
+                <th className="py-2 px-4">#</th>
                 <th className="py-2 px-4">Fecha</th>
                 <th className="py-2 px-4">Categoría</th>
                 {veTodos && <th className="py-2 px-4">Socio</th>}
@@ -566,6 +567,7 @@ export function Gastos() {
                   className={`border-b border-oliva-100/70 last:border-0 hover:bg-oliva-50/60 cursor-pointer ${g.socio_id !== soyYo ? 'bg-oliva-50/30' : ''}`}
                   onClick={() => setEditando(g)}
                 >
+                  <td className="py-2 px-4 tabular-nums text-oliva-500 text-xs">#{g.id}</td>
                   <td className="py-2 px-4 tabular-nums text-oliva-700 whitespace-nowrap">{fFecha(g.fecha)}</td>
                   <td className="py-2 px-4 text-oliva-800">{catLabel(g.categoria)}</td>
                   {veTodos && <td className="py-2 px-4 text-oliva-700 text-xs">{socioPorId.get(g.socio_id)?.nombre ?? '—'}</td>}
