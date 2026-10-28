@@ -423,11 +423,12 @@ function SueldosEditor() {
   }
 
   return (
-    <div className="card p-4 space-y-4">
-      <div className="flex items-center justify-between gap-2 flex-wrap">
+    <details className="card overflow-hidden">
+      <summary className="cursor-pointer select-none px-4 py-3 flex items-center justify-between gap-2 flex-wrap hover:bg-oliva-50">
         <h2 className="text-sm uppercase tracking-widest text-oliva-700 font-bold">💵 Sueldos por socio (reparto por área)</h2>
         {msg && <span className="text-xs text-green-700">{msg}</span>}
-      </div>
+      </summary>
+      <div className="px-4 pb-4 space-y-4">
       <p className="text-xs text-oliva-600">El sueldo nominal se reparte en una o varias áreas (categorías de gasto). La suma es el sueldo total. Se usa en "Liquidar sueldo del mes" (Finanzas) para registrar el monto exacto.</p>
       {socios.map((s) => {
         const ls = lineasDe(s.id)
@@ -472,7 +473,8 @@ function SueldosEditor() {
           <button type="button" className="btn-secondary text-xs" onClick={agregarJornalero}>+ Agregar</button>
         </div>
       </div>
-    </div>
+      </div>
+    </details>
   )
 }
 
