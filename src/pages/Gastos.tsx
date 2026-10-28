@@ -1156,6 +1156,21 @@ function GastoDialog({
   const propio = !editar || editar.socio_id === socioId
   const soloLectura = editar !== null && editar !== undefined && !propio && !veTodos
 
+  // Adelanto de un jornalero: se edita con una vista propia (no la de adelanto de socio).
+  const esAdelantoJornal = !!(editar && editar.jornalero_id && editar.es_adelanto)
+  async function guardarAdelantoJornal() {
+    if (!editar) return
+    setGuardando(true); setError(null)
+    const { error } = await supabase.from('gastos').update({
+      fecha, monto: Number(monto) || 0, metodo_pago: metodoPago,
+      cuenta_id: metodoPago === 'efectivo' ? null : (cuentaId ? Number(cuentaId) : null),
+      descripcion: descripcion.trim() || null, actualizado_en: new Date().toISOString(),
+    }).eq('id', editar.id)
+    setGuardando(false)
+    if (error) { setError(error.message); return }
+    onOk()
+  }
+
   async function guardar(e: React.FormEvent) {
     e.preventDefault()
     setGuardando(true); setError(null)
@@ -1202,6 +1217,57 @@ function GastoDialog({
       await supabase.from('correos_sincronizados').update({ estado_manual: 'pagada' }).eq('id', correoId)
     }
     onOk()
+  }
+
+  if (esAdelantoJornal && editar) {
+    return (
+      <Dialog abierto={abierto} onCerrar={onCerrar} titulo="Adelanto de jornal" ancho="sm">
+        <div className="space-y-4">
+          <p className="text-xs text-oliva-600">{editar.descripcion ?? 'Adelanto de jornal'}</p>
+          <p className="text-[11px] text-oliva-500">Es un <b>anticipo del jornal</b> (no es gasto hasta registrar el jornal del mes, donde se descuenta). No tiene categoría de área: eso se define al registrar el jornal.</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label">Fecha</label>
+              <input type="date" className="input" value={fecha} onChange={(e) => setFecha(e.target.value)} disabled={soloLectura} />
+            </div>
+            <div>
+              <label className="label">Monto</label>
+              <input type="number" className="input tabular-nums" min="0" step="0.01" value={monto} onChange={(e) => setMonto(e.target.value)} disabled={soloLectura} />
+            </div>
+            <div>
+              <label className="label">Medio</label>
+              <select className="input" value={metodoPago} onChange={(e) => setMetodoPago(e.target.value)} disabled={soloLectura}>
+                <option value="transferencia">Transferencia</option>
+                <option value="efectivo">Efectivo</option>
+              </select>
+            </div>
+            {metodoPago !== 'efectivo' && (
+              <div>
+                <label className="label">Cuenta de la que sale</label>
+                <select className="input" value={cuentaId} onChange={(e) => setCuentaId(e.target.value)} disabled={soloLectura}>
+                  <option value="">— cuenta —</option>
+                  {cuentas.filter((c) => c.moneda === 'UYU').map((c) => <option key={c.id} value={String(c.id)}>{c.nombre}</option>)}
+                </select>
+              </div>
+            )}
+            <div className="col-span-2">
+              <label className="label">Nota</label>
+              <input className="input" value={descripcion} onChange={(e) => setDescripcion(e.target.value)} disabled={soloLectura} />
+            </div>
+          </div>
+          {error && <div className="text-sm text-red-700">{error}</div>}
+          <div className="flex justify-between items-center gap-2 pt-1">
+            {onEliminar && !soloLectura
+              ? <button type="button" className="text-xs text-red-700 underline" onClick={async () => { setGuardando(true); try { await onEliminar(editar) } catch (e) { setError(e instanceof Error ? e.message : 'Error'); setGuardando(false) } }} disabled={guardando}>Eliminar adelanto</button>
+              : <span />}
+            <div className="flex gap-2">
+              <button type="button" className="btn-secondary" onClick={onCerrar} disabled={guardando}>{soloLectura ? 'Cerrar' : 'Cancelar'}</button>
+              {!soloLectura && <button type="button" className="btn-primary" onClick={guardarAdelantoJornal} disabled={guardando}>{guardando ? 'Guardando…' : 'Guardar'}</button>}
+            </div>
+          </div>
+        </div>
+      </Dialog>
+    )
   }
 
   return (
