@@ -792,6 +792,7 @@ function AdelantoJornalDialog({ jornalero, onCerrar, onOk }: {
   const { perfil } = useAuth()
   const [fecha, setFecha] = useState(() => new Date().toISOString().slice(0, 10))
   const [monto, setMonto] = useState('')
+  const [moneda, setMoneda] = useState<'UYU' | 'USD'>('UYU')
   const [medio, setMedio] = useState<'efectivo' | 'transferencia'>('transferencia')
   const [cuentaId, setCuentaId] = useState('')
   const [nota, setNota] = useState('')
@@ -801,12 +802,14 @@ function AdelantoJornalDialog({ jornalero, onCerrar, onOk }: {
 
   useEffect(() => {
     if (!jornalero) return
-    setFecha(new Date().toISOString().slice(0, 10)); setMonto(''); setMedio('transferencia'); setNota(''); setError(null)
-    supabase.from('cuentas_bancarias').select('id,nombre,moneda').eq('activo', true).eq('moneda', 'UYU').order('id').then(({ data }) => {
-      const arr = (data as CuentaBancariaBase[]) ?? []
-      setCuentas(arr); setCuentaId(arr[0] ? String(arr[0].id) : '')
+    setFecha(new Date().toISOString().slice(0, 10)); setMonto(''); setMoneda('UYU'); setMedio('transferencia'); setNota(''); setError(null)
+    supabase.from('cuentas_bancarias').select('id,nombre,moneda').eq('activo', true).order('id').then(({ data }) => {
+      setCuentas((data as CuentaBancariaBase[]) ?? [])
     })
   }, [jornalero])
+
+  const cuentasMoneda = cuentas.filter((c) => c.moneda === moneda)
+  useEffect(() => { setCuentaId(cuentasMoneda[0] ? String(cuentasMoneda[0].id) : '') }, [moneda, cuentas])
 
   async function guardar() {
     if (!jornalero || !perfil) return
@@ -815,7 +818,7 @@ function AdelantoJornalDialog({ jornalero, onCerrar, onOk }: {
     if (medio === 'transferencia' && !cuentaId) { setError('Elegí la cuenta de la que sale.'); return }
     setGuardando(true); setError(null)
     const { error: e } = await supabase.from('gastos').insert({
-      fecha, socio_id: perfil.id, jornalero_id: jornalero.id, categoria: 'varios', monto: m, moneda: 'UYU',
+      fecha, socio_id: perfil.id, jornalero_id: jornalero.id, categoria: 'varios', monto: m, moneda,
       descripcion: `Adelanto jornal · ${jornalero.nombre}${nota.trim() ? ` — ${nota.trim()}` : ''}`,
       metodo_pago: medio, cuenta_id: medio === 'efectivo' ? null : Number(cuentaId),
       reembolsable: false, reembolsado: false, es_adelanto: true, actualizado_en: new Date().toISOString(),
@@ -840,6 +843,13 @@ function AdelantoJornalDialog({ jornalero, onCerrar, onOk }: {
             <input type="number" className="input tabular-nums" min="0" step="0.01" value={monto} onChange={(e) => setMonto(e.target.value)} />
           </div>
           <div>
+            <label className="label">Moneda</label>
+            <select className="input" value={moneda} onChange={(e) => setMoneda(e.target.value as 'UYU' | 'USD')}>
+              <option value="UYU">UYU</option>
+              <option value="USD">USD</option>
+            </select>
+          </div>
+          <div>
             <label className="label">Medio</label>
             <select className="input" value={medio} onChange={(e) => setMedio(e.target.value as 'efectivo' | 'transferencia')}>
               <option value="transferencia">Transferencia</option>
@@ -850,8 +860,8 @@ function AdelantoJornalDialog({ jornalero, onCerrar, onOk }: {
             <div>
               <label className="label">Cuenta de la que sale</label>
               <select className="input" value={cuentaId} onChange={(e) => setCuentaId(e.target.value)}>
-                {cuentas.length === 0 && <option value="">(sin cuentas)</option>}
-                {cuentas.map((c) => <option key={c.id} value={String(c.id)}>{c.nombre}</option>)}
+                {cuentasMoneda.length === 0 && <option value="">(sin cuentas en {moneda})</option>}
+                {cuentasMoneda.map((c) => <option key={c.id} value={String(c.id)}>{c.nombre}</option>)}
               </select>
             </div>
           )}
@@ -882,9 +892,12 @@ function RegistrarJornalDialog({ jornalero, onCerrar, onOk }: {
   const [mes, setMes] = useState(String(hoy.getMonth() + 1).padStart(2, '0'))
   const [anio, setAnio] = useState(String(hoy.getFullYear()))
   const [fecha, setFecha] = useState(hoy.toISOString().slice(0, 10))
+  const [moneda, setMoneda] = useState<'UYU' | 'USD'>('UYU')
   const [lineas, setLineas] = useState<{ categoria: string; monto: string }[]>([{ categoria: '', monto: '' }])
   const [cats, setCats] = useState<{ slug: string; nombre: string }[]>([])
-  const [adelPend, setAdelPend] = useState<{ ids: number[]; total: number }>({ ids: [], total: 0 })
+  const [adelUYU, setAdelUYU] = useState<{ ids: number[]; total: number }>({ ids: [], total: 0 })
+  const [adelUSD, setAdelUSD] = useState<{ ids: number[]; total: number }>({ ids: [], total: 0 })
+  const [cot, setCot] = useState<number | null>(null)
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -895,30 +908,41 @@ function RegistrarJornalDialog({ jornalero, onCerrar, onOk }: {
     if (!jornalero) return
     setLineas([{ categoria: '', monto: '' }]); setError(null)
     supabase.from('categorias_gasto').select('slug,nombre').eq('activo', true).order('orden').order('nombre').then(({ data }) => setCats((data as { slug: string; nombre: string }[]) ?? []))
-    supabase.from('gastos').select('id,monto').eq('jornalero_id', jornalero.id).eq('es_adelanto', true).eq('reembolsado', false).then(({ data }) => {
-      const a = (data as { id: number; monto: number }[]) ?? []
-      setAdelPend({ ids: a.map((x) => x.id), total: a.reduce((s, x) => s + Number(x.monto), 0) })
+    supabase.from('gastos').select('id,monto,moneda').eq('jornalero_id', jornalero.id).eq('es_adelanto', true).eq('reembolsado', false).then(({ data }) => {
+      const a = (data as { id: number; monto: number; moneda: string }[]) ?? []
+      const uyu = a.filter((x) => x.moneda !== 'USD'); const usd = a.filter((x) => x.moneda === 'USD')
+      setAdelUYU({ ids: uyu.map((x) => x.id), total: uyu.reduce((s, x) => s + Number(x.monto), 0) })
+      setAdelUSD({ ids: usd.map((x) => x.id), total: usd.reduce((s, x) => s + Number(x.monto), 0) })
     })
   }, [jornalero])
+  useEffect(() => { fetchCotizacionBilleteMes(`${anio}-${mes}`).then((r) => { if (r && r.cotizacion > 0) setCot(r.cotizacion) }) }, [anio, mes])
 
   const total = lineas.reduce((s, l) => s + (Number(l.monto) || 0), 0)
-  const neto = total - adelPend.total
+  const tc = cot ?? 0
+  // Adelantos convertidos a la moneda del jornal.
+  const adelEnMoneda = moneda === 'UYU'
+    ? adelUYU.total + adelUSD.total * tc
+    : adelUSD.total + (tc > 0 ? adelUYU.total / tc : 0)
+  const hayOtraMoneda = moneda === 'UYU' ? adelUSD.total > 0 : adelUYU.total > 0
+  const neto = total - adelEnMoneda
 
   async function guardar() {
     if (!jornalero || !perfil) return
     const validas = lineas.filter((l) => l.categoria && Number(l.monto) > 0)
     if (validas.length === 0) { setError('Cargá al menos una línea (categoría + monto).'); return }
+    if (hayOtraMoneda && !cot) { setError('Esperando cotización del BCU del mes para convertir los adelantos en otra moneda.'); return }
     setGuardando(true); setError(null)
     const rows = validas.map((l) => ({
-      fecha, socio_id: perfil.id, jornalero_id: jornalero.id, categoria: l.categoria, monto: Number(l.monto), moneda: 'UYU',
+      fecha, socio_id: perfil.id, jornalero_id: jornalero.id, categoria: l.categoria, monto: Number(l.monto), moneda,
       descripcion: `Jornal ${jornalero.nombre} ${mesNombre} ${anio} ${marca}`,
       metodo_pago: 'transferencia', reembolsable: false, reembolsado: false, es_adelanto: false, actualizado_en: new Date().toISOString(),
     }))
     const { error: e1 } = await supabase.from('gastos').insert(rows)
     if (e1) { setGuardando(false); setError(e1.message); return }
-    if (adelPend.ids.length > 0) {
+    const idsAdel = [...adelUYU.ids, ...adelUSD.ids]
+    if (idsAdel.length > 0) {
       // Marcar adelantos como saldados (consumidos por este jornal) para no descontarlos de nuevo.
-      const { error: e2 } = await supabase.from('gastos').update({ reembolsado: true }).in('id', adelPend.ids)
+      const { error: e2 } = await supabase.from('gastos').update({ reembolsado: true }).in('id', idsAdel)
       if (e2) { setGuardando(false); setError('Jornal registrado, pero fallo saldar adelantos: ' + e2.message); return }
     }
     setGuardando(false)
@@ -945,13 +969,20 @@ function RegistrarJornalDialog({ jornalero, onCerrar, onOk }: {
             </select>
           </div>
           <div>
+            <label className="label">Moneda</label>
+            <select className="input" value={moneda} onChange={(e) => setMoneda(e.target.value as 'UYU' | 'USD')}>
+              <option value="UYU">UYU</option>
+              <option value="USD">USD</option>
+            </select>
+          </div>
+          <div>
             <label className="label">Fecha pago</label>
             <input type="date" className="input" value={fecha} onChange={(e) => setFecha(e.target.value)} />
           </div>
         </div>
 
         <div className="space-y-2">
-          <div className="text-[11px] uppercase tracking-wide text-oliva-500">Jornal por área (monto variable)</div>
+          <div className="text-[11px] uppercase tracking-wide text-oliva-500">Jornal por área (monto variable) · {moneda}</div>
           {lineas.map((l, i) => (
             <div key={i} className="flex gap-2 items-center">
               <select className="input flex-1" value={l.categoria} onChange={(e) => { const n = [...lineas]; n[i] = { ...n[i], categoria: e.target.value }; setLineas(n) }}>
@@ -966,16 +997,23 @@ function RegistrarJornalDialog({ jornalero, onCerrar, onOk }: {
         </div>
 
         <div className="rounded-lg border border-oliva-100 p-3 text-sm space-y-0.5">
-          <div className="flex justify-between gap-3"><span>Jornal total</span><span className="tabular-nums">{money(total)}</span></div>
-          {adelPend.total > 0 && <div className="flex justify-between gap-3 text-red-700"><span>− Adelantos pendientes</span><span className="tabular-nums">− {money(adelPend.total)}</span></div>}
-          <div className="flex justify-between gap-3 pt-1 border-t border-oliva-100 font-bold text-oliva-900"><span>Neto a pagar</span><span className="tabular-nums">{money(neto)}</span></div>
+          <div className="flex justify-between gap-3"><span>Jornal total</span><span className="tabular-nums">{money(total, moneda)}</span></div>
+          {adelUYU.total > 0 && (moneda === 'UYU'
+            ? <div className="flex justify-between gap-3 text-red-700"><span>− Adelantos pendientes</span><span className="tabular-nums">− {money(adelUYU.total)}</span></div>
+            : <div className="flex justify-between gap-3 text-red-700"><span>− Adelantos {money(adelUYU.total)} {cot ? `÷ ${cot}` : ''}</span><span className="tabular-nums">− {money(tc > 0 ? adelUYU.total / tc : 0, 'USD')}</span></div>)}
+          {adelUSD.total > 0 && (moneda === 'USD'
+            ? <div className="flex justify-between gap-3 text-red-700"><span>− Adelantos pendientes</span><span className="tabular-nums">− {money(adelUSD.total, 'USD')}</span></div>
+            : <div className="flex justify-between gap-3 text-red-700"><span>− Adelantos US$ {Number(adelUSD.total).toLocaleString('es-UY')} {cot ? `× ${cot}` : ''}</span><span className="tabular-nums">− {money(adelUSD.total * tc)}</span></div>)}
+          <div className="flex justify-between gap-3 pt-1 border-t border-oliva-100 font-bold text-oliva-900"><span>Neto a pagar</span><span className="tabular-nums">{money(neto, moneda)}</span></div>
+          {hayOtraMoneda && !cot && <div className="text-[11px] text-amber-700">Esperando cotización BCU del mes para convertir los adelantos en otra moneda…</div>}
+          {hayOtraMoneda && cot && <div className="text-[10px] text-oliva-500">Adelantos en otra moneda convertidos a la cotización BCU del mes ({cot}).</div>}
         </div>
         <p className="text-[11px] text-oliva-500">Se registra el jornal por área como gasto; los adelantos pendientes se descuentan del neto y quedan saldados.</p>
 
         {error && <div className="text-sm text-red-700">{error}</div>}
         <div className="flex justify-end gap-2">
           <button className="btn-secondary" onClick={onCerrar} disabled={guardando}>Cancelar</button>
-          <button className="btn-primary" onClick={guardar} disabled={guardando}>{guardando ? 'Registrando…' : `Registrar jornal ${money(total)}`}</button>
+          <button className="btn-primary" onClick={guardar} disabled={guardando}>{guardando ? 'Registrando…' : `Registrar jornal ${money(total, moneda)}`}</button>
         </div>
       </div>
     </Dialog>
