@@ -86,9 +86,9 @@ export function IngresosPanel() {
   const totalUSD = filtrados.filter((g) => g.moneda === 'USD').reduce((s, g) => s + Number(g.monto), 0)
 
   async function eliminar(id: number) {
-    if (!confirm('¿Eliminar este ingreso? No se puede deshacer.')) return
     const { error } = await supabase.from('ingresos').delete().eq('id', id)
-    if (error) { alert('Error: ' + error.message); return }
+    if (error) throw new Error(error.message)
+    setEditando(null)
     cargar()
   }
 
@@ -162,22 +162,21 @@ export function IngresosPanel() {
                 <th className="py-2 px-4 text-left">Descripción</th>
                 <th className="py-2 px-4 text-left">Socio</th>
                 <th className="py-2 px-4 text-right">Monto</th>
-                <th className="py-2 px-4"></th>
               </tr>
             </thead>
             <tbody>
               {filtrados.map((g) => (
-                <tr key={g.id} className="border-t border-oliva-100 hover:bg-oliva-50/50">
+                <tr
+                  key={g.id}
+                  className="border-t border-oliva-100 hover:bg-oliva-50/50 cursor-pointer"
+                  onClick={() => setEditando(g)}
+                >
                   <td className="py-2 px-4 text-oliva-700 tabular-nums">{fFecha(g.fecha)}</td>
                   <td className="py-2 px-4 text-oliva-800">{catPorId.get(g.categoria_id ?? -1)?.nombre ?? '—'}</td>
                   <td className="py-2 px-4 text-oliva-700">{g.descripcion || <span className="text-oliva-400">—</span>}</td>
                   <td className="py-2 px-4 text-oliva-700">{socioPorId.get(g.socio_id ?? '')?.nombre ?? '—'}</td>
                   <td className="py-2 px-4 text-right font-semibold tabular-nums">
                     {g.moneda === 'USD' ? `U$S ${Number(g.monto).toLocaleString('es-UY')}` : money(Number(g.monto))}
-                  </td>
-                  <td className="py-2 px-4 text-right">
-                    <button className="text-xs text-oliva-700 hover:text-oliva-900 underline mr-2" onClick={() => setEditando(g)}>Editar</button>
-                    <button className="text-xs text-red-700 hover:text-red-900 underline" onClick={() => eliminar(g.id)}>Borrar</button>
                   </td>
                 </tr>
               ))}
@@ -195,6 +194,7 @@ export function IngresosPanel() {
         soyYo={soyYo}
         onCerrar={() => { setNuevo(false); setEditando(null) }}
         onOk={() => { setNuevo(false); setEditando(null); cargar() }}
+        onEliminar={eliminar}
       />
       <EditorCategoriasDialog
         abierto={editorCat}
@@ -207,7 +207,7 @@ export function IngresosPanel() {
   )
 }
 
-function IngresoDialog({ abierto, editar, categorias, socios, cuentas, soyYo, onCerrar, onOk }: {
+function IngresoDialog({ abierto, editar, categorias, socios, cuentas, soyYo, onCerrar, onOk, onEliminar }: {
   abierto: boolean
   editar: Ingreso | null
   categorias: Categoria[]
@@ -216,6 +216,7 @@ function IngresoDialog({ abierto, editar, categorias, socios, cuentas, soyYo, on
   soyYo: string
   onCerrar: () => void
   onOk: () => void
+  onEliminar: (id: number) => Promise<void>
 }) {
   const [fecha, setFecha] = useState<string>(new Date().toISOString().slice(0, 10))
   const [socioId, setSocioId] = useState<string>('')
@@ -226,9 +227,11 @@ function IngresoDialog({ abierto, editar, categorias, socios, cuentas, soyYo, on
   const [cuentaId, setCuentaId] = useState<string>('')
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [confirmEliminar, setConfirmEliminar] = useState(false)
 
   useEffect(() => {
     if (!abierto) return
+    setConfirmEliminar(false)
     if (editar) {
       setFecha(editar.fecha)
       setSocioId(editar.socio_id ?? '')
@@ -344,7 +347,26 @@ function IngresoDialog({ abierto, editar, categorias, socios, cuentas, soyYo, on
           <input className="input" value={descripcion} onChange={(e) => setDescripcion(e.target.value)} placeholder="ej. tickets evento HEAT, arrendamiento Pardie 1/2" />
         </div>
         {error && <div className="text-sm text-red-700">{error}</div>}
-        <div className="flex justify-end gap-2 pt-2 border-t border-oliva-100">
+
+        {editar && (
+          <div className="border-t border-oliva-100 pt-3">
+            {confirmEliminar ? (
+              <div className="rounded-lg bg-red-50 border border-red-200 p-3 space-y-2">
+                <div className="text-sm text-red-800">¿Eliminar este ingreso? No se puede deshacer.</div>
+                <div className="flex justify-end gap-2">
+                  <button type="button" className="btn-secondary text-xs" onClick={() => setConfirmEliminar(false)} disabled={guardando}>Cancelar</button>
+                  <button type="button" className="text-xs px-3 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700" onClick={async () => { setGuardando(true); try { await onEliminar(editar.id) } catch (e) { setError(e instanceof Error ? e.message : 'Error'); setGuardando(false) } }} disabled={guardando}>
+                    {guardando ? 'Eliminando…' : 'Sí, eliminar'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button type="button" className="text-xs text-red-700 hover:text-red-900 underline" onClick={() => setConfirmEliminar(true)}>Eliminar ingreso</button>
+            )}
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2 pt-2">
           <button type="button" className="btn-secondary" onClick={onCerrar}>Cancelar</button>
           <button type="submit" className="btn-primary" disabled={guardando}>{guardando ? 'Guardando…' : 'Guardar'}</button>
         </div>
