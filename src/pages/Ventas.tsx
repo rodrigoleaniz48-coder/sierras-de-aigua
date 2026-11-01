@@ -2504,7 +2504,7 @@ function VentaDetalleDialog({
 // ---------- Diálogo Resumen mensual del cadete (para pago) ----------
 
 interface EnvioCadete {
-  id: number; fecha: string; socio_id: string; socio_nombre: string
+  id: number; fecha: string; fecha_entrega: string | null; socio_id: string; socio_nombre: string
   cliente_id: number | null; cliente_nombre: string | null
   cliente_telefono: string | null; cliente_whatsapp: string | null
   cliente_direccion: string | null; cliente_localidad: string | null
@@ -2539,8 +2539,14 @@ function ResumenMensualCadeteDialog({
       .then(({ data }) => setEnviosRPC((data as EnvioCadete[]) ?? []))
   }, [abierto, mes, anio, desde, hasta])
 
+  // Solo se le paga al cadete por envios ENTREGADOS, y cuentan en el mes de la
+  // entrega real (fecha_entrega), no en el de la venta. Los pendientes no se pagan
+  // hasta entregarse (ahi caen en el mes que corresponda).
   const enviosMes = useMemo(() => {
-    return [...enviosRPC].sort((a, b) => a.fecha === b.fecha ? a.id - b.id : a.fecha.localeCompare(b.fecha))
+    const fe = (v: EnvioCadete) => v.fecha_entrega ?? v.fecha
+    return enviosRPC
+      .filter((v) => v.entregado)
+      .sort((a, b) => fe(a) === fe(b) ? a.id - b.id : fe(a).localeCompare(fe(b)))
   }, [enviosRPC])
 
   // Precio efectivo por envío: si el usuario ingresó un precio unitario, se usa ése;
@@ -2560,7 +2566,7 @@ function ResumenMensualCadeteDialog({
       return partes.join('\n')
     }
     enviosMes.forEach((v, i) => {
-      const fecha = new Date(v.fecha + 'T00:00:00').toLocaleDateString('es-UY', { day: '2-digit', month: '2-digit' })
+      const fecha = new Date((v.fecha_entrega ?? v.fecha) + 'T00:00:00').toLocaleDateString('es-UY', { day: '2-digit', month: '2-digit' })
       const p = precioUnit > 0 ? precioUnit : Number(v.costo_envio) || 0
       const socio = (v.socio_nombre || '').split(' ')[0]
       partes.push(`${i + 1}. ${fecha} · ${v.cliente_nombre ?? 'sin cliente'} (${socio}) — ${money(p)}`)
@@ -2654,7 +2660,7 @@ function ResumenMensualCadeteDialog({
                   return (
                     <tr key={v.id} className="border-t border-oliva-100">
                       <td className="py-2 px-3 tabular-nums font-semibold text-oliva-900">{i + 1}</td>
-                      <td className="py-2 px-3 text-oliva-700">{fFecha(v.fecha)}</td>
+                      <td className="py-2 px-3 text-oliva-700">{fFecha(v.fecha_entrega ?? v.fecha)}</td>
                       <td className="py-2 px-3 text-oliva-800">{v.cliente_nombre ?? '—'}</td>
                       <td className="py-2 px-3 text-oliva-600 text-xs">{v.socio_nombre?.split(' ')[0] ?? '—'}</td>
                       <td className="py-2 px-3 text-right tabular-nums font-medium">{money(p)}</td>
@@ -2711,28 +2717,22 @@ function ListaCadeteDialog({
   const [copiado, setCopiado] = useState(false)
   const [entregando, setEntregando] = useState<number | null>(null)
 
-  // Solo pendientes de entrega en el rango — de TODOS los socios (via RPC SECURITY DEFINER)
+  // Todos los pendientes de entrega — de TODOS los socios (via RPC SECURITY DEFINER).
+  // Incluye los que quedaron sin entregar de meses anteriores (arrastre automatico):
+  // la RPC devuelve siempre los no entregados, sin importar el rango de fechas.
   const enviosDelRango = useMemo(() => {
     return enviosRPC
       .filter((v) => !v.entregado)
       .sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : a.id - b.id))
   }, [enviosRPC])
 
-  // Numeración estable por mes: índice+1 dentro de los envíos del mismo mes (todos los socios)
+  // Numeración simple: 1..N en orden de la lista (el mas viejo primero), para que
+  // un pedido arrastrado del mes anterior quede como el #1 de la tanda actual.
   const numeroPedido = useMemo(() => {
-    const porMes = new Map<string, EnvioCadete[]>()
-    for (const v of enviosRPC) {
-      const mes = v.fecha.slice(0, 7)
-      if (!porMes.has(mes)) porMes.set(mes, [])
-      porMes.get(mes)!.push(v)
-    }
     const map = new Map<number, number>()
-    for (const [, arr] of porMes) {
-      arr.sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : a.id - b.id))
-      arr.forEach((v, idx) => map.set(v.id, idx + 1))
-    }
+    enviosDelRango.forEach((v, idx) => map.set(v.id, idx + 1))
     return map
-  }, [enviosRPC])
+  }, [enviosDelRango])
 
   useEffect(() => {
     if (!abierto) return
@@ -2815,14 +2815,14 @@ function ListaCadeteDialog({
     <Dialog abierto={abierto} onCerrar={onCerrar} titulo="🛵 Pedidos para el cadete" ancho="lg">
       <div className="space-y-4">
         <div className="text-xs text-oliva-600">
-          Rango: <b>{desde || '—'}</b> a <b>{hasta || 'hoy'}</b>. Cambiá los filtros de fecha en el listado principal si necesitás otro período.
+          Pendientes de entrega de <b>todos</b> los meses. Los que quedaron sin entregar en meses anteriores siguen acá hasta que se marquen entregados (y recién ahí cuenta el pago al cadete, en el mes de la entrega).
         </div>
 
         {cargando ? (
           <div className="text-sm text-oliva-700">Cargando pedidos…</div>
         ) : enviosDelRango.length === 0 ? (
           <div className="card p-4 text-sm text-oliva-700">
-            No hay ventas con envío en este período. Cargá una nueva venta con el checkbox 🛵 Envío.
+            No hay pedidos pendientes de entrega. Cargá una nueva venta con el checkbox 🛵 Envío.
           </div>
         ) : (
           <>
@@ -2854,6 +2854,10 @@ function ListaCadeteDialog({
                       <div className="font-medium text-oliva-900 flex items-center gap-2 flex-wrap">
                         <span>Pedido #{num} · {v.cliente_nombre ?? <span className="italic text-oliva-500">sin cliente</span>}</span>
                         <span className="text-[10px] uppercase tracking-wide bg-oliva-100 text-oliva-700 px-1.5 py-[1px] rounded">{v.socio_nombre?.split(' ')[0]}</span>
+                        <span className="text-[10px] text-oliva-500 tabular-nums">{fFecha(v.fecha)}</span>
+                        {desde && v.fecha < desde && (
+                          <span className="text-[10px] uppercase tracking-wide bg-aceite-500/20 text-aceite-600 ring-1 ring-aceite-500/30 px-1.5 py-[1px] rounded">del mes anterior</span>
+                        )}
                       </div>
                       <div className="text-oliva-700 text-xs mt-0.5">{resumenItems(v) || <em>sin ítems</em>}</div>
                       <div className="text-oliva-600 text-xs mt-1 space-y-0.5">
