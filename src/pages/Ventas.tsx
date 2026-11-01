@@ -2520,12 +2520,23 @@ function ResumenMensualCadeteDialog({
   abierto: boolean
   onCerrar: () => void
 }) {
+  const { session } = useAuth()
+  const soyYo = session?.user.id ?? ''
   const hoyD = new Date()
   const [anio, setAnio] = useState<string>(String(hoyD.getFullYear()))
   const [mes, setMes] = useState<string>(String(hoyD.getMonth() + 1).padStart(2, '0'))
   const [copiado, setCopiado] = useState(false)
   const [precioUnitario, setPrecioUnitario] = useState<string>('')
   const [enviosRPC, setEnviosRPC] = useState<EnvioCadete[]>([])
+  // Registrar el pago como gasto (categoria Cadete / Fletes), para conciliar despues con el banco.
+  const [cuentasUyu, setCuentasUyu] = useState<{ id: number; nombre: string }[]>([])
+  const [montoGasto, setMontoGasto] = useState('')
+  const [fechaGasto, setFechaGasto] = useState<string>(new Date().toISOString().slice(0, 10))
+  const [cuentaGasto, setCuentaGasto] = useState('')
+  const [registrando, setRegistrando] = useState(false)
+  const [gastoMsg, setGastoMsg] = useState<string | null>(null)
+  const [gastoRegistradoId, setGastoRegistradoId] = useState<number | null>(null)
+  const totalPrevRef = useRef(0)
 
   const desde = `${anio}-${mes}-01`
   const ult = new Date(Number(anio), Number(mes), 0).getDate()
@@ -2535,9 +2546,18 @@ function ResumenMensualCadeteDialog({
   useEffect(() => {
     if (!abierto) return
     setCopiado(false)
+    setGastoMsg(null); setGastoRegistradoId(null); setCuentaGasto('')
+    setFechaGasto(new Date().toISOString().slice(0, 10))
     supabase.rpc('envios_cadete_todos', { p_desde: desde, p_hasta: hasta })
       .then(({ data }) => setEnviosRPC((data as EnvioCadete[]) ?? []))
   }, [abierto, mes, anio, desde, hasta])
+
+  // Cuentas en pesos (para indicar de dónde salió el pago y que concilie).
+  useEffect(() => {
+    if (!abierto) return
+    supabase.from('cuentas_bancarias').select('id,nombre').eq('activo', true).eq('moneda', 'UYU').order('id')
+      .then(({ data }) => setCuentasUyu((data as { id: number; nombre: string }[]) ?? []))
+  }, [abierto])
 
   // Solo se le paga al cadete por envios ENTREGADOS, y cuentan en el mes de la
   // entrega real (fecha_entrega), no en el de la venta. Los pendientes no se pagan
@@ -2556,6 +2576,38 @@ function ResumenMensualCadeteDialog({
     const p = precioUnit > 0 ? precioUnit : Number(v.costo_envio) || 0
     return s + p
   }, 0)
+
+  // El monto del gasto arranca igual al total a pagar; si el usuario lo editó a mano,
+  // no se pisa (para poder descontar el saldo a favor de meses anteriores).
+  useEffect(() => {
+    setMontoGasto((prev) => (prev === '' || prev === String(totalPrevRef.current) ? (totalPago ? String(totalPago) : '') : prev))
+    totalPrevRef.current = totalPago
+  }, [totalPago])
+
+  async function registrarGasto() {
+    const m = Number(montoGasto)
+    if (!soyYo) { setGastoMsg('No se pudo identificar el socio.'); return }
+    if (!m || m <= 0) { setGastoMsg('Ingresá un monto válido.'); return }
+    setRegistrando(true); setGastoMsg(null)
+    const { data, error } = await supabase.from('gastos').insert({
+      fecha: fechaGasto,
+      socio_id: soyYo,
+      categoria: 'cadete_fletes',
+      monto: m,
+      moneda: 'UYU',
+      descripcion: `Pago cadete - ${nombreMes} ${anio}`,
+      metodo_pago: cuentaGasto ? 'transferencia' : 'efectivo',
+      reembolsable: false,
+      reembolsado: false,
+      es_adelanto: false,
+      cuenta_id: cuentaGasto ? Number(cuentaGasto) : null,
+      actualizado_en: new Date().toISOString(),
+    }).select('id').single()
+    setRegistrando(false)
+    if (error || !data) { setGastoMsg('Error: ' + (error?.message ?? 'no se pudo registrar')); return }
+    setGastoRegistradoId(data.id)
+    setGastoMsg(`Gasto #${data.id} registrado en Cadete / Fletes.`)
+  }
 
   function armarMensaje(): string {
     const partes: string[] = []
@@ -2636,6 +2688,44 @@ function ResumenMensualCadeteDialog({
           <div className="panel">
             <div className="text-[10px] font-bold uppercase tracking-widest text-oliva-500">Total a pagar</div>
             <div className="text-2xl font-extrabold text-oliva-900 mt-1 tabular-nums">{money(totalPago)}</div>
+          </div>
+        </div>
+
+        {/* Registrar el pago como gasto (Cadete / Fletes) */}
+        <div className="card p-3 space-y-3">
+          <div className="text-sm font-semibold text-oliva-900">💸 Registrar el pago como gasto</div>
+          <p className="text-[11px] text-oliva-600">
+            Lo carga en la categoría <b>Cadete / Fletes</b> para que después lo concilies con el movimiento del banco.
+            Ajustá el monto si usaste saldo a favor de meses anteriores.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="label">Monto a pagar</label>
+              <input type="number" min="0" step="1" className="input tabular-nums" value={montoGasto} onChange={(e) => setMontoGasto(e.target.value)} disabled={gastoRegistradoId !== null} />
+            </div>
+            <div>
+              <label className="label">Fecha del pago</label>
+              <input type="date" className="input" value={fechaGasto} onChange={(e) => setFechaGasto(e.target.value)} disabled={gastoRegistradoId !== null} />
+            </div>
+            <div>
+              <label className="label">Cuenta</label>
+              <select className="input" value={cuentaGasto} onChange={(e) => setCuentaGasto(e.target.value)} disabled={gastoRegistradoId !== null}>
+                <option value="">— efectivo / sin cuenta —</option>
+                {cuentasUyu.map((c) => <option key={c.id} value={String(c.id)}>{c.nombre}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            {gastoRegistradoId !== null ? (
+              <span className="text-xs text-green-700">✅ {gastoMsg}</span>
+            ) : (
+              <>
+                <button type="button" className="btn-secondary text-sm" onClick={registrarGasto} disabled={registrando}>
+                  {registrando ? 'Registrando…' : '💸 Registrar gasto'}
+                </button>
+                {gastoMsg && <span className="text-xs text-red-700">{gastoMsg}</span>}
+              </>
+            )}
           </div>
         </div>
 
