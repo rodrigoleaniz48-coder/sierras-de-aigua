@@ -640,7 +640,10 @@ function LiquidarSueldoDialog({ socio, onCerrar, onOk }: {
   const hoy = new Date()
   const [mes, setMes] = useState(String(hoy.getMonth() + 1).padStart(2, '0'))
   const [anio, setAnio] = useState(String(hoy.getFullYear()))
-  const [fecha, setFecha] = useState(hoy.toISOString().slice(0, 10))
+  const [fecha, setFecha] = useState(() => {
+    const u = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0).getDate()
+    return `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}-${String(u).padStart(2, '0')}`
+  })
   const [lineas, setLineas] = useState<{ categoria: string; monto: number }[]>([])
   const [catNombres, setCatNombres] = useState<Map<string, string>>(new Map())
   const [adel, setAdel] = useState(0)
@@ -657,6 +660,8 @@ function LiquidarSueldoDialog({ socio, onCerrar, onOk }: {
   const hasta = `${anio}-${mes}-${String(ult).padStart(2, '0')}`
   const mesNombre = new Date(Number(anio), Number(mes) - 1, 1).toLocaleString('es-UY', { month: 'long' })
   const marca = `[sueldo ${anio}-${mes}]`
+  // La fecha del sueldo sigue al fin del mes liquidado: el costo cae en el mismo mes del trabajo.
+  useEffect(() => { setFecha(hasta) }, [hasta])
 
   useEffect(() => {
     if (!socio) return
@@ -893,7 +898,10 @@ function RegistrarJornalDialog({ jornalero, onCerrar, onOk }: {
   const hoy = new Date()
   const [mes, setMes] = useState(String(hoy.getMonth() + 1).padStart(2, '0'))
   const [anio, setAnio] = useState(String(hoy.getFullYear()))
-  const [fecha, setFecha] = useState(hoy.toISOString().slice(0, 10))
+  const [fecha, setFecha] = useState(() => {
+    const u = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0).getDate()
+    return `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}-${String(u).padStart(2, '0')}`
+  })
   const [moneda, setMoneda] = useState<'UYU' | 'USD'>('UYU')
   const [lineas, setLineas] = useState<{ categoria: string; monto: string }[]>([{ categoria: '', monto: '' }])
   const [cats, setCats] = useState<{ slug: string; nombre: string }[]>([])
@@ -905,6 +913,9 @@ function RegistrarJornalDialog({ jornalero, onCerrar, onOk }: {
 
   const mesNombre = new Date(Number(anio), Number(mes) - 1, 1).toLocaleString('es-UY', { month: 'long' })
   const marca = `[jornal ${anio}-${mes}]`
+  // La fecha del jornal sigue al fin del mes liquidado: el costo cae en el mismo mes del trabajo.
+  const finDeMes = `${anio}-${mes}-${String(new Date(Number(anio), Number(mes), 0).getDate()).padStart(2, '0')}`
+  useEffect(() => { setFecha(finDeMes) }, [finDeMes])
 
   useEffect(() => {
     if (!jornalero) return
