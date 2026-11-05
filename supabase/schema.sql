@@ -581,3 +581,84 @@ create policy jornaleros_upd on public.jornaleros for update using (ve_todos_gas
 
 alter table public.gastos add column if not exists jornalero_id bigint references public.jornaleros(id);
 create index if not exists gastos_jornalero_idx on public.gastos(jornalero_id);
+
+-- =========================================================================
+-- Modulo Campo — cuaderno de campo (ver supabase/migracion_campo.sql)
+-- Dos cronogramas: aplicaciones de productos y manejo de cultivo (labores).
+-- =========================================================================
+create table if not exists public.aplicaciones (
+  id bigserial primary key,
+  fecha date not null,
+  zafra text not null,
+  sectores text,
+  estado text not null default 'realizada',
+  forma_aplicacion text,
+  horas_tractor numeric(6,2),
+  horas_hombre numeric(6,2),
+  vol_total_l numeric(10,2),
+  operario text,
+  observaciones text,
+  creado_por uuid references auth.users(id),
+  creado_en timestamptz not null default now()
+);
+create index if not exists idx_aplicaciones_zafra on public.aplicaciones(zafra, fecha);
+
+create table if not exists public.aplicacion_productos (
+  id bigserial primary key,
+  aplicacion_id bigint not null references public.aplicaciones(id) on delete cascade,
+  categoria text not null,
+  producto_comercial text not null,
+  concentracion_100l numeric(10,3),
+  dosis_ha numeric(10,3),
+  dosis_total numeric(10,3),
+  cantidad_planta numeric(10,3),
+  vol_ha numeric(10,2),
+  vol_total numeric(10,2),
+  notas text
+);
+create index if not exists idx_aplic_prod_aplic on public.aplicacion_productos(aplicacion_id);
+
+create table if not exists public.labores_campo (
+  id bigserial primary key,
+  fecha date not null,
+  zafra text not null,
+  sectores text,
+  tipo_labor text not null,
+  descripcion text,
+  horas_tractor numeric(6,2),
+  horas_hombre numeric(6,2),
+  jornales numeric(7,2),
+  operarios text,
+  estado text not null default 'realizada',
+  observaciones text,
+  creado_por uuid references auth.users(id),
+  creado_en timestamptz not null default now()
+);
+create index if not exists idx_labores_zafra on public.labores_campo(zafra, fecha);
+
+create table if not exists public.productos_fito (
+  id bigserial primary key,
+  nombre text not null unique,
+  categoria text not null,
+  activo boolean not null default true
+);
+
+alter table public.aplicaciones         enable row level security;
+alter table public.aplicacion_productos  enable row level security;
+alter table public.labores_campo         enable row level security;
+alter table public.productos_fito        enable row level security;
+-- Policies: lectura para todo autenticado, escritura admin+campo (ver migracion_campo.sql).
+
+-- Categorias editables (color + nombre) por ambito. Ver migracion_campo_categorias.sql
+create table if not exists public.categorias_campo (
+  id bigserial primary key,
+  ambito text not null,                 -- 'aplicacion' | 'labor'
+  slug text not null,
+  nombre text not null,
+  color text not null default '#5F5E5A',
+  orden int not null default 0,
+  activo boolean not null default true,
+  unique (ambito, slug)
+);
+alter table public.categorias_campo enable row level security;
+-- Policies: lectura para todo autenticado, escritura admin+campo (ver migracion_campo_categorias.sql).

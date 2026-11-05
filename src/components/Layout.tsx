@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
-import { useEffect, useState, type ReactNode } from 'react'
+import { Suspense, useEffect, useState, type ReactNode } from 'react'
 import { useAuth } from '../lib/auth'
 import type { Rol } from '../lib/types'
 import { useTema, type Tema } from '../lib/tema'
@@ -24,6 +24,7 @@ const I = {
   contabilidad: <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 10h18" /></>,
   admin: <><circle cx="12" cy="12" r="3" /><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2" /></>,
   tareas: <><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></>,
+  campo: <><path d="M12 22V12" /><path d="M12 12c0-3.3 2.2-5.5 5.5-5.5C17.5 9.8 15.3 12 12 12z" /><path d="M12 13.5C12 10.5 10 8.5 7 8.5c0 3 2 5 5 5z" /></>,
   manual: <><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" /></>,
 }
 
@@ -34,6 +35,7 @@ const NAV: NavItem[] = [
   { to: '/stock',       label: 'Stock',         roles: ['admin', 'ventas', 'marketing'], icon: I.stock,        group: 'op' },
   { to: '/finanzas',    label: 'Ingresos y Egresos', roles: ['admin', 'ventas', 'marketing'], icon: I.gastos,   group: 'op' },
   { to: '/tareas',      label: 'Tareas',        roles: ['admin', 'ventas', 'marketing', 'campo'], icon: I.tareas,  group: 'op' },
+  { to: '/campo',       label: 'Campo',         roles: ['admin', 'ventas', 'marketing', 'campo'], icon: I.campo,   group: 'op' },
   { to: '/manual',      label: 'Manual',        roles: ['admin', 'ventas', 'marketing', 'campo'], icon: I.manual,  group: 'op' },
   { to: '/contabilidad',label: 'Contabilidad',  roles: ['admin'],                        icon: I.contabilidad, group: 'gestion' },
   { to: '/admin',       label: 'Administración',roles: ['admin'],                        icon: I.admin,        group: 'gestion' },
@@ -263,7 +265,9 @@ export function Layout() {
 
       {/* Contenido */}
       <main className="flex-1 p-4 lg:p-6 bg-oliva-50 pb-24 lg:pb-6">
-        <Outlet />
+        <Suspense fallback={<div className="text-oliva-500 text-sm py-10 text-center">Cargando…</div>}>
+          <Outlet />
+        </Suspense>
       </main>
 
       {/* Barra fija abajo (mobile) + FAB contextual */}
