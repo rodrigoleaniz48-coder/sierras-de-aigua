@@ -18,10 +18,9 @@ function hoyLocalStr(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-// Zafra agricola: arranca en julio.
-function zafraDe(fecha: string): string {
-  const [y, m] = fecha.slice(0, 10).split('-').map(Number)
-  return m >= 7 ? `${y}-${y + 1}` : `${y - 1}-${y}`
+// Se agrupa por ano calendario (ene-dic), no por zafra.
+function anioDe(fecha: string): string {
+  return fecha.slice(0, 4)
 }
 
 function slugify(s: string): string {
@@ -33,7 +32,7 @@ function slugify(s: string): string {
 
 const COLOR_FALLBACK = '#5F5E5A'
 const MESES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Set', 'Oct', 'Nov', 'Dic']
-const MESES_ZAFRA = [7, 8, 9, 10, 11, 12, 1, 2, 3, 4, 5, 6]
+const MESES_ANIO = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
 
 function nOrNull(s: string): number | null {
   const t = (s ?? '').trim().replace(',', '.')
@@ -113,7 +112,7 @@ export function Campo() {
 
   const [cronograma, setCronograma] = useState<Cronograma>('aplicaciones')
   const [vista, setVista] = useState<Vista>('lista')
-  const [zafra, setZafra] = useState<string>('')
+  const [anio, setAnio] = useState<string>('')
   const [cargando, setCargando] = useState(true)
 
   const [aplicaciones, setAplicaciones] = useState<Aplicacion[]>([])
@@ -189,33 +188,34 @@ export function Campo() {
     return m
   }, [productos])
 
-  const zafras = useMemo(() => {
+  // Anos presentes (derivados de la fecha real del evento, ascendente -> se invierte)
+  const anios = useMemo(() => {
     const s = new Set<string>()
-    for (const a of aplicaciones) s.add(a.zafra || zafraDe(a.fecha))
-    for (const l of labores) s.add(l.zafra || zafraDe(l.fecha))
+    for (const a of aplicaciones) s.add(anioDe(a.fecha))
+    for (const l of labores) s.add(anioDe(l.fecha))
     return [...s].sort().reverse()
   }, [aplicaciones, labores])
 
   useEffect(() => {
-    if (zafras.length && !zafras.includes(zafra)) setZafra(zafras[0])
-  }, [zafras, zafra])
+    if (anios.length && !anios.includes(anio)) setAnio(anios[0])
+  }, [anios, anio])
 
-  const aplicZafra = useMemo(
-    () => aplicaciones.filter((a) => (a.zafra || zafraDe(a.fecha)) === zafra)
+  const aplicAnio = useMemo(
+    () => aplicaciones.filter((a) => anioDe(a.fecha) === anio)
       .sort((x, y) => x.fecha.localeCompare(y.fecha)),
-    [aplicaciones, zafra],
+    [aplicaciones, anio],
   )
-  const laboresZafra = useMemo(
-    () => labores.filter((l) => (l.zafra || zafraDe(l.fecha)) === zafra)
+  const laboresAnio = useMemo(
+    () => labores.filter((l) => anioDe(l.fecha) === anio)
       .sort((x, y) => x.fecha.localeCompare(y.fecha)),
-    [labores, zafra],
+    [labores, anio],
   )
 
   // ------------------------------------------------------------------ guardar
   async function guardarAplicacion(form: AplicForm, id?: number) {
     const cab = {
       fecha: form.fecha,
-      zafra: zafraDe(form.fecha),
+      zafra: anioDe(form.fecha),
       sectores: form.sectores.trim() || null,
       estado: form.estado,
       forma_aplicacion: form.forma_aplicacion.trim() || null,
@@ -250,7 +250,7 @@ export function Campo() {
   async function guardarLabor(form: LaborForm, id?: number) {
     const row = {
       fecha: form.fecha,
-      zafra: zafraDe(form.fecha),
+      zafra: anioDe(form.fecha),
       sectores: form.sectores.trim() || null,
       tipo_labor: form.tipo_labor,
       descripcion: form.descripcion.trim() || null,
@@ -302,17 +302,17 @@ export function Campo() {
         )}
       </div>
 
-      {/* Fila 2: zafra + vista */}
+      {/* Fila 2: ano + vista */}
       <div className="flex items-center justify-between gap-2 flex-wrap mb-4">
         <label className="flex items-center gap-2 text-sm">
-          <span className="text-oliva-600">Zafra</span>
+          <span className="text-oliva-600">Año</span>
           <select
-            value={zafra}
-            onChange={(e) => setZafra(e.target.value)}
+            value={anio}
+            onChange={(e) => setAnio(e.target.value)}
             className="rounded-lg border border-oliva-200 bg-white px-2 py-1.5 text-sm"
           >
-            {zafras.length === 0 && <option value="">—</option>}
-            {zafras.map((z) => <option key={z} value={z}>{z}</option>)}
+            {anios.length === 0 && <option value="">—</option>}
+            {anios.map((a) => <option key={a} value={a}>{a}</option>)}
           </select>
         </label>
         <Segmento
@@ -333,17 +333,17 @@ export function Campo() {
         <p className="text-oliva-500 text-sm py-8 text-center">Cargando…</p>
       ) : cronograma === 'aplicaciones' ? (
         vista === 'lista'
-          ? <ListaAplicaciones items={aplicZafra} prodPorAplic={prodPorAplic} info={infoApp} onAbrir={setDetAplic} />
+          ? <ListaAplicaciones items={aplicAnio} prodPorAplic={prodPorAplic} info={infoApp} onAbrir={setDetAplic} />
           : <GrillaEventos
-              zafra={zafra}
-              eventos={aplicZafra.map((a) => ({ id: a.id, fecha: a.fecha, color: colorDe(infoApp, prodPorAplic.get(a.id)?.[0]?.categoria ?? ''), planif: a.estado === 'planificada', onAbrir: () => setDetAplic(a) }))}
+              anio={anio}
+              eventos={aplicAnio.map((a) => ({ id: a.id, fecha: a.fecha, color: colorDe(infoApp, prodPorAplic.get(a.id)?.[0]?.categoria ?? ''), planif: a.estado === 'planificada', onAbrir: () => setDetAplic(a) }))}
             />
       ) : (
         vista === 'lista'
-          ? <ListaLabores items={laboresZafra} info={infoLabor} onAbrir={setDetLabor} />
+          ? <ListaLabores items={laboresAnio} info={infoLabor} onAbrir={setDetLabor} />
           : <GrillaEventos
-              zafra={zafra}
-              eventos={laboresZafra.map((l) => ({ id: l.id, fecha: l.fecha, color: colorDe(infoLabor, l.tipo_labor), planif: l.estado === 'planificada', onAbrir: () => setDetLabor(l) }))}
+              anio={anio}
+              eventos={laboresAnio.map((l) => ({ id: l.id, fecha: l.fecha, color: colorDe(infoLabor, l.tipo_labor), planif: l.estado === 'planificada', onAbrir: () => setDetLabor(l) }))}
             />
       )}
 
@@ -489,7 +489,7 @@ function agruparPorMes<T extends { fecha: string }>(items: T[]): [string, T[]][]
 function ListaAplicaciones({ items, prodPorAplic, info, onAbrir }: {
   items: Aplicacion[]; prodPorAplic: Map<number, AplicacionProducto[]>; info: Map<string, CategoriaCampo>; onAbrir: (a: Aplicacion) => void
 }) {
-  if (items.length === 0) return <VacioMsg texto="No hay aplicaciones en esta zafra." />
+  if (items.length === 0) return <VacioMsg texto="No hay aplicaciones en este año." />
   return (
     <div>
       {agruparPorMes(items).map(([mes, grupo]) => (
@@ -533,7 +533,7 @@ function ListaAplicaciones({ items, prodPorAplic, info, onAbrir }: {
 }
 
 function ListaLabores({ items, info, onAbrir }: { items: LaborCampo[]; info: Map<string, CategoriaCampo>; onAbrir: (l: LaborCampo) => void }) {
-  if (items.length === 0) return <VacioMsg texto="No hay labores en esta zafra." />
+  if (items.length === 0) return <VacioMsg texto="No hay labores en este año." />
   return (
     <div>
       {agruparPorMes(items).map(([mes, grupo]) => (
@@ -574,20 +574,19 @@ function ListaLabores({ items, info, onAbrir }: { items: LaborCampo[]; info: Map
 
 interface EventoGrilla { id: number; fecha: string; color: string; planif: boolean; onAbrir: () => void }
 
-function GrillaEventos({ zafra, eventos }: { zafra: string; eventos: EventoGrilla[] }) {
-  const anioIni = Number((zafra || '0').split('-')[0]) || new Date().getFullYear()
-  if (!zafra) return <VacioMsg texto="Sin datos." />
+function GrillaEventos({ anio, eventos }: { anio: string; eventos: EventoGrilla[] }) {
+  const anioNum = Number(anio) || new Date().getFullYear()
+  if (!anio) return <VacioMsg texto="Sin datos." />
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-      {MESES_ZAFRA.map((m) => {
-        const anio = m >= 7 ? anioIni : anioIni + 1
+      {MESES_ANIO.map((m) => {
         const delMes = eventos.filter((e) => {
           const [y, mm] = e.fecha.slice(0, 10).split('-').map(Number)
-          return y === anio && mm === m
+          return y === anioNum && mm === m
         })
         return (
           <div key={m} className="rounded-xl border border-oliva-100 bg-white p-2.5 min-h-[76px]">
-            <div className="text-xs font-medium text-oliva-500 mb-1.5">{MESES[m - 1]} {String(anio).slice(2)}</div>
+            <div className="text-xs font-medium text-oliva-500 mb-1.5">{MESES[m - 1]} {String(anioNum).slice(2)}</div>
             <div className="flex flex-wrap gap-1">
               {delMes.length === 0 && <span className="text-xs text-oliva-300">—</span>}
               {delMes.map((e) => (
