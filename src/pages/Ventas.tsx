@@ -2810,19 +2810,24 @@ function ListaCadeteDialog({
   // Todos los pendientes de entrega — de TODOS los socios (via RPC SECURITY DEFINER).
   // Incluye los que quedaron sin entregar de meses anteriores (arrastre automatico):
   // la RPC devuelve siempre los no entregados, sin importar el rango de fechas.
-  const enviosDelRango = useMemo(() => {
-    return enviosRPC
-      .filter((v) => !v.entregado)
-      .sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : a.id - b.id))
+  // Tanda completa (entregados + pendientes) ordenada el mas viejo primero. Se usa para
+  // numerar: el numero del pedido es ESTABLE y no se recomprime cuando se entregan los
+  // anteriores (es el registro que se comparte con el cadete). Un arrastrado del mes
+  // anterior (fecha mas vieja) queda como #1.
+  const ordenCompleto = useMemo(() => {
+    return [...enviosRPC].sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : a.id - b.id))
   }, [enviosRPC])
 
-  // Numeración simple: 1..N en orden de la lista (el mas viejo primero), para que
-  // un pedido arrastrado del mes anterior quede como el #1 de la tanda actual.
+  // Solo los pendientes de entrega — lo que el cadete todavia tiene que entregar.
+  const enviosDelRango = useMemo(() => ordenCompleto.filter((v) => !v.entregado), [ordenCompleto])
+
+  // Numeración 1..N sobre la tanda COMPLETA (ver ordenCompleto): asi Mercedes sigue
+  // siendo #4 aunque los #1..#3 ya esten entregados y fuera de la lista.
   const numeroPedido = useMemo(() => {
     const map = new Map<number, number>()
-    enviosDelRango.forEach((v, idx) => map.set(v.id, idx + 1))
+    ordenCompleto.forEach((v, idx) => map.set(v.id, idx + 1))
     return map
-  }, [enviosDelRango])
+  }, [ordenCompleto])
 
   useEffect(() => {
     if (!abierto) return
