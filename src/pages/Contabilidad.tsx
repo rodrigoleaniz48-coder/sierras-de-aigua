@@ -59,7 +59,7 @@ interface MovBancario {
 interface Venta { id: number; fecha: string; total: number; con_factura: boolean; ubicacion_id: number; cliente_id: number | null; moneda?: string | null; cotizacion?: number | null; forma_pago?: string | null; entregado?: boolean; fecha_entrega?: string | null; conciliado_mov_id?: number | null }
 interface Gasto { id: number; fecha: string; monto: number; moneda: 'UYU' | 'USD'; descripcion: string | null; categoria: string; socio_id: string; es_adelanto?: boolean; reembolsable?: boolean; conciliado_mov_id?: number | null }
 interface Ingreso { id: number; fecha: string; monto: number; moneda: string; descripcion: string | null; categoria_id: number | null; cuenta_id?: number | null; conciliado_mov_id?: number | null }
-interface Pago { id: number; cliente_id: number | null; fecha: string; monto: number; moneda: string; medio_pago: string | null; nota: string | null }
+interface Pago { id: number; cliente_id: number | null; fecha: string; monto: number; moneda: string; medio_pago: string | null; nota: string | null; cuenta_id?: number | null }
 interface CategoriaGasto { id: number; slug: string; nombre: string }
 interface CategoriaIngreso { id: number; nombre: string }
 interface Cliente { id: number; nombre: string; tipo?: string; telefono?: string | null; whatsapp?: string | null; saldo_inicial?: number; saldo_inicial_usd?: number; saldo_inicial_fecha?: string | null }
@@ -1981,6 +1981,7 @@ export function CuentasCorrientes() {
   const [sel, setSel] = useState<number | null>(null)
   const [editSaldo, setEditSaldo] = useState<Cliente | null>(null)
   const [pagarCliente, setPagarCliente] = useState<Cliente | null>(null)
+  const [editarPago, setEditarPago] = useState<Pago | null>(null)
 
   async function cargar() {
     setCargando(true)
@@ -1991,7 +1992,7 @@ export function CuentasCorrientes() {
     if (ids.length > 0) {
       const [v, p] = await Promise.all([
         supabase.from('ventas').select('id,fecha,total,con_factura,ubicacion_id,cliente_id,moneda,cotizacion,entregado,fecha_entrega').in('cliente_id', ids).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
-        supabase.from('pagos').select('id,cliente_id,fecha,monto,moneda,medio_pago,nota').in('cliente_id', ids),
+        supabase.from('pagos').select('id,cliente_id,fecha,monto,moneda,medio_pago,nota,cuenta_id').in('cliente_id', ids),
       ])
       setVentas((v.data as Venta[]) ?? [])
       setPagos((p.data as Pago[]) ?? [])
@@ -2070,14 +2071,14 @@ export function CuentasCorrientes() {
   }
 
   const ledger = useMemo(() => {
-    type L = { fecha: string; tipo: 'inicial' | 'venta' | 'pago'; detalle: string; debe: number; haber: number; moneda: string }
+    type L = { fecha: string; tipo: 'inicial' | 'venta' | 'pago'; detalle: string; debe: number; haber: number; moneda: string; pago?: Pago }
     if (!sel) return [] as L[]
     const c = cliById.get(sel)
     const rows: L[] = []
     if (c && Number(c.saldo_inicial ?? 0) !== 0) rows.push({ fecha: c.saldo_inicial_fecha ?? '', tipo: 'inicial', detalle: `Saldo inicial${c.saldo_inicial_fecha ? ` al ${c.saldo_inicial_fecha}` : ''}`, debe: Number(c.saldo_inicial ?? 0), haber: 0, moneda: 'UYU' })
     if (c && Number(c.saldo_inicial_usd ?? 0) !== 0) rows.push({ fecha: c.saldo_inicial_fecha ?? '', tipo: 'inicial', detalle: `Saldo inicial USD${c.saldo_inicial_fecha ? ` al ${c.saldo_inicial_fecha}` : ''}`, debe: Number(c.saldo_inicial_usd ?? 0), haber: 0, moneda: 'USD' })
     ventas.filter((v) => v.cliente_id === sel && despuesDeCorte(c, v.fecha)).forEach((v) => rows.push({ fecha: v.fecha, tipo: 'venta', detalle: `Venta #${v.id}`, debe: ventaMonto(v), haber: 0, moneda: ventaEsUSD(v) ? 'USD' : 'UYU' }))
-    pagos.filter((p) => p.cliente_id === sel && despuesDeCorte(c, p.fecha)).forEach((p) => rows.push({ fecha: p.fecha, tipo: 'pago', detalle: p.nota ?? 'Pago a cuenta', debe: 0, haber: Number(p.monto), moneda: p.moneda }))
+    pagos.filter((p) => p.cliente_id === sel && despuesDeCorte(c, p.fecha)).forEach((p) => rows.push({ fecha: p.fecha, tipo: 'pago', detalle: p.nota ?? 'Pago a cuenta', debe: 0, haber: Number(p.monto), moneda: p.moneda, pago: p }))
     return rows.sort((a, b) => (a.tipo === 'inicial' ? -1 : b.tipo === 'inicial' ? 1 : a.fecha.localeCompare(b.fecha)))
   }, [sel, ventas, pagos, cliById])
 
@@ -2165,10 +2166,16 @@ export function CuentasCorrientes() {
                             return ledger.map((l, i) => {
                               const esUSD = l.moneda === 'USD'
                               if (esUSD) runUSD += l.debe - l.haber; else runUYU += l.debe - l.haber
+                              const editable = l.tipo === 'pago' && !!l.pago
                               return (
-                                <tr key={i} className="border-b border-oliva-100/70 last:border-0">
+                                <tr
+                                  key={i}
+                                  className={`border-b border-oliva-100/70 last:border-0 ${editable ? 'cursor-pointer hover:bg-oliva-100/60' : ''}`}
+                                  onClick={editable ? (e) => { e.stopPropagation(); setEditarPago(l.pago!) } : undefined}
+                                  title={editable ? 'Editar este pago' : undefined}
+                                >
                                   <td className="py-1.5 px-3 tabular-nums text-oliva-600 whitespace-nowrap">{fFecha(l.fecha)}</td>
-                                  <td className="py-1.5 px-3 text-oliva-800">{l.tipo === 'pago' ? '💵 ' : l.tipo === 'inicial' ? '⚖️ ' : '🧾 '}{l.detalle}{esUSD ? ' (USD)' : ''}</td>
+                                  <td className="py-1.5 px-3 text-oliva-800">{l.tipo === 'pago' ? '💵 ' : l.tipo === 'inicial' ? '⚖️ ' : '🧾 '}{l.detalle}{esUSD ? ' (USD)' : ''}{editable && <span className="text-oliva-400 ml-1.5 text-xs">✏️</span>}</td>
                                   <td className="py-1.5 px-3 text-right tabular-nums text-oliva-700">{l.debe > 0 ? money(l.debe, esUSD ? 'USD' : 'UYU') : ''}</td>
                                   <td className="py-1.5 px-3 text-right tabular-nums text-green-700">{l.haber > 0 ? money(l.haber, esUSD ? 'USD' : 'UYU') : ''}</td>
                                   <td className="py-1.5 px-3 text-right tabular-nums font-medium text-oliva-900">{money(esUSD ? runUSD : runUYU, esUSD ? 'USD' : 'UYU')}</td>
@@ -2191,6 +2198,7 @@ export function CuentasCorrientes() {
 
       <SaldoInicialDialog cliente={editSaldo} onCerrar={() => setEditSaldo(null)} onOk={() => { setEditSaldo(null); cargar() }} />
       <RegistrarPagoDialog cliente={pagarCliente} onCerrar={() => setPagarCliente(null)} onOk={() => { setPagarCliente(null); cargar() }} />
+      <EditarPagoDialog pago={editarPago} onCerrar={() => setEditarPago(null)} onOk={() => { setEditarPago(null); cargar() }} />
     </div>
   )
 }
@@ -2345,6 +2353,142 @@ function RegistrarPagoDialog({ cliente, onCerrar, onOk }: { cliente: Cliente | n
         <div className="flex justify-end gap-2 pt-1">
           <button className="btn-secondary" onClick={onCerrar}>Cancelar</button>
           <button className="btn-primary" onClick={guardar} disabled={guardando}>{guardando ? 'Guardando…' : (medio === 'efectivo' ? 'Registrar pago + adelanto' : 'Registrar pago')}</button>
+        </div>
+      </div>
+    </Dialog>
+  )
+}
+
+// Editar o borrar un pago a cuenta ya registrado (p.ej. corregir un monto mal cargado).
+// Avisos: si el pago fue en EFECTIVO se creo un adelanto al socio que lo recibio, y ese
+// adelanto NO se ajusta solo (hay que corregirlo a mano en Finanzas). Si estaba conciliado
+// con un movimiento bancario, al borrarlo el movimiento vuelve a quedar sin conciliar
+// (el FK conciliado_pago_id es ON DELETE SET NULL).
+function EditarPagoDialog({ pago, onCerrar, onOk }: { pago: Pago | null; onCerrar: () => void; onOk: () => void }) {
+  const [fecha, setFecha] = useState('')
+  const [monto, setMonto] = useState('')
+  const [moneda, setMoneda] = useState<'UYU' | 'USD'>('UYU')
+  const [medio, setMedio] = useState('transferencia')
+  const [nota, setNota] = useState('')
+  const [cuentas, setCuentas] = useState<{ id: number; nombre: string; moneda: string }[]>([])
+  const [cuentaId, setCuentaId] = useState<string>('')
+  const [conciliado, setConciliado] = useState(false)
+  const [confirmarBorrar, setConfirmarBorrar] = useState(false)
+  const [guardando, setGuardando] = useState(false)
+  const [borrando, setBorrando] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!pago) return
+    setFecha(pago.fecha); setMonto(String(Number(pago.monto))); setMoneda((pago.moneda as 'UYU' | 'USD') ?? 'UYU')
+    setMedio(pago.medio_pago ?? 'transferencia'); setNota(pago.nota ?? '')
+    setCuentaId(pago.cuenta_id != null ? String(pago.cuenta_id) : '')
+    setConfirmarBorrar(false); setError(null)
+    supabase.from('cuentas_bancarias').select('id,nombre,moneda').eq('activo', true).order('id')
+      .then(({ data }) => setCuentas((data as { id: number; nombre: string; moneda: string }[]) ?? []))
+    supabase.from('movimientos_bancarios').select('id').eq('conciliado_pago_id', pago.id).limit(1)
+      .then(({ data }) => setConciliado(((data as unknown[]) ?? []).length > 0))
+  }, [pago])
+
+  const cuentasMoneda = cuentas.filter((c) => c.moneda === moneda)
+  const sinDinero = medio === 'efectivo' || medio === 'especie'
+  const eraEfectivo = pago?.medio_pago === 'efectivo'
+
+  async function guardar() {
+    if (!pago) return
+    const m = Number(monto)
+    if (!(m > 0)) { setError('El monto debe ser mayor a cero.'); return }
+    setGuardando(true); setError(null)
+    const { error: e } = await supabase.from('pagos').update({
+      fecha, monto: m, moneda, medio_pago: medio,
+      cuenta_id: sinDinero ? null : (cuentaId ? Number(cuentaId) : null),
+      nota: nota.trim() || null, actualizado_en: new Date().toISOString(),
+    }).eq('id', pago.id)
+    if (e) { setGuardando(false); setError(e.message); return }
+    setGuardando(false)
+    onOk()
+  }
+
+  async function borrar() {
+    if (!pago) return
+    setBorrando(true); setError(null)
+    const { error: e } = await supabase.from('pagos').delete().eq('id', pago.id)
+    if (e) { setBorrando(false); setError(e.message); return }
+    setBorrando(false)
+    onOk()
+  }
+
+  if (!pago) return null
+  return (
+    <Dialog abierto={pago !== null} onCerrar={onCerrar} titulo="Editar pago a cuenta" ancho="sm">
+      <div className="space-y-4">
+        <p className="text-xs text-oliva-600">Corregí los datos de este pago. Le vuelve a calcular el saldo del cliente.</p>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="label">Fecha</label>
+            <input type="date" className="input" value={fecha} onChange={(e) => setFecha(e.target.value)} />
+          </div>
+          <div>
+            <label className="label">Monto</label>
+            <input type="number" className="input tabular-nums" min="0" step="0.01" value={monto} onChange={(e) => setMonto(e.target.value)} />
+          </div>
+          <div>
+            <label className="label">Moneda</label>
+            <select className="input" value={moneda} onChange={(e) => setMoneda(e.target.value as 'UYU' | 'USD')}>
+              <option value="UYU">UYU</option>
+              <option value="USD">USD</option>
+            </select>
+          </div>
+          <div>
+            <label className="label">Medio</label>
+            <select className="input" value={medio} onChange={(e) => setMedio(e.target.value)}>
+              <option value="transferencia">Transferencia</option>
+              <option value="efectivo">Efectivo</option>
+              <option value="especie">Especie (sin dinero)</option>
+              <option value="otro">Otro</option>
+            </select>
+          </div>
+          {!sinDinero && (
+            <div className="col-span-2">
+              <label className="label">Cuenta que recibe</label>
+              <select className="input" value={cuentaId} onChange={(e) => setCuentaId(e.target.value)}>
+                {cuentasMoneda.length === 0 && <option value="">(sin cuenta en {moneda})</option>}
+                {cuentasMoneda.map((c) => <option key={c.id} value={String(c.id)}>{c.nombre}</option>)}
+              </select>
+            </div>
+          )}
+          <div className="col-span-2">
+            <label className="label">Nota (opcional)</label>
+            <input className="input" value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Pago a cuenta" />
+          </div>
+        </div>
+
+        {eraEfectivo && (
+          <div className="rounded-lg border border-aceite-500/30 bg-aceite-500/5 p-3 text-xs text-oliva-700">
+            Este pago fue en <b>efectivo</b>: cuando se registró, se creó un <b>adelanto</b> al socio que lo recibió. Si cambiás el monto o lo borrás, ajustá ese adelanto a mano en <b>Finanzas → Gastos</b>.
+          </div>
+        )}
+        {conciliado && (
+          <div className="rounded-lg border border-oliva-200 bg-oliva-50 p-3 text-xs text-oliva-700">
+            Está <b>conciliado</b> con un movimiento bancario. Si lo borrás, ese movimiento vuelve a quedar <b>sin conciliar</b>. Si cambiás el monto, revisá que siga coincidiendo con el movimiento.
+          </div>
+        )}
+        {error && <div className="text-sm text-red-700">{error}</div>}
+
+        <div className="flex items-center justify-between gap-2 pt-1">
+          {confirmarBorrar ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-red-700">¿Borrar este pago?</span>
+              <button className="text-xs rounded-md bg-red-600 hover:bg-red-700 text-white px-2 py-1" onClick={borrar} disabled={borrando}>{borrando ? 'Borrando…' : 'Sí, borrar'}</button>
+              <button className="text-xs text-oliva-600 underline" onClick={() => setConfirmarBorrar(false)}>No</button>
+            </div>
+          ) : (
+            <button className="text-xs text-red-700 underline" onClick={() => setConfirmarBorrar(true)}>Borrar pago</button>
+          )}
+          <div className="flex gap-2">
+            <button className="btn-secondary" onClick={onCerrar}>Cancelar</button>
+            <button className="btn-primary" onClick={guardar} disabled={guardando}>{guardando ? 'Guardando…' : 'Guardar'}</button>
+          </div>
         </div>
       </div>
     </Dialog>
