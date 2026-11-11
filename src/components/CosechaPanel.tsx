@@ -33,6 +33,12 @@ function n0(s: string): number {
 const fmtKg = (v: number) => new Intl.NumberFormat('es-UY', { maximumFractionDigits: 0 }).format(v)
 const fmtKg1 = (v: number) => new Intl.NumberFormat('es-UY', { maximumFractionDigits: 1 }).format(v)
 const fmt$ = (v: number) => new Intl.NumberFormat('es-UY', { maximumFractionDigits: 0 }).format(v)
+const KG_POR_LITRO = 0.918 // 1 L de aceite = 918 gr (factor del cuaderno)
+
+// Kg de aceite de un pasaje: el valor cargado, o estimado desde los litros.
+function aceiteKgDe(p: CosechaProceso): number {
+  return p.kg_aceite ?? (p.litros != null ? p.litros * KG_POR_LITRO : 0)
+}
 
 // ---------------------------------------------------------------------------
 // Forms
@@ -50,11 +56,9 @@ interface CargaForm {
 interface ProcesoForm {
   fecha: string
   variedad: string
-  kg_balanza: string
-  kg_procesado: string
   kg_aceite: string
   litros: string
-  destino: string
+  destino: string // tanque de destino
   notas: string
 }
 
@@ -66,7 +70,7 @@ function cargaVacia(): CargaForm {
   return { fecha: hoyLocalStr(), sector: '', variedad: VARIEDADES[0], kg_balanza: '', kg_hojas: '', notas: '', lineas: [{ operario_id: '', kg: '' }] }
 }
 function procesoVacio(): ProcesoForm {
-  return { fecha: hoyLocalStr(), variedad: VARIEDADES[0], kg_balanza: '', kg_procesado: '', kg_aceite: '', litros: '', destino: 'AOVE', notas: '' }
+  return { fecha: hoyLocalStr(), variedad: VARIEDADES[0], kg_aceite: '', litros: '', destino: '', notas: '' }
 }
 function cargaAForm(c: CosechaCarga, ops: CosechaCargaOperario[]): CargaForm {
   return {
@@ -85,8 +89,6 @@ function procesoAForm(p: CosechaProceso): ProcesoForm {
   return {
     fecha: p.fecha.slice(0, 10),
     variedad: p.variedad,
-    kg_balanza: p.kg_balanza != null ? String(p.kg_balanza) : '',
-    kg_procesado: p.kg_procesado != null ? String(p.kg_procesado) : '',
     kg_aceite: p.kg_aceite != null ? String(p.kg_aceite) : '',
     litros: p.litros != null ? String(p.litros) : '',
     destino: p.destino ?? '',
@@ -213,23 +215,27 @@ export function CosechaPanel({ anio, puedeEscribir }: { anio: string; puedeEscri
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0], 'es', { numeric: true }))
   }, [cargas])
 
+  // Rendimiento = aceite que salio (pasajes a tanque) / kg que entraron (cargas), por variedad.
   const rendPorVariedad = useMemo(() => {
-    const m = new Map<string, { kg: number; litros: number; aceite: number }>()
+    const kgIn = new Map<string, number>()
+    for (const c of cargas) kgIn.set(c.variedad, (kgIn.get(c.variedad) ?? 0) + (c.kg_balanza || 0))
+    const litrosM = new Map<string, number>()
+    const aceiteM = new Map<string, number>()
     for (const p of procesos) {
-      const prev = m.get(p.variedad) ?? { kg: 0, litros: 0, aceite: 0 }
-      prev.kg += p.kg_balanza || 0
-      prev.litros += p.litros || 0
-      prev.aceite += p.kg_aceite || 0
-      m.set(p.variedad, prev)
+      litrosM.set(p.variedad, (litrosM.get(p.variedad) ?? 0) + (p.litros || 0))
+      aceiteM.set(p.variedad, (aceiteM.get(p.variedad) ?? 0) + aceiteKgDe(p))
     }
-    return [...m.entries()].map(([v, d]) => ({ variedad: v, ...d, rend: d.kg > 0 ? (d.aceite / d.kg) * 100 : 0 }))
-  }, [procesos])
+    const vars = new Set<string>([...kgIn.keys(), ...aceiteM.keys()])
+    return [...vars].map((v) => {
+      const kg = kgIn.get(v) ?? 0, litros = litrosM.get(v) ?? 0, aceite = aceiteM.get(v) ?? 0
+      return { variedad: v, kg, litros, aceite, rend: kg > 0 ? (aceite / kg) * 100 : 0 }
+    }).sort((a, b) => b.kg - a.kg)
+  }, [cargas, procesos])
 
   const totKgCosecha = useMemo(() => cargas.reduce((s, c) => s + (c.kg_balanza || 0), 0), [cargas])
   const totLitros = useMemo(() => procesos.reduce((s, p) => s + (p.litros || 0), 0), [procesos])
-  const totKgProceso = useMemo(() => procesos.reduce((s, p) => s + (p.kg_balanza || 0), 0), [procesos])
-  const totAceite = useMemo(() => procesos.reduce((s, p) => s + (p.kg_aceite || 0), 0), [procesos])
-  const rendTotal = totKgProceso > 0 ? (totAceite / totKgProceso) * 100 : 0
+  const totAceite = useMemo(() => procesos.reduce((s, p) => s + aceiteKgDe(p), 0), [procesos])
+  const rendTotal = totKgCosecha > 0 ? (totAceite / totKgCosecha) * 100 : 0
   const totPagable = useMemo(() => liquidacion.reduce((s, f) => s + f.pagable, 0), [liquidacion])
 
   // Comparativo entre anos: historico (cosecha_resumen) + ano vivo (cargas/proceso)
@@ -283,8 +289,6 @@ export function CosechaPanel({ anio, puedeEscribir }: { anio: string; puedeEscri
       fecha: form.fecha,
       anio: Number(form.fecha.slice(0, 4)),
       variedad: form.variedad,
-      kg_balanza: nOrNull(form.kg_balanza),
-      kg_procesado: nOrNull(form.kg_procesado),
       kg_aceite: nOrNull(form.kg_aceite),
       litros: nOrNull(form.litros),
       destino: form.destino.trim() || null,
@@ -301,7 +305,7 @@ export function CosechaPanel({ anio, puedeEscribir }: { anio: string; puedeEscri
     await cargar()
   }
   async function borrarProceso(id: number) {
-    if (!confirm('¿Borrar este proceso?')) return
+    if (!confirm('¿Borrar este pasaje a tanque?')) return
     await supabase.from('cosecha_proceso').delete().eq('id', id)
     await cargar()
   }
@@ -317,7 +321,7 @@ export function CosechaPanel({ anio, puedeEscribir }: { anio: string; puedeEscri
             <span className="text-base leading-none">+</span> Nueva carga
           </button>
           <button onClick={() => setNuevoProceso(true)} className="inline-flex items-center gap-1.5 rounded-lg bg-white border border-oliva-300 text-oliva-800 px-3.5 py-2 text-sm font-medium hover:border-oliva-400">
-            <span className="text-base leading-none">+</span> Nuevo proceso
+            <span className="text-base leading-none">+</span> Pasaje a tanque
           </button>
           <div className="ml-auto flex items-center gap-3 text-xs">
             <button onClick={() => setEditorTarifa(true)} className="text-oliva-600 hover:text-oliva-900 underline decoration-dotted">
@@ -394,14 +398,14 @@ export function CosechaPanel({ anio, puedeEscribir }: { anio: string; puedeEscri
           </div>
 
           {/* Rendimiento por variedad */}
-          <Seccion titulo="Rendimiento por variedad (almazara)">
-            {rendPorVariedad.length === 0 ? <VacioMini texto="Sin procesos cargados este año." /> : (
+          <Seccion titulo="Rendimiento por variedad (aceite ÷ cosecha)">
+            {rendPorVariedad.length === 0 ? <VacioMini texto="Sin datos este año." /> : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-xs text-oliva-500 border-b border-oliva-100">
                       <th className="text-left font-medium py-1.5">Variedad</th>
-                      <th className="text-right font-medium">Kg procesados</th>
+                      <th className="text-right font-medium">Kg cosechados</th>
                       <th className="text-right font-medium">Litros</th>
                       <th className="text-right font-medium">Rendimiento</th>
                     </tr>
@@ -459,8 +463,8 @@ export function CosechaPanel({ anio, puedeEscribir }: { anio: string; puedeEscri
                 </div>
               )}
             </Seccion>
-            <Seccion titulo={`Procesos (${procesos.length})`}>
-              {procesos.length === 0 ? <VacioMini texto="Sin procesos." /> : (
+            <Seccion titulo={`Pasajes a tanque (${procesos.length})`}>
+              {procesos.length === 0 ? <VacioMini texto="Sin pasajes a tanque." /> : (
                 <div className="space-y-1.5">
                   {procesos.map((p) => (
                     <button key={p.id} onClick={() => puedeEscribir && setEditProceso(p)} className="w-full text-left flex items-center gap-2 rounded-lg border border-oliva-100 bg-white px-3 py-2 hover:border-oliva-300 transition">
@@ -494,14 +498,14 @@ export function CosechaPanel({ anio, puedeEscribir }: { anio: string; puedeEscri
       )}
       {nuevoProceso && (
         <ProcesoDialog
-          titulo="Nuevo proceso" borradorKey={BORRADOR_PROCESO}
+          titulo="Pasaje a tanque" borradorKey={BORRADOR_PROCESO}
           onCerrar={() => { setNuevoProceso(false); borrarKey(BORRADOR_PROCESO) }}
           onGuardar={async (f) => { await guardarProceso(f); setNuevoProceso(false); borrarKey(BORRADOR_PROCESO) }}
         />
       )}
       {editProceso && (
         <ProcesoDialog
-          titulo="Editar proceso" inicial={procesoAForm(editProceso)}
+          titulo="Editar pasaje a tanque" inicial={procesoAForm(editProceso)}
           onBorrar={async () => { await borrarProceso(editProceso.id); setEditProceso(null) }}
           onCerrar={() => setEditProceso(null)}
           onGuardar={async (f) => { await guardarProceso(f, editProceso.id); setEditProceso(null) }}
@@ -671,9 +675,6 @@ function ProcesoDialog({ titulo, inicial, borradorKey, onCerrar, onGuardar, onBo
   useEffect(() => { if (borradorKey) guardarObj(borradorKey, form) }, [form, borradorKey])
 
   const set = <K extends keyof ProcesoForm>(k: K, v: ProcesoForm[K]) => setForm((f) => ({ ...f, [k]: v }))
-  const kgBal = n0(form.kg_balanza)
-  const aceite = n0(form.kg_aceite)
-  const rend = kgBal > 0 && aceite > 0 ? (aceite / kgBal) * 100 : 0
 
   async function submit() {
     if (!form.fecha) { alert('Falta la fecha.'); return }
@@ -698,33 +699,17 @@ function ProcesoDialog({ titulo, inicial, borradorKey, onCerrar, onGuardar, onBo
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className={labelCls}>Kg balanza (entrada)</label>
-            <input inputMode="decimal" value={form.kg_balanza} onChange={(e) => set('kg_balanza', e.target.value)} className={inputCls} />
-          </div>
-          <div>
-            <label className={labelCls}>Kg procesados (−hojas)</label>
-            <input inputMode="decimal" value={form.kg_procesado} onChange={(e) => set('kg_procesado', e.target.value)} className={inputCls} />
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className={labelCls}>Kg de aceite</label>
-            <input inputMode="decimal" value={form.kg_aceite} onChange={(e) => set('kg_aceite', e.target.value)} className={inputCls} />
-          </div>
-          <div>
-            <label className={labelCls}>Litros obtenidos</label>
+            <label className={labelCls}>Litros a tanque</label>
             <input inputMode="decimal" value={form.litros} onChange={(e) => set('litros', e.target.value)} className={inputCls} />
           </div>
+          <div>
+            <label className={labelCls}>Kg de aceite (opcional)</label>
+            <input inputMode="decimal" value={form.kg_aceite} onChange={(e) => set('kg_aceite', e.target.value)} placeholder="si no, se estima de litros" className={inputCls} />
+          </div>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className={labelCls}>Destino</label>
-            <input value={form.destino} onChange={(e) => set('destino', e.target.value)} placeholder="AOVE" className={inputCls} />
-          </div>
-          <div>
-            <label className={labelCls}>Rendimiento</label>
-            <div className={inputCls + ' bg-oliva-50 text-oliva-700'}>{rend > 0 ? `${fmtKg1(rend)}%` : '—'}</div>
-          </div>
+        <div>
+          <label className={labelCls}>Tanque</label>
+          <input value={form.destino} onChange={(e) => set('destino', e.target.value)} placeholder="T1" className={inputCls} />
         </div>
         <div>
           <label className={labelCls}>Notas</label>
