@@ -274,7 +274,7 @@ export function Ventas() {
         ))}
       </div>
 
-      {vista === 'ctacte' && <CuentasCorrientes />}
+      {vista === 'ctacte' && <CuentasCorrientes onVerVenta={(id) => setVentaDetalleId(id)} />}
 
       {vista === 'ventas' && (<>
       {/* Sección 1: Pendientes de entrega o cobro (siempre visible arriba, sin filtros) */}

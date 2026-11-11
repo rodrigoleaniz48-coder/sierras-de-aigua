@@ -1972,7 +1972,7 @@ function CobroACuentaDialog({
 // Cuentas corrientes (distribuidores / mayoristas)
 // Saldo por cliente = ventas (debe) − pagos a cuenta (haber). Base UYU.
 // ============================================================
-export function CuentasCorrientes() {
+export function CuentasCorrientes({ onVerVenta }: { onVerVenta?: (ventaId: number) => void } = {}) {
   const { perfil } = useAuth()
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [ventas, setVentas] = useState<Venta[]>([])
@@ -2071,13 +2071,13 @@ export function CuentasCorrientes() {
   }
 
   const ledger = useMemo(() => {
-    type L = { fecha: string; tipo: 'inicial' | 'venta' | 'pago'; detalle: string; debe: number; haber: number; moneda: string; pago?: Pago }
+    type L = { fecha: string; tipo: 'inicial' | 'venta' | 'pago'; detalle: string; debe: number; haber: number; moneda: string; pago?: Pago; ventaId?: number }
     if (!sel) return [] as L[]
     const c = cliById.get(sel)
     const rows: L[] = []
     if (c && Number(c.saldo_inicial ?? 0) !== 0) rows.push({ fecha: c.saldo_inicial_fecha ?? '', tipo: 'inicial', detalle: `Saldo inicial${c.saldo_inicial_fecha ? ` al ${c.saldo_inicial_fecha}` : ''}`, debe: Number(c.saldo_inicial ?? 0), haber: 0, moneda: 'UYU' })
     if (c && Number(c.saldo_inicial_usd ?? 0) !== 0) rows.push({ fecha: c.saldo_inicial_fecha ?? '', tipo: 'inicial', detalle: `Saldo inicial USD${c.saldo_inicial_fecha ? ` al ${c.saldo_inicial_fecha}` : ''}`, debe: Number(c.saldo_inicial_usd ?? 0), haber: 0, moneda: 'USD' })
-    ventas.filter((v) => v.cliente_id === sel && despuesDeCorte(c, v.fecha)).forEach((v) => rows.push({ fecha: v.fecha, tipo: 'venta', detalle: `Venta #${v.id}`, debe: ventaMonto(v), haber: 0, moneda: ventaEsUSD(v) ? 'USD' : 'UYU' }))
+    ventas.filter((v) => v.cliente_id === sel && despuesDeCorte(c, v.fecha)).forEach((v) => rows.push({ fecha: v.fecha, tipo: 'venta', detalle: `Venta #${v.id}`, debe: ventaMonto(v), haber: 0, moneda: ventaEsUSD(v) ? 'USD' : 'UYU', ventaId: v.id }))
     pagos.filter((p) => p.cliente_id === sel && despuesDeCorte(c, p.fecha)).forEach((p) => rows.push({ fecha: p.fecha, tipo: 'pago', detalle: p.nota ?? 'Pago a cuenta', debe: 0, haber: Number(p.monto), moneda: p.moneda, pago: p }))
     return rows.sort((a, b) => (a.tipo === 'inicial' ? -1 : b.tipo === 'inicial' ? 1 : a.fecha.localeCompare(b.fecha)))
   }, [sel, ventas, pagos, cliById])
@@ -2167,15 +2167,21 @@ export function CuentasCorrientes() {
                               const esUSD = l.moneda === 'USD'
                               if (esUSD) runUSD += l.debe - l.haber; else runUYU += l.debe - l.haber
                               const editable = l.tipo === 'pago' && !!l.pago
+                              const verVenta = l.tipo === 'venta' && !!l.ventaId && !!onVerVenta
+                              const clickable = editable || verVenta
                               return (
                                 <tr
                                   key={i}
-                                  className={`border-b border-oliva-100/70 last:border-0 ${editable ? 'cursor-pointer hover:bg-oliva-100/60' : ''}`}
-                                  onClick={editable ? (e) => { e.stopPropagation(); setEditarPago(l.pago!) } : undefined}
-                                  title={editable ? 'Editar este pago' : undefined}
+                                  className={`border-b border-oliva-100/70 last:border-0 ${clickable ? 'cursor-pointer hover:bg-oliva-100/60' : ''}`}
+                                  onClick={
+                                    editable ? (e) => { e.stopPropagation(); setEditarPago(l.pago!) }
+                                      : verVenta ? (e) => { e.stopPropagation(); onVerVenta!(l.ventaId!) }
+                                        : undefined
+                                  }
+                                  title={editable ? 'Editar este pago' : verVenta ? 'Ver detalle de la venta' : undefined}
                                 >
                                   <td className="py-1.5 px-3 tabular-nums text-oliva-600 whitespace-nowrap">{fFecha(l.fecha)}</td>
-                                  <td className="py-1.5 px-3 text-oliva-800">{l.tipo === 'pago' ? '💵 ' : l.tipo === 'inicial' ? '⚖️ ' : '🧾 '}{l.detalle}{esUSD ? ' (USD)' : ''}{editable && <span className="text-oliva-400 ml-1.5 text-xs">✏️</span>}</td>
+                                  <td className="py-1.5 px-3 text-oliva-800">{l.tipo === 'pago' ? '💵 ' : l.tipo === 'inicial' ? '⚖️ ' : '🧾 '}{l.detalle}{esUSD ? ' (USD)' : ''}{editable && <span className="text-oliva-400 ml-1.5 text-xs">✏️</span>}{verVenta && <span className="text-oliva-400 ml-1.5 text-xs">›</span>}</td>
                                   <td className="py-1.5 px-3 text-right tabular-nums text-oliva-700">{l.debe > 0 ? money(l.debe, esUSD ? 'USD' : 'UYU') : ''}</td>
                                   <td className="py-1.5 px-3 text-right tabular-nums text-green-700">{l.haber > 0 ? money(l.haber, esUSD ? 'USD' : 'UYU') : ''}</td>
                                   <td className="py-1.5 px-3 text-right tabular-nums font-medium text-oliva-900">{money(esUSD ? runUSD : runUYU, esUSD ? 'USD' : 'UYU')}</td>
