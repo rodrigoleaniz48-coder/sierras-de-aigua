@@ -503,6 +503,12 @@ function TablaVentas({
   resumenPorId?: Map<number, string>
   onRecordarCobro?: (v: Venta, e: React.MouseEvent) => void
 }) {
+  // Resumen del pedido retraible por fila (colapsado por defecto para no ocupar
+  // tanto alto, sobre todo en movil). Se abre/cierra con el toggle del cliente.
+  const [resumenAbierto, setResumenAbierto] = useState<Set<number>>(new Set())
+  const toggleResumen = (id: number) => setResumenAbierto((prev) => {
+    const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s
+  })
   return (
     <table className="w-full text-sm min-w-[860px]">
       <thead>
@@ -530,7 +536,7 @@ function TablaVentas({
             <td className="py-2 px-4 tabular-nums text-oliva-500 text-xs">#{v.id}</td>
             <td className="py-2 px-4 tabular-nums text-oliva-700">{fFecha(v.fecha)}</td>
             <td className="py-2 px-4 text-oliva-900">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span>{clientePorId.get(v.cliente_id ?? 0)?.nombre ?? <span className="italic text-oliva-500">sin cliente</span>}</span>
                 {v.promocion_comercial && (
                   <span className="text-[10px] uppercase tracking-wide rounded-full bg-purple-100 text-purple-800 px-1.5 py-[1px] font-semibold">🎁 promo</span>
@@ -538,8 +544,18 @@ function TablaVentas({
                 {v.a_confirmar && (
                   <span className="text-[10px] uppercase tracking-wide rounded-full bg-yellow-100 text-yellow-900 border border-yellow-400 px-1.5 py-[1px] font-semibold" title="Venta potencial · no descuenta stock ni cuenta en reportes">❓ a confirmar</span>
                 )}
+                {resumenPorId?.get(v.id) && (
+                  <button
+                    type="button"
+                    className="text-[10px] text-oliva-500 hover:text-oliva-800 shrink-0 tabular-nums"
+                    title={resumenAbierto.has(v.id) ? 'Ocultar pedido' : 'Ver pedido'}
+                    onClick={(e) => { e.stopPropagation(); toggleResumen(v.id) }}
+                  >
+                    {resumenAbierto.has(v.id) ? '▾ ocultar' : '▸ ver pedido'}
+                  </button>
+                )}
               </div>
-              {resumenPorId?.get(v.id) && (
+              {resumenPorId?.get(v.id) && resumenAbierto.has(v.id) && (
                 <div className="text-[11px] text-oliva-600 font-normal mt-0.5 leading-snug">
                   {resumenPorId.get(v.id)}
                 </div>
