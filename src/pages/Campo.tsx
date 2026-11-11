@@ -5,6 +5,7 @@ import { useAuth } from '../lib/auth'
 import { Dialog } from '../components/Dialog'
 import { fFecha } from '../lib/format'
 import { guardarFlag, leerFlag, guardarObj, leerObj, borrarKey } from '../lib/persistencia'
+import { CosechaPanel } from '../components/CosechaPanel'
 import type {
   Aplicacion, AplicacionProducto, LaborCampo, CategoriaCampo, AmbitoCategoria, EstadoEvento,
 } from '../lib/types'
@@ -99,7 +100,7 @@ function laborFormVacio(catDefault: string): LaborForm {
 // Componente principal
 // ---------------------------------------------------------------------------
 
-type Cronograma = 'aplicaciones' | 'manejo'
+type Cronograma = 'aplicaciones' | 'manejo' | 'cosecha'
 type Vista = 'lista' | 'grilla'
 
 export function Campo() {
@@ -163,6 +164,7 @@ export function Campo() {
 
   useEffect(() => {
     function h() {
+      if (cronograma === 'cosecha') return // CosechaPanel maneja su propio FAB
       if (cronograma === 'aplicaciones') setNuevaAplic(true); else setNuevaLabor(true)
     }
     window.addEventListener('app:fab-nuevo', h)
@@ -290,9 +292,9 @@ export function Campo() {
         <Segmento
           valor={cronograma}
           onChange={(v) => setCronograma(v as Cronograma)}
-          opciones={[['aplicaciones', 'Aplicaciones'], ['manejo', 'Manejo de cultivo']]}
+          opciones={[['aplicaciones', 'Aplicaciones'], ['manejo', 'Manejo de cultivo'], ['cosecha', 'Cosecha']]}
         />
-        {puedeEscribir && (
+        {puedeEscribir && cronograma !== 'cosecha' && (
           <button
             onClick={abrirNuevo}
             className="inline-flex items-center gap-1.5 rounded-lg bg-oliva-800 text-oliva-50 px-3.5 py-2 text-sm font-medium hover:bg-oliva-900"
@@ -315,22 +317,28 @@ export function Campo() {
             {anios.map((a) => <option key={a} value={a}>{a}</option>)}
           </select>
         </label>
-        <Segmento
-          valor={vista}
-          onChange={(v) => setVista(v as Vista)}
-          opciones={[['lista', 'Lista'], ['grilla', 'Grilla']]}
-          pequeno
-        />
+        {cronograma !== 'cosecha' && (
+          <Segmento
+            valor={vista}
+            onChange={(v) => setVista(v as Vista)}
+            opciones={[['lista', 'Lista'], ['grilla', 'Grilla']]}
+            pequeno
+          />
+        )}
       </div>
 
-      {/* Leyenda + editar categorias */}
-      <Leyenda
-        cats={activasActual}
-        onEditar={puedeEscribir ? () => setEditorAmbito(ambito) : undefined}
-      />
+      {/* Leyenda + editar categorias (solo cronogramas) */}
+      {cronograma !== 'cosecha' && (
+        <Leyenda
+          cats={activasActual}
+          onEditar={puedeEscribir ? () => setEditorAmbito(ambito) : undefined}
+        />
+      )}
 
       {cargando ? (
         <p className="text-oliva-500 text-sm py-8 text-center">Cargando…</p>
+      ) : cronograma === 'cosecha' ? (
+        <CosechaPanel anio={anio} puedeEscribir={puedeEscribir} />
       ) : cronograma === 'aplicaciones' ? (
         vista === 'lista'
           ? <ListaAplicaciones items={aplicAnio} prodPorAplic={prodPorAplic} info={infoApp} onAbrir={setDetAplic} />

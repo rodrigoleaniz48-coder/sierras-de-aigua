@@ -102,3 +102,65 @@ export interface ProductoFito {
   categoria: string
   activo: boolean
 }
+
+// === Cosecha (v1) ===
+// Flujo: carga de cosecha (por operario) -> procesamiento en almazara.
+// Pago a destajo con castigo por hojas sobre la tolerancia. Se agrupa por anio.
+
+export interface CosechaOperario {
+  id: number
+  nombre: string
+  activo: boolean
+  orden: number
+}
+
+export interface CosechaTarifa {
+  id: number
+  anio: number
+  precio_kg: number | null
+  tolerancia_pct: number
+}
+
+export interface CosechaCarga {
+  id: number
+  fecha: string
+  anio: number
+  sector: string | null
+  variedad: string
+  kg_balanza: number
+  kg_hojas: number | null
+  notas: string | null
+  creado_por: string | null
+  creado_en: string
+}
+
+export interface CosechaCargaOperario {
+  id: number
+  carga_id: number
+  operario_id: number | null
+  kg: number
+}
+
+export interface CosechaProceso {
+  id: number
+  fecha: string
+  anio: number
+  variedad: string
+  kg_balanza: number | null
+  kg_procesado: number | null
+  kg_aceite: number | null
+  litros: number | null
+  destino: string | null
+  notas: string | null
+  creado_por: string | null
+  creado_en: string
+}
+
+export interface CosechaResumen {
+  id: number
+  anio: number
+  variedad: string
+  kg_cosecha: number | null
+  litros: number | null
+  rendimiento_pct: number | null
+}

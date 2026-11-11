@@ -662,3 +662,61 @@ create table if not exists public.categorias_campo (
 );
 alter table public.categorias_campo enable row level security;
 -- Policies: lectura para todo autenticado, escritura admin+campo (ver migracion_campo_categorias.sql).
+
+-- === Cosecha (ver migracion_cosecha.sql) ================================
+-- Flujo: carga de cosecha (por operario) -> procesamiento en almazara.
+-- Pago a destajo con castigo por hojas sobre tolerancia (2% default). Por anio.
+create table if not exists public.cosecha_operarios (
+  id bigserial primary key,
+  nombre text not null,
+  activo boolean not null default true,
+  orden int not null default 0
+);
+create table if not exists public.cosecha_tarifas (
+  id bigserial primary key,
+  anio int not null unique,
+  precio_kg numeric(12,4),
+  tolerancia_pct numeric(5,2) not null default 2
+);
+create table if not exists public.cosecha_cargas (
+  id bigserial primary key,
+  fecha date not null,
+  anio int not null,
+  sector text,
+  variedad text not null,
+  kg_balanza numeric(12,2) not null default 0,
+  kg_hojas numeric(12,2),
+  notas text,
+  creado_por uuid references auth.users(id),
+  creado_en timestamptz not null default now()
+);
+create table if not exists public.cosecha_carga_operarios (
+  id bigserial primary key,
+  carga_id bigint not null references public.cosecha_cargas(id) on delete cascade,
+  operario_id bigint references public.cosecha_operarios(id),
+  kg numeric(12,2) not null default 0
+);
+create table if not exists public.cosecha_proceso (
+  id bigserial primary key,
+  fecha date not null,
+  anio int not null,
+  variedad text not null,
+  kg_balanza numeric(12,2),
+  kg_procesado numeric(12,2),
+  kg_aceite numeric(12,2),
+  litros numeric(12,2),
+  destino text,
+  notas text,
+  creado_por uuid references auth.users(id),
+  creado_en timestamptz not null default now()
+);
+create table if not exists public.cosecha_resumen (
+  id bigserial primary key,
+  anio int not null,
+  variedad text not null,
+  kg_cosecha numeric(12,2),
+  litros numeric(12,2),
+  rendimiento_pct numeric(6,3),
+  unique (anio, variedad)
+);
+-- RLS en las 6: lectura autenticado, escritura admin+campo (ver migracion_cosecha.sql).
