@@ -33,6 +33,7 @@ function n0(s: string): number {
 const fmtKg = (v: number) => new Intl.NumberFormat('es-UY', { maximumFractionDigits: 0 }).format(v)
 const fmtKg1 = (v: number) => new Intl.NumberFormat('es-UY', { maximumFractionDigits: 1 }).format(v)
 const fmt$ = (v: number) => new Intl.NumberFormat('es-UY', { maximumFractionDigits: 0 }).format(v)
+const fmtPrecio = (v: number) => new Intl.NumberFormat('es-UY', { maximumFractionDigits: 2 }).format(v) // precio/kg con decimales
 const KG_POR_LITRO = 0.918 // 1 L de aceite = 918 gr (factor del cuaderno)
 
 // Kg de aceite de un pasaje: el valor cargado, o estimado desde los litros.
@@ -325,7 +326,7 @@ export function CosechaPanel({ anio, puedeEscribir }: { anio: string; puedeEscri
           </button>
           <div className="ml-auto flex items-center gap-3 text-xs">
             <button onClick={() => setEditorTarifa(true)} className="text-oliva-600 hover:text-oliva-900 underline decoration-dotted">
-              Tarifa {anioNum}: {precioKg != null ? `$${fmt$(precioKg)}/kg` : 'sin precio'} · tol {fmtKg1(tolPct)}%
+              Tarifa {anioNum}: {precioKg != null ? `$${fmtPrecio(precioKg)}/kg` : 'sin precio'} · tol {fmtKg1(tolPct)}%
             </button>
             <button onClick={() => setEditorOperarios(true)} className="text-oliva-600 hover:text-oliva-900 underline decoration-dotted">Operarios</button>
           </div>
