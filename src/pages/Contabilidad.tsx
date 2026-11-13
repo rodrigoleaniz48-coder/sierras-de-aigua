@@ -659,6 +659,9 @@ function EstadoResultados() {
   const [ccIds, setCcIds] = useState<Set<number>>(new Set())
   const [pagos, setPagos] = useState<{ cliente_id: number | null; monto: number; moneda: string }[]>([])
   const [catIng, setCatIng] = useState<Map<number, { slug: string; nombre: string }>>(new Map())
+  // Fraccion de IVA por cliente de cuenta corriente (IVA/total de sus ventas). Sirve para separar
+  // el IVA de los pagos a cuenta de los que facturan; los que no facturan tienen fraccion 0.
+  const [fracIvaCC, setFracIvaCC] = useState<Map<number, number>>(new Map())
   const [cargando, setCargando] = useState(true)
 
   const desde = `${anio}-${mes}-01`
@@ -688,6 +691,27 @@ function EstadoResultados() {
     })
   }, [desde, hasta])
 
+  // Fraccion de IVA de cada cliente de cuenta corriente (no depende del mes: se calcula sobre
+  // todas sus ventas reales). Permite separar, al cobrarse, el IVA incluido en sus pagos.
+  useEffect(() => {
+    (async () => {
+      const { data: cc } = await supabase.from('clientes').select('id').in('tipo', ['distribuidor', 'mayorista'])
+      const ids = ((cc as { id: number }[] | null) ?? []).map((c) => c.id)
+      if (ids.length === 0) { setFracIvaCC(new Map()); return }
+      const { data: vs } = await supabase.from('ventas').select('cliente_id,total,iva')
+        .in('cliente_id', ids).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false)
+      const agg = new Map<number, { iva: number; total: number }>()
+      for (const v of ((vs as { cliente_id: number; total: number; iva: number }[] | null) ?? [])) {
+        const a = agg.get(v.cliente_id) ?? { iva: 0, total: 0 }
+        a.iva += Number(v.iva ?? 0); a.total += Number(v.total ?? 0)
+        agg.set(v.cliente_id, a)
+      }
+      const frac = new Map<number, number>()
+      for (const [id, a] of agg) frac.set(id, a.total > 0 ? a.iva / a.total : 0)
+      setFracIvaCC(frac)
+    })()
+  }, [])
+
   // Los totales en BD (ventas.total) están en UYU e INCLUYEN IVA cuando la venta es "con factura".
   // El IVA no es ingreso (se le paga a DGI): el ingreso real es el neto = total − iva.
   // Ventas sin factura: iva = 0, así que neto = total.
@@ -700,10 +724,18 @@ function EstadoResultados() {
   const esCC = (v: VentaMon) => !!v.cliente_id && ccIds.has(v.cliente_id)
   const ventasRev = ventas.filter((v) => !esCC(v))
   const pagosCC = pagos.filter((p) => p.cliente_id && ccIds.has(p.cliente_id))
-  const pagosCCUYU = pagosCC.filter((p) => p.moneda !== 'USD').reduce((s, p) => s + Number(p.monto), 0)
-  const pagosCCUSD = pagosCC.filter((p) => p.moneda === 'USD').reduce((s, p) => s + Number(p.monto), 0)
+  // Los pagos a cuenta de clientes que FACTURAN traen IVA adentro: se separa por la fraccion de
+  // IVA del cliente (IVA/total de sus ventas). pagosCC* = NETO (ingreso); ivaPagosCC* va a DGI.
+  // Los que no facturan (Gonzalo) tienen fraccion 0, asi que el pago entero es ingreso.
+  let pagosCCUYU = 0, pagosCCUSD = 0, ivaPagosCCUYU = 0, ivaPagosCCUSD = 0, facturadoCCUYU = 0
+  for (const p of pagosCC) {
+    const frac = fracIvaCC.get(p.cliente_id!) ?? 0
+    const monto = Number(p.monto), iva = monto * frac, neto = monto - iva
+    if (p.moneda === 'USD') { pagosCCUSD += neto; ivaPagosCCUSD += iva }
+    else { pagosCCUYU += neto; ivaPagosCCUYU += iva; if (frac > 0) facturadoCCUYU += neto }
+  }
 
-  // Ingresos (ventas minoristas NETAS de IVA + pagos a cuenta de distribuidores + ingresos manuales) por moneda
+  // Ingresos (ventas minoristas NETAS de IVA + pagos a cuenta de distribuidores NETOS + ingresos manuales) por moneda
   const ventasUYU = ventasRev.filter((v) => !ventaEsUSD(v)).reduce((s, v) => s + ventaNetoUyu(v), 0)
   const ventasUSD = ventasRev.filter((v) => ventaEsUSD(v)).reduce((s, v) => s + ventaUSD(v), 0)
   const ingresosManUYU = ingresos.filter((i) => i.moneda === 'UYU').reduce((s, i) => s + Number(i.monto), 0)
@@ -711,10 +743,10 @@ function EstadoResultados() {
   const totalIngresosUYU = ventasUYU + ingresosManUYU + pagosCCUYU
   const totalIngresosUSD = ventasUSD + ingresosManUSD + pagosCCUSD
 
-  // IVA cobrado en ventas con factura (en pesos y dólares) — NO es ingreso: se le paga a DGI.
-  const ivaCobradoUYU = ventasRev.filter((v) => !ventaEsUSD(v)).reduce((s, v) => s + Number(v.iva ?? 0), 0)
-  const ivaCobradoUSD = ventasRev.filter((v) => ventaEsUSD(v)).reduce((s, v) => s + Number(v.iva ?? 0) / Number(v.cotizacion), 0)
-  const ventasConFactura = ventasRev.reduce((s, v) => s + (v.con_factura ? ventaNetoUyu(v) : 0), 0)
+  // IVA cobrado en ventas con factura (minoristas + lo facturado a cuenta corriente al cobrarse) — NO es ingreso: se le paga a DGI.
+  const ivaCobradoUYU = ventasRev.filter((v) => !ventaEsUSD(v)).reduce((s, v) => s + Number(v.iva ?? 0), 0) + ivaPagosCCUYU
+  const ivaCobradoUSD = ventasRev.filter((v) => ventaEsUSD(v)).reduce((s, v) => s + Number(v.iva ?? 0) / Number(v.cotizacion), 0) + ivaPagosCCUSD
+  const ventasConFactura = ventasRev.reduce((s, v) => s + (v.con_factura ? ventaNetoUyu(v) : 0), 0) + facturadoCCUYU
 
   // Egresos por moneda
   const gastosUYU = gastos.filter((g) => g.moneda === 'UYU').reduce((s, g) => s + Number(g.monto), 0)
