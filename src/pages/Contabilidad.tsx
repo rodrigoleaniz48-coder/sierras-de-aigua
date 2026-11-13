@@ -2650,10 +2650,11 @@ function CargarMovimientosDialog({
   const [analizando, setAnalizando] = useState(false)
   const [archivoNombre, setArchivoNombre] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [estado, setEstado] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
-    if (!abierto) { setModo('excel'); setTexto(''); setPreview(null); setError(null); setArchivoNombre(null) }
+    if (!abierto) { setModo('excel'); setTexto(''); setPreview(null); setError(null); setArchivoNombre(null); setEstado(null) }
   }, [abierto])
 
   function analizar() {
@@ -2663,11 +2664,16 @@ function CargarMovimientosDialog({
 
   async function analizarArchivo(file: File) {
     setAnalizando(true); setError(null); setPreview(null); setArchivoNombre(file.name)
+    setEstado(`1) Archivo recibido: "${file.name}" · ${(file.size / 1024).toFixed(0)} KB`)
     try {
+      setEstado(`2) Leyendo el contenido de "${file.name}"…`)
       const buf = await file.arrayBuffer()
+      setEstado(`3) Interpretando el Excel (${(buf.byteLength / 1024).toFixed(0)} KB)…`)
       const res = await parsearExcelBanco(buf)
+      setEstado(`4) Interpretado: ${res.movimientos.length} movimientos · ${res.errores.length} con problemas`)
       setPreview(res)
     } catch (e) {
+      setEstado(null)
       setError(`No se pudo leer el archivo: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setAnalizando(false)
@@ -2736,8 +2742,18 @@ function CargarMovimientosDialog({
               type="file"
               accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
               className="hidden"
-              onChange={(e) => { const f = e.target.files?.[0]; if (f) analizarArchivo(f); e.target.value = '' }}
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                if (f) analizarArchivo(f)
+                else setEstado('0) Se abrió el selector pero no llegó ningún archivo')
+                e.target.value = ''
+              }}
             />
+            {estado && (
+              <div className="rounded-lg border border-oliva-200 bg-white px-3 py-2 text-xs text-oliva-700 tabular-nums">
+                {estado}
+              </div>
+            )}
           </div>
         ) : (
           <>
