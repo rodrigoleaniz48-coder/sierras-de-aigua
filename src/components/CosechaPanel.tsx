@@ -13,6 +13,13 @@ import type {
 // ---------------------------------------------------------------------------
 
 const VARIEDADES = ['Arbequina', 'Coratina', 'Picual']
+// Colores por variedad en tono tierra (apagados, como el Excel 2026):
+// verde oliva (Arbequina), terracota (Coratina), azul pizarra (Picual).
+const COLOR_VARIEDAD: Record<string, string> = {
+  Arbequina: '#88976a',
+  Coratina: '#b0795d',
+  Picual: '#7589a0',
+}
 const inputCls = 'w-full rounded-lg border border-oliva-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-oliva-300'
 const labelCls = 'block text-xs font-medium text-oliva-600 mb-1'
 
@@ -453,7 +460,7 @@ export function CosechaPanel({ puedeEscribir }: { puedeEscribir: boolean }) {
           <div className="grid sm:grid-cols-2 gap-5">
             <Seccion titulo="Kg por variedad">
               {kgVarView.length === 0 ? <VacioMini texto="Sin datos." /> : (
-                <BarrasKg filas={kgVarView} />
+                <BarrasKg filas={kgVarView} colorDe={(k) => COLOR_VARIEDAD[k]} />
               )}
             </Seccion>
             <Seccion titulo="Kg por sector">
@@ -627,19 +634,25 @@ function Seccion({ titulo, children, accion }: { titulo: string; children: React
 function VacioMini({ texto }: { texto: string }) {
   return <p className="text-oliva-400 text-sm py-3">{texto}</p>
 }
-function BarrasKg({ filas }: { filas: [string, number][] }) {
+function BarrasKg({ filas, colorDe }: { filas: [string, number][]; colorDe?: (k: string) => string | undefined }) {
   const max = Math.max(1, ...filas.map((f) => f[1]))
   return (
     <div className="space-y-1.5">
-      {filas.map(([k, v]) => (
-        <div key={k} className="flex items-center gap-2">
-          <span className="w-20 text-xs text-oliva-600 shrink-0 truncate">{k}</span>
-          <div className="flex-1 bg-oliva-50 rounded h-5 overflow-hidden">
-            <div className="h-full bg-oliva-300 rounded" style={{ width: `${(v / max) * 100}%` }} />
+      {filas.map(([k, v]) => {
+        const color = colorDe?.(k)
+        return (
+          <div key={k} className="flex items-center gap-2">
+            <span className="w-20 text-xs text-oliva-600 shrink-0 truncate">{k}</span>
+            <div className="flex-1 bg-oliva-50 rounded h-5 overflow-hidden">
+              <div
+                className={`h-full rounded${color ? '' : ' bg-oliva-300'}`}
+                style={{ width: `${(v / max) * 100}%`, ...(color ? { backgroundColor: color } : {}) }}
+              />
+            </div>
+            <span className="w-16 text-right text-xs tabular-nums text-oliva-700 shrink-0">{fmtKg(v)} kg</span>
           </div>
-          <span className="w-16 text-right text-xs tabular-nums text-oliva-700 shrink-0">{fmtKg(v)} kg</span>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
