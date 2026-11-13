@@ -319,9 +319,11 @@ export function CosechaPanel({ anio, puedeEscribir }: { anio: string; puedeEscri
     setBajando(true)
     try {
       const { descargarCosechaAnio } = await import('../lib/exportCosecha')
+      const resumenAnio = historial.find((h) => h.anio === anioNum) ?? null
       await descargarCosechaAnio({
         anio: anioNum, cargas, opsPorCarga, operarios, procesos, liquidacion,
         precioKg, totKgCosecha, totLitros, totAceite, rendTotal, kgPorSector, rendPorVariedad,
+        resumenAnio,
       })
     } catch (e) { console.error(e); alert('No se pudo generar el Excel del ano.') }
     finally { setBajando(false) }

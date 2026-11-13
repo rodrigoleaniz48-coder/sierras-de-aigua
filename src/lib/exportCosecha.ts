@@ -77,6 +77,8 @@ export interface AnioExport {
   rendTotal: number
   kgPorSector: [string, number][]
   rendPorVariedad: { variedad: string; kg: number; litros: number; aceite: number; rend: number }[]
+  // Resumen del ano (del historial), para anos sin detalle diario cargado.
+  resumenAnio?: HistFila | null
 }
 
 export async function descargarCosechaAnio(d: AnioExport) {
@@ -85,17 +87,37 @@ export async function descargarCosechaAnio(d: AnioExport) {
   wb.creator = 'Sierras de Aigua'
   wb.created = new Date()
 
+  // Totales del ano: datos live si hay cargas/pasajes; si no, el resumen historico.
+  const r = d.resumenAnio ?? null
+  const kgCos = d.totKgCosecha || r?.total || 0
+  const litros = d.totLitros || r?.litros || 0
+  const aceite = d.totAceite || (litros ? litros * KG_POR_LITRO : 0)
+  const rend = d.rendTotal || r?.rend || (kgCos > 0 && aceite > 0 ? (aceite / kgCos) * 100 : 0)
+  const hayDetalle = d.cargas.length > 0 || d.procesos.length > 0
+
+  // Rendimiento por variedad: live, o kg por variedad del historico como fallback.
+  const rendVar = d.rendPorVariedad.length
+    ? d.rendPorVariedad
+    : r
+      ? [...r.porVar.entries()].map(([variedad, kg]) => ({ variedad, kg, litros: 0, aceite: 0, rend: 0 })).sort((a, b) => b.kg - a.kg)
+      : []
+
   // --- Hoja Resumen ---------------------------------------------------------
   const res = wb.addWorksheet(`Resumen ${d.anio}`)
   tituloSeccion(res, `Cosecha ${d.anio}`, 5)
+  if (!hayDetalle && r) {
+    const nota = res.addRow(['Sin detalle diario cargado: datos del resumen historico del ano.'])
+    res.mergeCells(nota.number, 1, nota.number, 5)
+    nota.getCell(1).font = { italic: true, color: { argb: 'FF8A8A6A' }, size: 10 }
+  }
   res.addRow([])
 
   encabezado(res, ['Indicador', 'Valor'])
   const tiles: [string, number, string][] = [
-    ['Kg cosechados', d.totKgCosecha, FMT_KG],
-    ['Litros de aceite', d.totLitros, FMT_KG],
-    ['Kg de aceite', d.totAceite, FMT_KG],
-    ['Rendimiento', d.rendTotal, FMT_PCT],
+    ['Kg cosechados', kgCos, FMT_KG],
+    ['Litros de aceite', litros, FMT_KG],
+    ['Kg de aceite', aceite, FMT_KG],
+    ['Rendimiento', rend, FMT_PCT],
   ]
   for (const [k, v, fmt] of tiles) {
     const r = res.addRow([k, v])
@@ -110,6 +132,11 @@ export async function descargarCosechaAnio(d: AnioExport) {
   const headLiq = ['Operario', 'Kg brutos', 'Desc. hojas', 'Kg a pagar']
   if (conPrecio) headLiq.push('$ a pagar')
   encabezado(res, headLiq)
+  if (d.liquidacion.length === 0) {
+    const nota = res.addRow(['Sin cargas por operario cargadas en este ano.'])
+    res.mergeCells(nota.number, 1, nota.number, conPrecio ? 5 : 4)
+    nota.getCell(1).font = { italic: true, color: { argb: 'FF8A8A6A' }, size: 10 }
+  }
   let tBruto = 0, tDesc = 0, tPag = 0
   for (const f of d.liquidacion) {
     tBruto += f.bruto; tDesc += f.descuento; tPag += f.pagable
@@ -121,11 +148,13 @@ export async function descargarCosechaAnio(d: AnioExport) {
       r.getCell(i).alignment = { horizontal: 'right' }
     }
   }
-  const filaTot = ['TOTAL', tBruto, tDesc, tPag]
-  if (conPrecio) filaTot.push(tPag * (d.precioKg as number))
-  const rt = res.addRow(filaTot)
-  rt.eachCell((c) => { c.font = { bold: true }; c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: VERDE_SUAVE } } })
-  for (let i = 2; i <= filaTot.length; i++) { rt.getCell(i).numFmt = FMT_KG; rt.getCell(i).alignment = { horizontal: 'right' } }
+  if (d.liquidacion.length) {
+    const filaTot = ['TOTAL', tBruto, tDesc, tPag]
+    if (conPrecio) filaTot.push(tPag * (d.precioKg as number))
+    const rt = res.addRow(filaTot)
+    rt.eachCell((c) => { c.font = { bold: true }; c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: VERDE_SUAVE } } })
+    for (let i = 2; i <= filaTot.length; i++) { rt.getCell(i).numFmt = FMT_KG; rt.getCell(i).alignment = { horizontal: 'right' } }
+  }
   if (conPrecio) {
     res.addRow([])
     const rp = res.addRow(['Precio por kg', d.precioKg])
@@ -134,11 +163,11 @@ export async function descargarCosechaAnio(d: AnioExport) {
   }
   res.addRow([])
 
-  // Rendimiento por variedad
-  tituloSeccion(res, 'Rendimiento por variedad (aceite / cosecha)', 5)
+  // Rendimiento por variedad (o solo kg por variedad si viene del historico)
+  tituloSeccion(res, 'Kg por variedad' + (d.rendPorVariedad.length ? ' y rendimiento (aceite / cosecha)' : ''), 5)
   encabezado(res, ['Variedad', 'Kg cosechados', 'Litros', 'Kg aceite', 'Rend. %'])
-  for (const r of d.rendPorVariedad) {
-    const fila = res.addRow([r.variedad, r.kg, r.litros, r.aceite, r.rend])
+  for (const rv of rendVar) {
+    const fila = res.addRow([rv.variedad, rv.kg || null, rv.litros || null, rv.aceite || null, rv.rend || null])
     fila.getCell(2).numFmt = FMT_KG; fila.getCell(3).numFmt = FMT_KG
     fila.getCell(4).numFmt = FMT_KG; fila.getCell(5).numFmt = FMT_PCT
     for (let i = 2; i <= 5; i++) fila.getCell(i).alignment = { horizontal: 'right' }
@@ -180,9 +209,15 @@ export async function descargarCosechaAnio(d: AnioExport) {
     const fila = cg.addRow([c.fecha.slice(0, 10), c.sector ?? '', c.variedad, ...kgs, c.kg_balanza || 0, c.kg_hojas ?? null])
     for (let i = 4; i <= ncolsCg; i++) { fila.getCell(i).numFmt = FMT_KG; fila.getCell(i).alignment = { horizontal: 'right' } }
   }
-  const rtot = cg.addRow(['TOTAL', '', '', ...sumCol, sumBal, sumHoj])
-  rtot.eachCell((c) => { c.font = { bold: true }; c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: VERDE_SUAVE } } })
-  for (let i = 4; i <= ncolsCg; i++) { rtot.getCell(i).numFmt = FMT_KG; rtot.getCell(i).alignment = { horizontal: 'right' } }
+  if (d.cargas.length) {
+    const rtot = cg.addRow(['TOTAL', '', '', ...sumCol, sumBal, sumHoj])
+    rtot.eachCell((c) => { c.font = { bold: true }; c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: VERDE_SUAVE } } })
+    for (let i = 4; i <= ncolsCg; i++) { rtot.getCell(i).numFmt = FMT_KG; rtot.getCell(i).alignment = { horizontal: 'right' } }
+  } else {
+    const nota = cg.addRow(['Sin detalle diario cargado para este ano.'])
+    cg.mergeCells(nota.number, 1, nota.number, ncolsCg)
+    nota.getCell(1).font = { italic: true, color: { argb: 'FF8A8A6A' }, size: 10 }
+  }
   cg.getColumn(1).width = 12; cg.getColumn(2).width = 9; cg.getColumn(3).width = 12
   for (let i = 4; i <= ncolsCg; i++) cg.getColumn(i).width = 12
   cg.views = [{ state: 'frozen', ySplit: 2 }]
@@ -195,6 +230,11 @@ export async function descargarCosechaAnio(d: AnioExport) {
     const fila = pt.addRow([p.fecha.slice(0, 10), p.variedad, p.litros ?? null, aceiteKgDe(p) || null, p.destino ?? ''])
     fila.getCell(3).numFmt = FMT_KG; fila.getCell(4).numFmt = FMT_KG
     fila.getCell(3).alignment = { horizontal: 'right' }; fila.getCell(4).alignment = { horizontal: 'right' }
+  }
+  if (d.procesos.length === 0) {
+    const nota = pt.addRow(['Sin pasajes a tanque cargados para este ano.'])
+    pt.mergeCells(nota.number, 1, nota.number, 5)
+    nota.getCell(1).font = { italic: true, color: { argb: 'FF8A8A6A' }, size: 10 }
   }
   pt.getColumn(1).width = 12; pt.getColumn(2).width = 12; pt.getColumn(3).width = 12
   pt.getColumn(4).width = 12; pt.getColumn(5).width = 12
