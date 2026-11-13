@@ -17,6 +17,10 @@ interface Props {
 
 export function Dialog({ abierto, onCerrar, titulo, children, ancho = 'md', scrollKey }: Props) {
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  // Solo cerramos por "clic afuera" si el gesto EMPEZO y TERMINO sobre el fondo.
+  // Sin esto, interacciones internas (p.ej. el selector de archivos nativo, que al
+  // cerrarse dispara un click sobre el overlay) cerraban el dialog por sorpresa.
+  const mouseDownEnFondo = useRef(false)
 
   useEffect(() => {
     function esc(e: KeyboardEvent) {
@@ -67,12 +71,12 @@ export function Dialog({ abierto, onCerrar, titulo, children, ancho = 'md', scro
   return (
     <div
       className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4"
-      onClick={onCerrar}
+      onMouseDown={(e) => { mouseDownEnFondo.current = e.target === e.currentTarget }}
+      onClick={(e) => { if (e.target === e.currentTarget && mouseDownEnFondo.current) onCerrar() }}
     >
       <div
         ref={scrollRef}
         className={`w-full ${w} bg-white rounded-t-2xl sm:rounded-2xl shadow-xl max-h-[92vh] overflow-y-auto`}
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-oliva-100 px-5 py-3 sticky top-0 bg-white">
           <h2 className="font-semibold text-oliva-900">{titulo}</h2>
