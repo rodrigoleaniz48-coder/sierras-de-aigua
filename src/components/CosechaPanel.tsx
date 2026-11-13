@@ -162,6 +162,7 @@ export function CosechaPanel({ puedeEscribir }: { puedeEscribir: boolean }) {
   const [editorOperarios, setEditorOperarios] = useState(false)
   const [editorTarifa, setEditorTarifa] = useState(false)
   const [editorHistorial, setEditorHistorial] = useState(false)
+  const [editorSectores, setEditorSectores] = useState(false)
 
   const anioNum = Number(anio) || new Date().getFullYear()
 
@@ -472,7 +473,9 @@ export function CosechaPanel({ puedeEscribir }: { puedeEscribir: boolean }) {
                 <BarrasKg filas={kgVarView} colorDe={(k) => COLOR_VARIEDAD[k]} />
               )}
             </Seccion>
-            <Seccion titulo="Kg por sector">
+            <Seccion titulo="Kg por sector" accion={puedeEscribir && !hayDetalle ? (
+              <button onClick={() => setEditorSectores(true)} className="text-xs font-medium text-oliva-600 hover:text-oliva-900 underline decoration-dotted">Editar</button>
+            ) : undefined}>
               {kgSecView.length === 0 ? <VacioMini texto="Sin datos." /> : (
                 <BarrasKg filas={kgSecView} />
               )}
@@ -614,6 +617,7 @@ export function CosechaPanel({ puedeEscribir }: { puedeEscribir: boolean }) {
       {editorOperarios && <OperariosDialog operarios={operarios} onCerrar={() => setEditorOperarios(false)} onCambio={cargar} />}
       {editorTarifa && <TarifaDialog anio={anioNum} tarifa={tarifa} onCerrar={() => setEditorTarifa(false)} onCambio={cargar} />}
       {editorHistorial && <HistorialDialog resumen={resumen} onCerrar={() => setEditorHistorial(false)} onCambio={cargar} />}
+      {editorSectores && <SectoresDialog anio={anioNum} sectores={sectorResumen} onCerrar={() => setEditorSectores(false)} onCambio={cargar} />}
     </div>
   )
 }
@@ -1031,6 +1035,82 @@ function HistorialDialog({ resumen, onCerrar, onCambio }: {
           </table>
         </div>
         <p className="text-xs text-oliva-400">El total de kg se calcula como la suma de las variedades.</p>
+        <div className="flex justify-end gap-2 pt-1">
+          <button onClick={onCerrar} className="px-3 py-2 text-sm text-oliva-600 hover:text-oliva-900">Cancelar</button>
+          <button onClick={guardar} disabled={guardando} className="px-4 py-2 text-sm font-medium rounded-lg bg-oliva-800 text-oliva-50 hover:bg-oliva-900 disabled:opacity-50">
+            {guardando ? 'Guardando…' : 'Guardar'}
+          </button>
+        </div>
+      </div>
+    </Dialog>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Dialog: Kg por sector del ano (editable) — resumen sin detalle diario
+// ---------------------------------------------------------------------------
+interface FilaSector { sector: string; kg: string; original?: string }
+
+function SectoresDialog({ anio, sectores, onCerrar, onCambio }: {
+  anio: number; sectores: CosechaSectorResumen[]; onCerrar: () => void; onCambio: () => Promise<void>
+}) {
+  const [filas, setFilas] = useState<FilaSector[]>(() => {
+    if (sectores.length) {
+      return [...sectores]
+        .sort((a, b) => a.sector.localeCompare(b.sector, 'es', { numeric: true }))
+        .map((s) => ({ sector: s.sector, kg: s.kg_cosecha != null ? String(s.kg_cosecha) : '', original: s.sector }))
+    }
+    return ['1', '2', '3', '4', '5', '6', '7'].map((s) => ({ sector: s, kg: '' }))
+  })
+  const [removidos, setRemovidos] = useState<string[]>([])
+  const [guardando, setGuardando] = useState(false)
+
+  const setFila = (i: number, patch: Partial<FilaSector>) => setFilas((fs) => fs.map((f, j) => (j === i ? { ...f, ...patch } : f)))
+  const addFila = () => setFilas((fs) => [...fs, { sector: '', kg: '' }])
+  const delFila = (i: number) => {
+    const f = filas[i]
+    if (f.original) setRemovidos((r) => [...r, f.original!])
+    setFilas((fs) => fs.filter((_, j) => j !== i))
+  }
+
+  const total = filas.reduce((s, f) => s + (nOrNull(f.kg) ?? 0), 0)
+
+  async function guardar() {
+    setGuardando(true)
+    const rows = filas
+      .map((f) => ({ sector: f.sector.trim(), kg: nOrNull(f.kg) }))
+      .filter((f) => f.sector !== '')
+      .map((f) => ({ anio, sector: f.sector, kg_cosecha: f.kg }))
+    const quedan = new Set(rows.map((r) => r.sector))
+    const aBorrar = [...new Set(removidos.filter((s) => !quedan.has(s)))]
+    if (aBorrar.length) await supabase.from('cosecha_sector_resumen').delete().eq('anio', anio).in('sector', aBorrar)
+    if (rows.length) await supabase.from('cosecha_sector_resumen').upsert(rows, { onConflict: 'anio,sector' })
+    await onCambio()
+    setGuardando(false)
+    onCerrar()
+  }
+
+  const miniCls = 'w-full rounded border border-oliva-200 px-1.5 py-1 text-xs tabular-nums focus:outline-none focus:ring-1 focus:ring-oliva-300'
+
+  return (
+    <Dialog abierto onCerrar={onCerrar} titulo={`Kg por sector ${anio}`} ancho="sm">
+      <div className="space-y-3">
+        <button onClick={addFila} className="text-xs font-medium text-oliva-700 hover:text-oliva-900">+ Agregar sector</button>
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 text-xs text-oliva-500">
+            <span className="w-24">Sector</span>
+            <span className="flex-1 text-right">Kg cosechados</span>
+            <span className="w-5" />
+          </div>
+          {filas.map((f, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <input value={f.sector} onChange={(e) => setFila(i, { sector: e.target.value })} placeholder="1" className={miniCls + ' w-24 text-left'} />
+              <input inputMode="decimal" value={f.kg} onChange={(e) => setFila(i, { kg: e.target.value })} placeholder="kg" className={miniCls + ' flex-1 text-right'} />
+              <button onClick={() => delFila(i)} className="text-red-500 hover:text-red-700 w-5" aria-label="Quitar sector">✕</button>
+            </div>
+          ))}
+        </div>
+        <p className="text-xs text-oliva-400">Suma: {fmtKg(total)} kg. Se usa cuando el año no tiene cargas diarias cargadas.</p>
         <div className="flex justify-end gap-2 pt-1">
           <button onClick={onCerrar} className="px-3 py-2 text-sm text-oliva-600 hover:text-oliva-900">Cancelar</button>
           <button onClick={guardar} disabled={guardando} className="px-4 py-2 text-sm font-medium rounded-lg bg-oliva-800 text-oliva-50 hover:bg-oliva-900 disabled:opacity-50">
