@@ -44,5 +44,11 @@ insert into public.cosecha_resumen (anio, variedad, kg_cosecha, litros, rendimie
   (2025,'Arbequina',13071,null,null),
   (2025,'Coratina',18283,null,null),
   (2025,'Picual',5382,null,null),
-  (2025,'TOTAL',36736,null,null)
+  (2025,'TOTAL',36736,null,null),
+
+  -- 2026: de 'Numeros cosecha 2026.xlsx' (kg balanza y litros por variedad)
+  (2026,'Arbequina',29367,null,null),
+  (2026,'Coratina',14718,null,null),
+  (2026,'Picual',7050,null,null),
+  (2026,'TOTAL',51135,5950,10.90)
 on conflict (anio, variedad) do nothing;

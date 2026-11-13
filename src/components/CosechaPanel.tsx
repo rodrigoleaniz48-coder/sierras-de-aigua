@@ -151,6 +151,7 @@ export function CosechaPanel({ anio, puedeEscribir }: { anio: string; puedeEscri
   const [editProceso, setEditProceso] = useState<CosechaProceso | null>(null)
   const [editorOperarios, setEditorOperarios] = useState(false)
   const [editorTarifa, setEditorTarifa] = useState(false)
+  const [editorHistorial, setEditorHistorial] = useState(false)
 
   const anioNum = Number(anio) || new Date().getFullYear()
 
@@ -426,7 +427,9 @@ export function CosechaPanel({ anio, puedeEscribir }: { anio: string; puedeEscri
           </Seccion>
 
           {/* Historial por ano (detallado) */}
-          <Seccion titulo="Historial de cosechas">
+          <Seccion titulo="Historial de cosechas" accion={puedeEscribir ? (
+            <button onClick={() => setEditorHistorial(true)} className="text-xs font-medium text-oliva-600 hover:text-oliva-900 underline decoration-dotted">Editar</button>
+          ) : undefined}>
             {historial.length === 0 ? <VacioMini texto="Sin histórico." /> : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm whitespace-nowrap">
@@ -526,6 +529,7 @@ export function CosechaPanel({ anio, puedeEscribir }: { anio: string; puedeEscri
       )}
       {editorOperarios && <OperariosDialog operarios={operarios} onCerrar={() => setEditorOperarios(false)} onCambio={cargar} />}
       {editorTarifa && <TarifaDialog anio={anioNum} tarifa={tarifa} onCerrar={() => setEditorTarifa(false)} onCambio={cargar} />}
+      {editorHistorial && <HistorialDialog resumen={resumen} onCerrar={() => setEditorHistorial(false)} onCambio={cargar} />}
     </div>
   )
 }
@@ -541,10 +545,13 @@ function Tile({ label, valor }: { label: string; valor: string }) {
     </div>
   )
 }
-function Seccion({ titulo, children }: { titulo: string; children: ReactNode }) {
+function Seccion({ titulo, children, accion }: { titulo: string; children: ReactNode; accion?: ReactNode }) {
   return (
     <div>
-      <h3 className="text-xs font-medium uppercase tracking-wide text-oliva-400 mb-2">{titulo}</h3>
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-xs font-medium uppercase tracking-wide text-oliva-400">{titulo}</h3>
+        {accion}
+      </div>
       {children}
     </div>
   )
@@ -830,6 +837,110 @@ function TarifaDialog({ anio, tarifa, onCerrar, onCambio }: {
           <input inputMode="decimal" value={tol} onChange={(e) => setTol(e.target.value)} className={inputCls} />
           <p className="text-xs text-oliva-400 mt-1">Hasta este % no se descuenta. El exceso se resta del pago, prorrateado por operario.</p>
         </div>
+        <div className="flex justify-end gap-2 pt-1">
+          <button onClick={onCerrar} className="px-3 py-2 text-sm text-oliva-600 hover:text-oliva-900">Cancelar</button>
+          <button onClick={guardar} disabled={guardando} className="px-4 py-2 text-sm font-medium rounded-lg bg-oliva-800 text-oliva-50 hover:bg-oliva-900 disabled:opacity-50">
+            {guardando ? 'Guardando…' : 'Guardar'}
+          </button>
+        </div>
+      </div>
+    </Dialog>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Dialog: Historial editable — kg por variedad, litros y rendimiento por ano
+// ---------------------------------------------------------------------------
+interface FilaHist { anio: string; arb: string; cor: string; pic: string; litros: string; rend: string; nueva?: boolean }
+
+function resumenAFilas(resumen: CosechaResumen[]): FilaHist[] {
+  const m = new Map<number, FilaHist>()
+  for (const r of resumen) {
+    const f = m.get(r.anio) ?? { anio: String(r.anio), arb: '', cor: '', pic: '', litros: '', rend: '' }
+    const kg = r.kg_cosecha != null ? String(r.kg_cosecha) : ''
+    if (r.variedad === 'Arbequina') f.arb = kg
+    else if (r.variedad === 'Coratina') f.cor = kg
+    else if (r.variedad === 'Picual') f.pic = kg
+    else if (r.variedad === 'TOTAL') { f.litros = r.litros != null ? String(r.litros) : ''; f.rend = r.rendimiento_pct != null ? String(r.rendimiento_pct) : '' }
+    m.set(r.anio, f)
+  }
+  return [...m.values()].sort((a, b) => Number(b.anio) - Number(a.anio))
+}
+
+function HistorialDialog({ resumen, onCerrar, onCambio }: {
+  resumen: CosechaResumen[]; onCerrar: () => void; onCambio: () => Promise<void>
+}) {
+  const [filas, setFilas] = useState<FilaHist[]>(() => resumenAFilas(resumen))
+  const [removidos, setRemovidos] = useState<number[]>([])
+  const [guardando, setGuardando] = useState(false)
+
+  const setFila = (i: number, patch: Partial<FilaHist>) => setFilas((fs) => fs.map((f, j) => (j === i ? { ...f, ...patch } : f)))
+  const addFila = () => setFilas((fs) => [{ anio: '', arb: '', cor: '', pic: '', litros: '', rend: '', nueva: true }, ...fs])
+  const delFila = (i: number) => {
+    const f = filas[i]
+    if (!f.nueva && f.anio) setRemovidos((r) => [...r, Number(f.anio)])
+    setFilas((fs) => fs.filter((_, j) => j !== i))
+  }
+
+  async function guardar() {
+    setGuardando(true)
+    const rows: Partial<CosechaResumen>[] = []
+    for (const f of filas) {
+      const anio = Number(f.anio)
+      if (!Number.isFinite(anio) || anio < 2000) continue
+      const arb = nOrNull(f.arb), cor = nOrNull(f.cor), pic = nOrNull(f.pic)
+      const total = (arb ?? 0) + (cor ?? 0) + (pic ?? 0)
+      rows.push(
+        { anio, variedad: 'Arbequina', kg_cosecha: arb, litros: null, rendimiento_pct: null },
+        { anio, variedad: 'Coratina', kg_cosecha: cor, litros: null, rendimiento_pct: null },
+        { anio, variedad: 'Picual', kg_cosecha: pic, litros: null, rendimiento_pct: null },
+        { anio, variedad: 'TOTAL', kg_cosecha: total || null, litros: nOrNull(f.litros), rendimiento_pct: nOrNull(f.rend) },
+      )
+    }
+    if (removidos.length) await supabase.from('cosecha_resumen').delete().in('anio', removidos)
+    if (rows.length) await supabase.from('cosecha_resumen').upsert(rows, { onConflict: 'anio,variedad' })
+    await onCambio()
+    setGuardando(false)
+    onCerrar()
+  }
+
+  const miniCls = 'w-full rounded border border-oliva-200 px-1.5 py-1 text-xs text-right tabular-nums focus:outline-none focus:ring-1 focus:ring-oliva-300'
+
+  return (
+    <Dialog abierto onCerrar={onCerrar} titulo="Editar historial" ancho="lg">
+      <div className="space-y-3">
+        <button onClick={addFila} className="text-xs font-medium text-oliva-700 hover:text-oliva-900">+ Agregar año</button>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-oliva-500 border-b border-oliva-100">
+                <th className="text-left font-medium py-1 pr-1">Año</th>
+                <th className="font-medium px-1">Arbequina</th>
+                <th className="font-medium px-1">Coratina</th>
+                <th className="font-medium px-1">Picual</th>
+                <th className="font-medium px-1">Litros</th>
+                <th className="font-medium px-1">Rend.%</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filas.map((f, i) => (
+                <tr key={i} className="border-b border-oliva-50">
+                  <td className="py-1 pr-1 w-16">
+                    <input inputMode="numeric" value={f.anio} onChange={(e) => setFila(i, { anio: e.target.value })} className={miniCls + ' text-left'} />
+                  </td>
+                  <td className="px-1"><input inputMode="decimal" value={f.arb} onChange={(e) => setFila(i, { arb: e.target.value })} className={miniCls} /></td>
+                  <td className="px-1"><input inputMode="decimal" value={f.cor} onChange={(e) => setFila(i, { cor: e.target.value })} className={miniCls} /></td>
+                  <td className="px-1"><input inputMode="decimal" value={f.pic} onChange={(e) => setFila(i, { pic: e.target.value })} className={miniCls} /></td>
+                  <td className="px-1"><input inputMode="decimal" value={f.litros} onChange={(e) => setFila(i, { litros: e.target.value })} className={miniCls} /></td>
+                  <td className="px-1"><input inputMode="decimal" value={f.rend} onChange={(e) => setFila(i, { rend: e.target.value })} className={miniCls} /></td>
+                  <td className="pl-1"><button onClick={() => delFila(i)} className="text-red-500 hover:text-red-700" aria-label="Quitar año">✕</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="text-xs text-oliva-400">El total de kg se calcula como la suma de las variedades.</p>
         <div className="flex justify-end gap-2 pt-1">
           <button onClick={onCerrar} className="px-3 py-2 text-sm text-oliva-600 hover:text-oliva-900">Cancelar</button>
           <button onClick={guardar} disabled={guardando} className="px-4 py-2 text-sm font-medium rounded-lg bg-oliva-800 text-oliva-50 hover:bg-oliva-900 disabled:opacity-50">
