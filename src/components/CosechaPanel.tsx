@@ -142,6 +142,7 @@ export function CosechaPanel({ anio, puedeEscribir }: { anio: string; puedeEscri
   const [tarifas, setTarifas] = useState<CosechaTarifa[]>([])
   const [resumen, setResumen] = useState<CosechaResumen[]>([])
   const [cargando, setCargando] = useState(true)
+  const [bajando, setBajando] = useState(false)
 
   const [nuevaCarga, setNuevaCargaRaw] = useState(() => leerFlag(FLAG_CARGA))
   const setNuevaCarga = (v: boolean) => { setNuevaCargaRaw(v); guardarFlag(FLAG_CARGA, v) }
@@ -313,6 +314,27 @@ export function CosechaPanel({ anio, puedeEscribir }: { anio: string; puedeEscri
 
   const operariosActivos = useMemo(() => operarios.filter((o) => o.activo), [operarios])
 
+  // ------------------------------------------------------------------ export
+  async function descargarAnio() {
+    setBajando(true)
+    try {
+      const { descargarCosechaAnio } = await import('../lib/exportCosecha')
+      await descargarCosechaAnio({
+        anio: anioNum, cargas, opsPorCarga, operarios, procesos, liquidacion,
+        precioKg, totKgCosecha, totLitros, totAceite, rendTotal, kgPorSector, rendPorVariedad,
+      })
+    } catch (e) { console.error(e); alert('No se pudo generar el Excel del ano.') }
+    finally { setBajando(false) }
+  }
+  async function descargarHist() {
+    setBajando(true)
+    try {
+      const { descargarCosechaHistorial } = await import('../lib/exportCosecha')
+      await descargarCosechaHistorial(historial, VARIEDADES)
+    } catch (e) { console.error(e); alert('No se pudo generar el Excel del historial.') }
+    finally { setBajando(false) }
+  }
+
   // ------------------------------------------------------------------ render
   return (
     <div>
@@ -332,6 +354,12 @@ export function CosechaPanel({ anio, puedeEscribir }: { anio: string; puedeEscri
           </div>
         </div>
       )}
+
+      <div className="flex items-center gap-2 flex-wrap mb-4">
+        <button onClick={descargarAnio} disabled={bajando} className="inline-flex items-center gap-1.5 rounded-lg bg-white border border-oliva-200 text-oliva-700 px-3 py-1.5 text-xs font-medium hover:border-oliva-400 disabled:opacity-50">
+          <span className="leading-none">↓</span> Descargar año {anioNum} (Excel)
+        </button>
+      </div>
 
       {cargando ? (
         <p className="text-oliva-500 text-sm py-8 text-center">Cargando…</p>
@@ -427,9 +455,12 @@ export function CosechaPanel({ anio, puedeEscribir }: { anio: string; puedeEscri
           </Seccion>
 
           {/* Historial por ano (detallado) */}
-          <Seccion titulo="Historial de cosechas" accion={puedeEscribir ? (
-            <button onClick={() => setEditorHistorial(true)} className="text-xs font-medium text-oliva-600 hover:text-oliva-900 underline decoration-dotted">Editar</button>
-          ) : undefined}>
+          <Seccion titulo="Historial de cosechas" accion={(
+            <div className="flex items-center gap-3">
+              <button onClick={descargarHist} disabled={bajando} className="text-xs font-medium text-oliva-600 hover:text-oliva-900 underline decoration-dotted disabled:opacity-50">Descargar</button>
+              {puedeEscribir && <button onClick={() => setEditorHistorial(true)} className="text-xs font-medium text-oliva-600 hover:text-oliva-900 underline decoration-dotted">Editar</button>}
+            </div>
+          )}>
             {historial.length === 0 ? <VacioMini texto="Sin histórico." /> : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm whitespace-nowrap">
