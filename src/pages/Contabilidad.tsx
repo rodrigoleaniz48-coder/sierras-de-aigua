@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { guardarObj, guardarFlag } from '../lib/persistencia'
 import { supabase } from '../lib/supabase'
@@ -2651,7 +2651,6 @@ function CargarMovimientosDialog({
   const [archivoNombre, setArchivoNombre] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [estado, setEstado] = useState<string | null>(null)
-  const fileRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     if (!abierto) { setModo('excel'); setTexto(''); setPreview(null); setError(null); setArchivoNombre(null); setEstado(null) }
@@ -2725,30 +2724,25 @@ function CargarMovimientosDialog({
             <p className="text-xs text-oliva-600">
               Subí el extracto exportado del homebanking en Excel (.xlsx o .xls). Detecta las columnas automáticamente (Fecha, Débito/Crédito o Importe). Al importar no se duplican los que ya estén cargados, y después podés usar <b>Conciliar automático</b> para contrastarlos con ingresos y egresos.
             </p>
-            <button
-              type="button"
-              onClick={() => fileRef.current?.click()}
-              disabled={analizando}
-              className="card border-dashed border-2 border-oliva-200 bg-oliva-50/40 p-5 flex flex-col items-center justify-center gap-1 cursor-pointer hover:bg-oliva-50 transition w-full text-center"
-            >
+            {/* Input de archivo NATIVO y visible, sin indirecciones (sin label/boton
+                oculto ni ref) ni filtro accept: es lo mas compatible en todo navegador
+                y PWA. El parser valida el contenido y reporta si el formato no sirve. */}
+            <div className="card border-dashed border-2 border-oliva-200 bg-oliva-50/40 p-4 flex flex-col items-center gap-2 text-center">
               <span className="text-2xl">📄</span>
-              <span className="text-sm font-medium text-oliva-800">{archivoNombre ?? 'Elegí un archivo Excel'}</span>
-              <span className="text-[11px] text-oliva-500">{analizando ? 'Analizando…' : 'Tocá para seleccionar (.xlsx / .xls)'}</span>
-            </button>
-            {/* Input fuera del boton y disparado por ref: un <input type=file display:none>
-                dentro de un <label> no abre el selector en Android / PWA instalada. */}
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0]
-                if (f) analizarArchivo(f)
-                else setEstado('0) Se abrió el selector pero no llegó ningún archivo')
-                e.target.value = ''
-              }}
-            />
+              <span className="text-sm font-medium text-oliva-800">{archivoNombre ?? 'Elegí tu extracto en Excel'}</span>
+              <input
+                type="file"
+                disabled={analizando}
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  if (f) analizarArchivo(f)
+                  else setEstado('0) Se abrió el selector pero no llegó ningún archivo')
+                  e.target.value = ''
+                }}
+                className="block w-full max-w-xs text-xs text-oliva-700 cursor-pointer file:mr-3 file:cursor-pointer file:rounded-md file:border-0 file:bg-oliva-800 file:px-3 file:py-1.5 file:font-semibold file:text-oliva-50"
+              />
+              <span className="text-[11px] text-oliva-500">{analizando ? 'Analizando…' : 'Archivos .xlsx o .xls del homebanking'}</span>
+            </div>
             {estado && (
               <div className="rounded-lg border border-oliva-200 bg-white px-3 py-2 text-xs text-oliva-700 tabular-nums">
                 {estado}
