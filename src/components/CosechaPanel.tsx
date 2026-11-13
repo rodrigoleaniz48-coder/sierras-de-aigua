@@ -239,22 +239,21 @@ export function CosechaPanel({ anio, puedeEscribir }: { anio: string; puedeEscri
   const rendTotal = totKgCosecha > 0 ? (totAceite / totKgCosecha) * 100 : 0
   const totPagable = useMemo(() => liquidacion.reduce((s, f) => s + f.pagable, 0), [liquidacion])
 
-  // Comparativo entre anos: historico (cosecha_resumen) + ano vivo (cargas/proceso)
-  const comparativo = useMemo(() => {
-    const porAnio = new Map<number, { kg: number; litros: number | null; rend: number | null }>()
+  // Historial por ano: historico importado (cosecha_resumen) + ano vivo (cargas/pasajes).
+  const historial = useMemo(() => {
+    const m = new Map<number, { total: number; porVar: Map<string, number>; litros: number | null; rend: number | null }>()
     for (const r of resumen) {
-      const e = porAnio.get(r.anio) ?? { kg: 0, litros: null, rend: null }
-      if (r.variedad === 'TOTAL') { e.litros = r.litros; e.rend = r.rendimiento_pct } else { e.kg += r.kg_cosecha || 0 }
-      porAnio.set(r.anio, e)
+      const e = m.get(r.anio) ?? { total: 0, porVar: new Map<string, number>(), litros: null, rend: null }
+      if (r.variedad === 'TOTAL') { e.total = r.kg_cosecha ?? 0; e.litros = r.litros; e.rend = r.rendimiento_pct }
+      else e.porVar.set(r.variedad, r.kg_cosecha ?? 0)
+      m.set(r.anio, e)
     }
-    // ano actual en vivo (pisa el resumen si hay cargas cargadas)
+    // ano vivo: pisa el resumen con los datos reales si hay cargas cargadas
     if (totKgCosecha > 0 || totLitros > 0) {
-      porAnio.set(anioNum, { kg: totKgCosecha, litros: totLitros || null, rend: rendTotal || null })
+      m.set(anioNum, { total: totKgCosecha, porVar: new Map(kgPorVariedad), litros: totLitros || null, rend: rendTotal || null })
     }
-    return [...porAnio.entries()].map(([a, d]) => ({ anio: a, ...d })).sort((x, y) => x.anio - y.anio)
-  }, [resumen, anioNum, totKgCosecha, totLitros, rendTotal])
-
-  const maxKgComp = Math.max(1, ...comparativo.map((c) => c.kg))
+    return [...m.entries()].map(([anio, e]) => ({ anio, ...e })).sort((a, b) => b.anio - a.anio)
+  }, [resumen, anioNum, totKgCosecha, totLitros, rendTotal, kgPorVariedad])
 
   // ------------------------------------------------------------------ guardar
   async function guardarCarga(form: CargaForm, id?: number) {
@@ -426,20 +425,33 @@ export function CosechaPanel({ anio, puedeEscribir }: { anio: string; puedeEscri
             )}
           </Seccion>
 
-          {/* Comparativo entre anos */}
-          <Seccion titulo="Comparativo entre años">
-            {comparativo.length === 0 ? <VacioMini texto="Sin histórico." /> : (
-              <div className="space-y-1.5">
-                {comparativo.map((c) => (
-                  <div key={c.anio} className={`flex items-center gap-2 ${c.anio === anioNum ? 'font-medium' : ''}`}>
-                    <span className="w-10 text-xs text-oliva-600 shrink-0">{c.anio}</span>
-                    <div className="flex-1 bg-oliva-50 rounded h-5 overflow-hidden">
-                      <div className="h-full bg-oliva-300 rounded" style={{ width: `${(c.kg / maxKgComp) * 100}%` }} />
-                    </div>
-                    <span className="w-20 text-right text-xs tabular-nums text-oliva-700 shrink-0">{fmtKg(c.kg)} kg</span>
-                    <span className="w-14 text-right text-xs tabular-nums text-oliva-500 shrink-0">{c.rend != null ? `${fmtKg1(c.rend)}%` : ''}</span>
-                  </div>
-                ))}
+          {/* Historial por ano (detallado) */}
+          <Seccion titulo="Historial de cosechas">
+            {historial.length === 0 ? <VacioMini texto="Sin histórico." /> : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm whitespace-nowrap">
+                  <thead>
+                    <tr className="text-xs text-oliva-500 border-b border-oliva-100">
+                      <th className="text-left font-medium py-1.5 pr-3">Año</th>
+                      <th className="text-right font-medium px-2">Total kg</th>
+                      {VARIEDADES.map((v) => <th key={v} className="text-right font-medium px-2">{v}</th>)}
+                      <th className="text-right font-medium px-2">Litros</th>
+                      <th className="text-right font-medium pl-2">Rend.</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {historial.map((h) => (
+                      <tr key={h.anio} className={`border-b border-oliva-50 ${h.anio === anioNum ? 'bg-oliva-50/40' : ''}`}>
+                        <td className="py-1.5 pr-3 text-oliva-800 font-medium">{h.anio}</td>
+                        <td className="text-right tabular-nums px-2 text-oliva-900">{fmtKg(h.total)}</td>
+                        {VARIEDADES.map((v) => <td key={v} className="text-right tabular-nums px-2 text-oliva-600">{h.porVar.get(v) ? fmtKg(h.porVar.get(v)!) : '—'}</td>)}
+                        <td className="text-right tabular-nums px-2 text-oliva-700">{h.litros != null ? fmtKg(h.litros) : '—'}</td>
+                        <td className="text-right tabular-nums pl-2 font-medium text-oliva-900">{h.rend != null ? `${fmtKg1(h.rend)}%` : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p className="text-xs text-oliva-400 mt-2">2018–2025 importado del cuaderno. El rendimiento de 2023–2025 no estaba en la planilla.</p>
               </div>
             )}
           </Seccion>
