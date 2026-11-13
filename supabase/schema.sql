@@ -724,4 +724,12 @@ create table if not exists public.cosecha_resumen (
   rendimiento_pct numeric(6,3),
   unique (anio, variedad)
 );
--- RLS en las 6: lectura autenticado, escritura admin+campo (ver migracion_cosecha.sql).
+-- Resumen por sector y ano (paralelo a cosecha_resumen; ver migracion_cosecha_sector.sql).
+create table if not exists public.cosecha_sector_resumen (
+  id bigserial primary key,
+  anio int not null,
+  sector text not null,
+  kg_cosecha numeric(12,2),
+  unique (anio, sector)
+);
+-- RLS: lectura autenticado, escritura admin+campo (ver migracion_cosecha*.sql).

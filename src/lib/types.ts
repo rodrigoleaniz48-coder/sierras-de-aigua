@@ -164,3 +164,10 @@ export interface CosechaResumen {
   litros: number | null
   rendimiento_pct: number | null
 }
+
+export interface CosechaSectorResumen {
+  id: number
+  anio: number
+  sector: string
+  kg_cosecha: number | null
+}

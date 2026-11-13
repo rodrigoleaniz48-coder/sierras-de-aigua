@@ -4,7 +4,7 @@ import { Dialog } from './Dialog'
 import { fFecha } from '../lib/format'
 import { guardarFlag, leerFlag, guardarObj, leerObj, borrarKey } from '../lib/persistencia'
 import type {
-  CosechaOperario, CosechaTarifa, CosechaCarga, CosechaCargaOperario, CosechaProceso, CosechaResumen,
+  CosechaOperario, CosechaTarifa, CosechaCarga, CosechaCargaOperario, CosechaProceso, CosechaResumen, CosechaSectorResumen,
 } from '../lib/types'
 
 // ---------------------------------------------------------------------------
@@ -149,6 +149,7 @@ export function CosechaPanel({ puedeEscribir }: { puedeEscribir: boolean }) {
   const [operarios, setOperarios] = useState<CosechaOperario[]>([])
   const [tarifas, setTarifas] = useState<CosechaTarifa[]>([])
   const [resumen, setResumen] = useState<CosechaResumen[]>([])
+  const [sectorResumen, setSectorResumen] = useState<CosechaSectorResumen[]>([])
   const [cargando, setCargando] = useState(true)
   const [bajando, setBajando] = useState(false)
 
@@ -166,13 +167,14 @@ export function CosechaPanel({ puedeEscribir }: { puedeEscribir: boolean }) {
 
   async function cargar() {
     setCargando(true)
-    const [c, co, p, o, t, r] = await Promise.all([
+    const [c, co, p, o, t, r, sr] = await Promise.all([
       supabase.from('cosecha_cargas').select('*').eq('anio', anioNum).order('fecha', { ascending: true }),
       supabase.from('cosecha_carga_operarios').select('*'),
       supabase.from('cosecha_proceso').select('*').eq('anio', anioNum).order('fecha', { ascending: true }),
       supabase.from('cosecha_operarios').select('*').order('orden'),
       supabase.from('cosecha_tarifas').select('*'),
       supabase.from('cosecha_resumen').select('*'),
+      supabase.from('cosecha_sector_resumen').select('*').eq('anio', anioNum),
     ])
     setCargas((c.data as CosechaCarga[]) ?? [])
     setCargaOps((co.data as CosechaCargaOperario[]) ?? [])
@@ -180,6 +182,7 @@ export function CosechaPanel({ puedeEscribir }: { puedeEscribir: boolean }) {
     setOperarios((o.data as CosechaOperario[]) ?? [])
     setTarifas((t.data as CosechaTarifa[]) ?? [])
     setResumen((r.data as CosechaResumen[]) ?? [])
+    setSectorResumen((sr.data as CosechaSectorResumen[]) ?? [])
     setCargando(false)
   }
   useEffect(() => { cargar() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [anioNum])
@@ -286,6 +289,12 @@ export function CosechaPanel({ puedeEscribir }: { puedeEscribir: boolean }) {
   const kgVarView: [string, number][] = kgPorVariedad.length
     ? kgPorVariedad
     : resAnio ? [...resAnio.porVar.entries()].filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]) : []
+  const kgSecView: [string, number][] = kgPorSector.length
+    ? kgPorSector
+    : sectorResumen
+      .map((s) => [s.sector, s.kg_cosecha ?? 0] as [string, number])
+      .filter(([, v]) => v > 0)
+      .sort((a, b) => a[0].localeCompare(b[0], 'es', { numeric: true }))
 
   // ------------------------------------------------------------------ guardar
   async function guardarCarga(form: CargaForm, id?: number) {
@@ -352,7 +361,7 @@ export function CosechaPanel({ puedeEscribir }: { puedeEscribir: boolean }) {
       const resumenAnio = historial.find((h) => h.anio === anioNum) ?? null
       await descargarCosechaAnio({
         anio: anioNum, cargas, opsPorCarga, operarios, procesos, liquidacion,
-        precioKg, totKgCosecha, totLitros, totAceite, rendTotal, kgPorSector, rendPorVariedad,
+        precioKg, totKgCosecha, totLitros, totAceite, rendTotal, kgPorSector: kgSecView, rendPorVariedad,
         resumenAnio,
       })
     } catch (e) { console.error(e); alert('No se pudo generar el Excel del ano.') }
@@ -464,8 +473,8 @@ export function CosechaPanel({ puedeEscribir }: { puedeEscribir: boolean }) {
               )}
             </Seccion>
             <Seccion titulo="Kg por sector">
-              {kgPorSector.length === 0 ? <VacioMini texto="Sin datos." /> : (
-                <BarrasKg filas={kgPorSector} />
+              {kgSecView.length === 0 ? <VacioMini texto="Sin datos." /> : (
+                <BarrasKg filas={kgSecView} />
               )}
             </Seccion>
           </div>
