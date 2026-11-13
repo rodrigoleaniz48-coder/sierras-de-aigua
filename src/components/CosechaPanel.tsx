@@ -134,7 +134,8 @@ function liquidar(
 // ---------------------------------------------------------------------------
 // Panel principal
 // ---------------------------------------------------------------------------
-export function CosechaPanel({ anio, puedeEscribir }: { anio: string; puedeEscribir: boolean }) {
+export function CosechaPanel({ puedeEscribir }: { puedeEscribir: boolean }) {
+  const [anio, setAnio] = useState<string>(String(new Date().getFullYear()))
   const [cargas, setCargas] = useState<CosechaCarga[]>([])
   const [cargaOps, setCargaOps] = useState<CosechaCargaOperario[]>([])
   const [procesos, setProcesos] = useState<CosechaProceso[]>([])
@@ -186,6 +187,16 @@ export function CosechaPanel({ anio, puedeEscribir }: { anio: string; puedeEscri
   const tarifa = useMemo(() => tarifas.find((t) => t.anio === anioNum) ?? null, [tarifas, anioNum])
   const tolPct = tarifa?.tolerancia_pct ?? 2
   const precioKg = tarifa?.precio_kg ?? null
+
+  // Anos que conoce Cosecha: del historico (resumen) + tarifas + ano actual + el elegido.
+  const aniosCosecha = useMemo(() => {
+    const s = new Set<number>()
+    for (const r of resumen) s.add(r.anio)
+    for (const t of tarifas) s.add(t.anio)
+    s.add(new Date().getFullYear())
+    s.add(anioNum)
+    return [...s].filter((a) => a >= 2000).sort((a, b) => b - a)
+  }, [resumen, tarifas, anioNum])
 
   const nombreOp = useMemo(() => {
     const m = new Map(operarios.map((o) => [o.id, o.nombre]))
@@ -256,6 +267,18 @@ export function CosechaPanel({ anio, puedeEscribir }: { anio: string; puedeEscri
     }
     return [...m.entries()].map(([anio, e]) => ({ anio, ...e })).sort((a, b) => b.anio - a.anio)
   }, [resumen, anioNum, totKgCosecha, totLitros, rendTotal, kgPorVariedad])
+
+  // Vista en pantalla: datos live si el ano tiene cargas/pasajes; si no, el
+  // resumen historico (mismo criterio que el export del ano).
+  const resAnio = useMemo(() => historial.find((h) => h.anio === anioNum) ?? null, [historial, anioNum])
+  const hayDetalle = cargas.length > 0 || procesos.length > 0
+  const kgCosView = totKgCosecha || resAnio?.total || 0
+  const litrosView = totLitros || resAnio?.litros || 0
+  const aceiteView = totAceite || (litrosView ? litrosView * KG_POR_LITRO : 0)
+  const rendView = rendTotal || resAnio?.rend || (kgCosView > 0 && aceiteView > 0 ? (aceiteView / kgCosView) * 100 : 0)
+  const kgVarView: [string, number][] = kgPorVariedad.length
+    ? kgPorVariedad
+    : resAnio ? [...resAnio.porVar.entries()].filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]) : []
 
   // ------------------------------------------------------------------ guardar
   async function guardarCarga(form: CargaForm, id?: number) {
@@ -358,8 +381,14 @@ export function CosechaPanel({ anio, puedeEscribir }: { anio: string; puedeEscri
       )}
 
       <div className="flex items-center gap-2 flex-wrap mb-4">
-        <button onClick={descargarAnio} disabled={bajando} className="inline-flex items-center gap-1.5 rounded-lg bg-white border border-oliva-200 text-oliva-700 px-3 py-1.5 text-xs font-medium hover:border-oliva-400 disabled:opacity-50">
-          <span className="leading-none">↓</span> Descargar año {anioNum} (Excel)
+        <label className="flex items-center gap-2 text-sm">
+          <span className="text-oliva-600">Año</span>
+          <select value={anio} onChange={(e) => setAnio(e.target.value)} className="rounded-lg border border-oliva-200 bg-white px-2 py-1.5 text-sm">
+            {aniosCosecha.map((a) => <option key={a} value={String(a)}>{a}</option>)}
+          </select>
+        </label>
+        <button onClick={descargarAnio} disabled={bajando} className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-white border border-oliva-200 text-oliva-700 px-3 py-1.5 text-xs font-medium hover:border-oliva-400 disabled:opacity-50">
+          <span className="leading-none">↓</span> Descargar año (Excel)
         </button>
       </div>
 
@@ -369,10 +398,16 @@ export function CosechaPanel({ anio, puedeEscribir }: { anio: string; puedeEscri
         <div className="space-y-5">
           {/* Resumen */}
           <div className="grid grid-cols-3 gap-2.5">
-            <Tile label="Kg cosechados" valor={fmtKg(totKgCosecha)} />
-            <Tile label="Litros de aceite" valor={fmtKg(totLitros)} />
-            <Tile label="Rendimiento" valor={rendTotal > 0 ? `${fmtKg1(rendTotal)}%` : '—'} />
+            <Tile label="Kg cosechados" valor={fmtKg(kgCosView)} />
+            <Tile label="Litros de aceite" valor={fmtKg(litrosView)} />
+            <Tile label="Rendimiento" valor={rendView > 0 ? `${fmtKg1(rendView)}%` : '—'} />
           </div>
+
+          {!hayDetalle && resAnio && (
+            <p className="text-xs text-oliva-600 bg-oliva-50 rounded-lg px-3 py-2">
+              Mostrando el <strong>resumen histórico</strong> de {anioNum} (del cuaderno). Cargá cargas y pasajes a tanque para ver la liquidación por operario y el detalle diario.
+            </p>
+          )}
 
           {/* Liquidacion por operario */}
           <Seccion titulo="Liquidación por operario (destajo)">
@@ -417,8 +452,8 @@ export function CosechaPanel({ anio, puedeEscribir }: { anio: string; puedeEscri
           {/* Kg por variedad y sector */}
           <div className="grid sm:grid-cols-2 gap-5">
             <Seccion titulo="Kg por variedad">
-              {kgPorVariedad.length === 0 ? <VacioMini texto="Sin datos." /> : (
-                <BarrasKg filas={kgPorVariedad} />
+              {kgVarView.length === 0 ? <VacioMini texto="Sin datos." /> : (
+                <BarrasKg filas={kgVarView} />
               )}
             </Seccion>
             <Seccion titulo="Kg por sector">

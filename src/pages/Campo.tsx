@@ -304,28 +304,28 @@ export function Campo() {
         )}
       </div>
 
-      {/* Fila 2: ano + vista */}
-      <div className="flex items-center justify-between gap-2 flex-wrap mb-4">
-        <label className="flex items-center gap-2 text-sm">
-          <span className="text-oliva-600">Año</span>
-          <select
-            value={anio}
-            onChange={(e) => setAnio(e.target.value)}
-            className="rounded-lg border border-oliva-200 bg-white px-2 py-1.5 text-sm"
-          >
-            {anios.length === 0 && <option value="">—</option>}
-            {anios.map((a) => <option key={a} value={a}>{a}</option>)}
-          </select>
-        </label>
-        {cronograma !== 'cosecha' && (
+      {/* Fila 2: ano + vista (Cosecha maneja su propio ano) */}
+      {cronograma !== 'cosecha' && (
+        <div className="flex items-center justify-between gap-2 flex-wrap mb-4">
+          <label className="flex items-center gap-2 text-sm">
+            <span className="text-oliva-600">Año</span>
+            <select
+              value={anio}
+              onChange={(e) => setAnio(e.target.value)}
+              className="rounded-lg border border-oliva-200 bg-white px-2 py-1.5 text-sm"
+            >
+              {anios.length === 0 && <option value="">—</option>}
+              {anios.map((a) => <option key={a} value={a}>{a}</option>)}
+            </select>
+          </label>
           <Segmento
             valor={vista}
             onChange={(v) => setVista(v as Vista)}
             opciones={[['lista', 'Lista'], ['grilla', 'Grilla']]}
             pequeno
           />
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Leyenda + editar categorias (solo cronogramas) */}
       {cronograma !== 'cosecha' && (
@@ -338,7 +338,7 @@ export function Campo() {
       {cargando ? (
         <p className="text-oliva-500 text-sm py-8 text-center">Cargando…</p>
       ) : cronograma === 'cosecha' ? (
-        <CosechaPanel anio={anio} puedeEscribir={puedeEscribir} />
+        <CosechaPanel puedeEscribir={puedeEscribir} />
       ) : cronograma === 'aplicaciones' ? (
         vista === 'lista'
           ? <ListaAplicaciones items={aplicAnio} prodPorAplic={prodPorAplic} info={infoApp} onAbrir={setDetAplic} />
