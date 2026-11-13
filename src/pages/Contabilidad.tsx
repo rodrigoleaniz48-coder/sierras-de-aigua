@@ -2257,19 +2257,20 @@ function RegistrarPagoDialog({ cliente, onCerrar, onOk }: { cliente: Cliente | n
     if (medio === 'efectivo' && !socioAdel) { setError('Elegí quién recibió el efectivo.'); return }
     setGuardando(true); setError(null)
     // 1) Pago a cuenta (baja el saldo, cuenta como ingreso)
-    const { error: e } = await supabase.from('pagos').insert({
+    const { data: pagoRow, error: e } = await supabase.from('pagos').insert({
       cliente_id: cliente.id, fecha, monto: m, moneda, medio_pago: medio,
       cuenta_id: sinDinero ? null : (cuentaId ? Number(cuentaId) : null),
       nota: nota.trim() || null, socio_id: perfil.id, actualizado_en: new Date().toISOString(),
-    })
-    if (e) { setGuardando(false); setError(e.message); return }
+    }).select('id').single()
+    if (e || !pagoRow) { setGuardando(false); setError(e?.message ?? 'No se pudo guardar'); return }
     // 2) Si fue en efectivo: el socio que lo recibió lo lleva como adelanto a su sueldo.
+    //    Se vincula con pago_id para que editar/borrar el pago ajuste el adelanto.
     if (medio === 'efectivo') {
       const { error: e2 } = await supabase.from('gastos').insert({
         fecha, socio_id: socioAdel, categoria: origenAdel, monto: m, moneda,
         descripcion: `Pago a cuenta · ${cliente.nombre} (cobro efectivo)${nota.trim() ? ` — ${nota.trim()}` : ''}`,
         metodo_pago: 'efectivo', reembolsable: false, reembolsado: false, es_adelanto: true,
-        actualizado_en: new Date().toISOString(),
+        pago_id: pagoRow.id, actualizado_en: new Date().toISOString(),
       })
       if (e2) { setGuardando(false); setError('Pago guardado, pero falló el adelanto: ' + e2.message); return }
     }
@@ -2379,6 +2380,7 @@ function EditarPagoDialog({ pago, onCerrar, onOk }: { pago: Pago | null; onCerra
   const [cuentas, setCuentas] = useState<{ id: number; nombre: string; moneda: string }[]>([])
   const [cuentaId, setCuentaId] = useState<string>('')
   const [conciliado, setConciliado] = useState(false)
+  const [adelantoId, setAdelantoId] = useState<number | null>(null)
   const [confirmarBorrar, setConfirmarBorrar] = useState(false)
   const [guardando, setGuardando] = useState(false)
   const [borrando, setBorrando] = useState(false)
@@ -2389,16 +2391,20 @@ function EditarPagoDialog({ pago, onCerrar, onOk }: { pago: Pago | null; onCerra
     setFecha(pago.fecha); setMonto(String(Number(pago.monto))); setMoneda((pago.moneda as 'UYU' | 'USD') ?? 'UYU')
     setMedio(pago.medio_pago ?? 'transferencia'); setNota(pago.nota ?? '')
     setCuentaId(pago.cuenta_id != null ? String(pago.cuenta_id) : '')
-    setConfirmarBorrar(false); setError(null)
+    setConfirmarBorrar(false); setError(null); setAdelantoId(null)
     supabase.from('cuentas_bancarias').select('id,nombre,moneda').eq('activo', true).order('id')
       .then(({ data }) => setCuentas((data as { id: number; nombre: string; moneda: string }[]) ?? []))
     supabase.from('movimientos_bancarios').select('id').eq('conciliado_pago_id', pago.id).limit(1)
       .then(({ data }) => setConciliado(((data as unknown[]) ?? []).length > 0))
+    // Adelanto vinculado (si el cobro fue en efectivo): se ajusta/borra junto con el pago.
+    supabase.from('gastos').select('id').eq('pago_id', pago.id).eq('es_adelanto', true).limit(1)
+      .then(({ data }) => setAdelantoId((data as { id: number }[] | null)?.[0]?.id ?? null))
   }, [pago])
 
   const cuentasMoneda = cuentas.filter((c) => c.moneda === moneda)
   const sinDinero = medio === 'efectivo' || medio === 'especie'
   const eraEfectivo = pago?.medio_pago === 'efectivo'
+  const hayAdelanto = adelantoId != null
 
   async function guardar() {
     if (!pago) return
@@ -2411,6 +2417,15 @@ function EditarPagoDialog({ pago, onCerrar, onOk }: { pago: Pago | null; onCerra
       nota: nota.trim() || null, actualizado_en: new Date().toISOString(),
     }).eq('id', pago.id)
     if (e) { setGuardando(false); setError(e.message); return }
+    // Mantener en sincronía el adelanto vinculado (cobro en efectivo):
+    //  - sigue en efectivo -> ajustar su monto/fecha/moneda;
+    //  - ya no es efectivo -> el adelanto deja de corresponder, se borra.
+    if (hayAdelanto) {
+      const { error: eA } = medio === 'efectivo'
+        ? await supabase.from('gastos').update({ monto: m, moneda, fecha, actualizado_en: new Date().toISOString() }).eq('id', adelantoId!)
+        : await supabase.from('gastos').delete().eq('id', adelantoId!)
+      if (eA) { setGuardando(false); setError('Pago actualizado, pero falló ajustar el adelanto: ' + eA.message); return }
+    }
     setGuardando(false)
     onOk()
   }
@@ -2469,9 +2484,22 @@ function EditarPagoDialog({ pago, onCerrar, onOk }: { pago: Pago | null; onCerra
           </div>
         </div>
 
-        {eraEfectivo && (
+        {hayAdelanto && (
           <div className="rounded-lg border border-aceite-500/30 bg-aceite-500/5 p-3 text-xs text-oliva-700">
-            Este pago fue en <b>efectivo</b>: cuando se registró, se creó un <b>adelanto</b> al socio que lo recibió. Si cambiás el monto o lo borrás, ajustá ese adelanto a mano en <b>Finanzas → Gastos</b>.
+            Este pago fue en <b>efectivo</b> y tiene un <b>adelanto</b> vinculado al socio que recibió la plata.
+            {medio === 'efectivo'
+              ? <> Al guardar, el adelanto se <b>ajusta solo</b> a este monto; si borrás el pago, el adelanto se <b>borra solo</b>.</>
+              : <> Como cambiaste el medio a <b>{medio}</b>, al guardar el adelanto se <b>elimina</b> (ya no corresponde).</>}
+          </div>
+        )}
+        {eraEfectivo && !hayAdelanto && (
+          <div className="rounded-lg border border-aceite-500/30 bg-aceite-500/5 p-3 text-xs text-oliva-700">
+            Este pago fue en <b>efectivo</b>. No encontré un adelanto vinculado (es un pago viejo, previo a la vinculación automática): si cambiás el monto o lo borrás, ajustá el adelanto a mano en <b>Finanzas → Gastos</b>.
+          </div>
+        )}
+        {!eraEfectivo && medio === 'efectivo' && (
+          <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
+            Cambiaste el medio a <b>efectivo</b>: el adelanto del socio <b>no se crea</b> al editar. Si corresponde, registrá el cobro en efectivo desde <b>+ Pago</b> para que genere el adelanto.
           </div>
         )}
         {conciliado && (

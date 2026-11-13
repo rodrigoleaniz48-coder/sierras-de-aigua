@@ -582,6 +582,11 @@ create policy jornaleros_upd on public.jornaleros for update using (ve_todos_gas
 alter table public.gastos add column if not exists jornalero_id bigint references public.jornaleros(id);
 create index if not exists gastos_jornalero_idx on public.gastos(jornalero_id);
 
+-- Vincula el adelanto creado al cobrar en EFECTIVO con el pago que lo origino:
+-- editar el pago ajusta el adelanto; borrar el pago lo borra (ON DELETE CASCADE).
+alter table public.gastos add column if not exists pago_id bigint references public.pagos(id) on delete cascade;
+create index if not exists idx_gastos_pago_id on public.gastos(pago_id) where pago_id is not null;
+
 -- =========================================================================
 -- Modulo Campo — cuaderno de campo (ver supabase/migracion_campo.sql)
 -- Dos cronogramas: aplicaciones de productos y manejo de cultivo (labores).
