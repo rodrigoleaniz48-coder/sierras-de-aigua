@@ -171,3 +171,19 @@ export interface CosechaSectorResumen {
   sector: string
   kg_cosecha: number | null
 }
+
+// Clima (solo lluvia). Se muestra dentro del cronograma de Manejo de cultivo.
+export interface Lluvia {
+  id: number
+  fecha: string
+  mm: number
+  nota: string | null
+}
+
+// Visitas del tecnico del predio.
+export interface InformeTecnico {
+  id: number
+  fecha: string
+  tecnico: string
+  notas: string | null
+}

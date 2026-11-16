@@ -733,3 +733,25 @@ create table if not exists public.cosecha_sector_resumen (
   unique (anio, sector)
 );
 -- RLS: lectura autenticado, escritura admin+campo (ver migracion_cosecha*.sql).
+
+-- Clima (solo lluvia) e informes tecnicos del modulo Campo. Ver migracion_campo_clima.sql.
+-- lluvias se integra al cronograma de 'Manejo de cultivo' (dia + mm).
+create table if not exists public.lluvias (
+  id bigserial primary key,
+  fecha date not null,
+  mm numeric(6,1) not null,
+  nota text,
+  creado_por uuid references auth.users(id),
+  creado_en timestamptz not null default now()
+);
+create index if not exists idx_lluvias_fecha on public.lluvias(fecha);
+create table if not exists public.informes_tecnicos (
+  id bigserial primary key,
+  fecha date not null,
+  tecnico text not null,
+  notas text,
+  creado_por uuid references auth.users(id),
+  creado_en timestamptz not null default now()
+);
+create index if not exists idx_informes_fecha on public.informes_tecnicos(fecha);
+-- RLS: lectura autenticado, escritura admin+campo (ver migracion_campo_clima.sql).

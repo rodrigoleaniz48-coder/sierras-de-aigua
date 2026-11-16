@@ -62,6 +62,20 @@ Pendientes por área. El contexto de proyecto (stack, roles, comandos, convencio
 
 ---
 
+## Campo (cuaderno de campo)
+
+Módulo con 4 sub-vistas (pestañas scrolleables): Aplicaciones, Manejo de cultivo, Cosecha, Informes.
+
+- [x] Cronogramas de Aplicaciones y Manejo (lista/grilla, categorías de color editables).
+- [x] Cosecha (resumen por variedad y sector, export Excel, editor de sectores).
+- [x] **Clima = solo lluvia**, integrado al cronograma de Manejo (día + mm, total mm por mes/año). Histórico 2017–2025 importado (356 eventos; ver `migracion_campo_clima.sql`).
+- [x] **Informes técnicos**: pestaña propia con las 27 visitas de Marcelo Cabrera + alta/edición.
+- [ ] **Jornales**: pendiente. La idea (a definir en conversación aparte) es un resumen mensual por operario derivado de las labores/aplicaciones (que ya guardan jornales/horas), sin depender del módulo Tareas. Tareas hoy no se aprovecha bien.
+- [ ] Clima 2023 no quedó cargado (el Excel solo lo tiene en detalle diario, sin agregado); 2018–2022 sin desglose. Se puede cargar a mano.
+- [ ] Granizo/viento/heladas: por ahora se anotan como nota de la lluvia; evaluar si merecen su propio registro.
+
+---
+
 ## Importación de históricos
 
 - [ ] Importar ventas históricas de Rodrigo (planillas Google Drive). Idempotente, detectar duplicados por fecha+cliente+total. Va cuando Rodrigo pase las planillas.

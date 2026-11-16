@@ -8,6 +8,7 @@ import { guardarFlag, leerFlag, guardarObj, leerObj, borrarKey } from '../lib/pe
 import { CosechaPanel } from '../components/CosechaPanel'
 import type {
   Aplicacion, AplicacionProducto, LaborCampo, CategoriaCampo, AmbitoCategoria, EstadoEvento,
+  Lluvia, InformeTecnico,
 } from '../lib/types'
 
 // ---------------------------------------------------------------------------
@@ -100,8 +101,13 @@ function laborFormVacio(catDefault: string): LaborForm {
 // Componente principal
 // ---------------------------------------------------------------------------
 
-type Cronograma = 'aplicaciones' | 'manejo' | 'cosecha'
+type Cronograma = 'aplicaciones' | 'manejo' | 'cosecha' | 'informes'
 type Vista = 'lista' | 'grilla'
+
+// Formularios cortos de clima / informes (sin borrador: son chicos)
+interface LluviaForm { fecha: string; mm: string; nota: string }
+interface InformeForm { fecha: string; tecnico: string; notas: string }
+const TECNICO_DEFAULT = 'Marcelo Cabrera Fontes'
 
 export function Campo() {
   const { puede } = useAuth()
@@ -119,6 +125,8 @@ export function Campo() {
   const [aplicaciones, setAplicaciones] = useState<Aplicacion[]>([])
   const [productos, setProductos] = useState<AplicacionProducto[]>([])
   const [labores, setLabores] = useState<LaborCampo[]>([])
+  const [lluvias, setLluvias] = useState<Lluvia[]>([])
+  const [informes, setInformes] = useState<InformeTecnico[]>([])
   const [cats, setCats] = useState<CategoriaCampo[]>([])
 
   // Dialogs
@@ -131,6 +139,13 @@ export function Campo() {
   const [editAplic, setEditAplic] = useState<Aplicacion | null>(null)
   const [editLabor, setEditLabor] = useState<LaborCampo | null>(null)
   const [editorAmbito, setEditorAmbito] = useState<AmbitoCategoria | null>(null)
+  // Clima (lluvia) e informes tecnicos
+  const [nuevaLluvia, setNuevaLluvia] = useState(false)
+  const [editLluvia, setEditLluvia] = useState<Lluvia | null>(null)
+  const [detLluvia, setDetLluvia] = useState<Lluvia | null>(null)
+  const [nuevoInforme, setNuevoInforme] = useState(false)
+  const [editInforme, setEditInforme] = useState<InformeTecnico | null>(null)
+  const [detInforme, setDetInforme] = useState<InformeTecnico | null>(null)
 
   const ambito: AmbitoCategoria = cronograma === 'aplicaciones' ? 'aplicacion' : 'labor'
 
@@ -140,16 +155,20 @@ export function Campo() {
   }
   async function cargar() {
     setCargando(true)
-    const [a, p, l, c] = await Promise.all([
+    const [a, p, l, c, lv, inf] = await Promise.all([
       supabase.from('aplicaciones').select('*').order('fecha', { ascending: false }),
       supabase.from('aplicacion_productos').select('*'),
       supabase.from('labores_campo').select('*').order('fecha', { ascending: false }),
       supabase.from('categorias_campo').select('*').order('orden').order('nombre'),
+      supabase.from('lluvias').select('*').order('fecha', { ascending: false }),
+      supabase.from('informes_tecnicos').select('*').order('fecha', { ascending: false }),
     ])
     setAplicaciones((a.data as Aplicacion[]) ?? [])
     setProductos((p.data as AplicacionProducto[]) ?? [])
     setLabores((l.data as LaborCampo[]) ?? [])
     setCats((c.data as CategoriaCampo[]) ?? [])
+    setLluvias((lv.data as Lluvia[]) ?? [])
+    setInformes((inf.data as InformeTecnico[]) ?? [])
     setCargando(false)
   }
   useEffect(() => { cargar() }, [])
@@ -165,7 +184,9 @@ export function Campo() {
   useEffect(() => {
     function h() {
       if (cronograma === 'cosecha') return // CosechaPanel maneja su propio FAB
-      if (cronograma === 'aplicaciones') setNuevaAplic(true); else setNuevaLabor(true)
+      if (cronograma === 'aplicaciones') setNuevaAplic(true)
+      else if (cronograma === 'manejo') setNuevaLabor(true)
+      else if (cronograma === 'informes') setNuevoInforme(true)
     }
     window.addEventListener('app:fab-nuevo', h)
     return () => window.removeEventListener('app:fab-nuevo', h)
@@ -195,8 +216,9 @@ export function Campo() {
     const s = new Set<string>()
     for (const a of aplicaciones) s.add(anioDe(a.fecha))
     for (const l of labores) s.add(anioDe(l.fecha))
+    for (const r of lluvias) s.add(anioDe(r.fecha))
     return [...s].sort().reverse()
-  }, [aplicaciones, labores])
+  }, [aplicaciones, labores, lluvias])
 
   useEffect(() => {
     if (anios.length && !anios.includes(anio)) setAnio(anios[0])
@@ -212,6 +234,20 @@ export function Campo() {
       .sort((x, y) => x.fecha.localeCompare(y.fecha)),
     [labores, anio],
   )
+  const lluviasAnio = useMemo(
+    () => lluvias.filter((r) => anioDe(r.fecha) === anio)
+      .sort((x, y) => x.fecha.localeCompare(y.fecha)),
+    [lluvias, anio],
+  )
+  const mmPorMes = useMemo(() => {
+    const m: Record<number, number> = {}
+    for (const r of lluviasAnio) {
+      const mes = Number(r.fecha.slice(5, 7))
+      m[mes] = (m[mes] ?? 0) + (r.mm ?? 0)
+    }
+    return m
+  }, [lluviasAnio])
+  const mmAnio = useMemo(() => lluviasAnio.reduce((s, r) => s + (r.mm ?? 0), 0), [lluviasAnio])
 
   // ------------------------------------------------------------------ guardar
   async function guardarAplicacion(form: AplicForm, id?: number) {
@@ -281,31 +317,73 @@ export function Campo() {
     await cargar()
   }
 
-  const labelNuevo = cronograma === 'aplicaciones' ? 'Nueva aplicación' : 'Nueva labor'
-  function abrirNuevo() { if (cronograma === 'aplicaciones') setNuevaAplic(true); else setNuevaLabor(true) }
+  async function guardarLluvia(form: LluviaForm, id?: number) {
+    const row = { fecha: form.fecha, mm: nOrNull(form.mm) ?? 0, nota: form.nota.trim() || null }
+    if (id) await supabase.from('lluvias').update(row).eq('id', id)
+    else await supabase.from('lluvias').insert(row)
+    await cargar()
+  }
+  async function borrarLluvia(id: number) {
+    if (!confirm('¿Borrar este registro de lluvia?')) return
+    await supabase.from('lluvias').delete().eq('id', id)
+    setDetLluvia(null)
+    await cargar()
+  }
+  async function guardarInforme(form: InformeForm, id?: number) {
+    const row = { fecha: form.fecha, tecnico: form.tecnico.trim() || TECNICO_DEFAULT, notas: form.notas.trim() || null }
+    if (id) await supabase.from('informes_tecnicos').update(row).eq('id', id)
+    else await supabase.from('informes_tecnicos').insert(row)
+    await cargar()
+  }
+  async function borrarInforme(id: number) {
+    if (!confirm('¿Borrar esta visita?')) return
+    await supabase.from('informes_tecnicos').delete().eq('id', id)
+    setDetInforme(null)
+    await cargar()
+  }
+
+  const labelNuevo = cronograma === 'aplicaciones' ? 'Nueva aplicación'
+    : cronograma === 'manejo' ? 'Nueva labor' : 'Nueva visita'
+  function abrirNuevo() {
+    if (cronograma === 'aplicaciones') setNuevaAplic(true)
+    else if (cronograma === 'manejo') setNuevaLabor(true)
+    else if (cronograma === 'informes') setNuevoInforme(true)
+  }
 
   // ------------------------------------------------------------------ render
   return (
     <div className="pb-24 lg:pb-6">
-      {/* Fila 1: cronograma + boton Nuevo (arriba, siempre visible) */}
-      <div className="flex items-center justify-between gap-2 flex-wrap mb-3">
-        <Segmento
-          valor={cronograma}
-          onChange={(v) => setCronograma(v as Cronograma)}
-          opciones={[['aplicaciones', 'Aplicaciones'], ['manejo', 'Manejo de cultivo'], ['cosecha', 'Cosecha']]}
-        />
+      {/* Fila 1: cronograma (scrollable en mobile) + botones de alta */}
+      <div className="mb-3 space-y-2">
+        <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
+          <Segmento
+            valor={cronograma}
+            onChange={(v) => setCronograma(v as Cronograma)}
+            opciones={[['aplicaciones', 'Aplicaciones'], ['manejo', 'Manejo de cultivo'], ['cosecha', 'Cosecha'], ['informes', 'Informes']]}
+          />
+        </div>
         {puedeEscribir && cronograma !== 'cosecha' && (
-          <button
-            onClick={abrirNuevo}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-oliva-800 text-oliva-50 px-3.5 py-2 text-sm font-medium hover:bg-oliva-900"
-          >
-            <span className="text-base leading-none">+</span> {labelNuevo}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={abrirNuevo}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-oliva-800 text-oliva-50 px-3.5 py-2 text-sm font-medium hover:bg-oliva-900"
+            >
+              <span className="text-base leading-none">+</span> {labelNuevo}
+            </button>
+            {cronograma === 'manejo' && (
+              <button
+                onClick={() => setNuevaLluvia(true)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 text-sky-800 px-3 py-2 text-sm font-medium hover:bg-sky-100"
+              >
+                💧 Lluvia
+              </button>
+            )}
+          </div>
         )}
       </div>
 
-      {/* Fila 2: ano + vista (Cosecha maneja su propio ano) */}
-      {cronograma !== 'cosecha' && (
+      {/* Fila 2: ano + vista (solo cronogramas con linea de tiempo) */}
+      {(cronograma === 'aplicaciones' || cronograma === 'manejo') && (
         <div className="flex items-center justify-between gap-2 flex-wrap mb-4">
           <label className="flex items-center gap-2 text-sm">
             <span className="text-oliva-600">Año</span>
@@ -317,6 +395,11 @@ export function Campo() {
               {anios.length === 0 && <option value="">—</option>}
               {anios.map((a) => <option key={a} value={a}>{a}</option>)}
             </select>
+            {cronograma === 'manejo' && mmAnio > 0 && (
+              <span className="inline-flex items-center gap-1 text-xs font-medium text-sky-700 bg-sky-50 border border-sky-100 rounded-full px-2 py-0.5">
+                💧 {Math.round(mmAnio)} mm
+              </span>
+            )}
           </label>
           <Segmento
             valor={vista}
@@ -327,8 +410,8 @@ export function Campo() {
         </div>
       )}
 
-      {/* Leyenda + editar categorias (solo cronogramas) */}
-      {cronograma !== 'cosecha' && (
+      {/* Leyenda + editar categorias (solo cronogramas de labores/aplicaciones) */}
+      {(cronograma === 'aplicaciones' || cronograma === 'manejo') && (
         <Leyenda
           cats={activasActual}
           onEditar={puedeEscribir ? () => setEditorAmbito(ambito) : undefined}
@@ -339,6 +422,8 @@ export function Campo() {
         <p className="text-oliva-500 text-sm py-8 text-center">Cargando…</p>
       ) : cronograma === 'cosecha' ? (
         <CosechaPanel puedeEscribir={puedeEscribir} />
+      ) : cronograma === 'informes' ? (
+        <ListaInformes items={informes} onAbrir={setDetInforme} />
       ) : cronograma === 'aplicaciones' ? (
         vista === 'lista'
           ? <ListaAplicaciones items={aplicAnio} prodPorAplic={prodPorAplic} info={infoApp} onAbrir={setDetAplic} />
@@ -348,9 +433,16 @@ export function Campo() {
             />
       ) : (
         vista === 'lista'
-          ? <ListaLabores items={laboresAnio} info={infoLabor} onAbrir={setDetLabor} />
+          ? <ListaManejo
+              labores={laboresAnio}
+              lluvias={lluviasAnio}
+              info={infoLabor}
+              onAbrirLabor={setDetLabor}
+              onAbrirLluvia={setDetLluvia}
+            />
           : <GrillaEventos
               anio={anio}
+              mmPorMes={mmPorMes}
               eventos={laboresAnio.map((l) => ({ id: l.id, fecha: l.fecha, color: colorDe(infoLabor, l.tipo_labor), planif: l.estado === 'planificada', onAbrir: () => setDetLabor(l) }))}
             />
       )}
@@ -420,6 +512,58 @@ export function Campo() {
           ambito={editorAmbito}
           onCerrar={() => setEditorAmbito(null)}
           onCambio={cargarCats}
+        />
+      )}
+
+      {/* ---- Clima (lluvia) ---- */}
+      {nuevaLluvia && (
+        <LluviaDialog
+          titulo="Registrar lluvia"
+          onCerrar={() => setNuevaLluvia(false)}
+          onGuardar={async (f) => { await guardarLluvia(f); setNuevaLluvia(false) }}
+        />
+      )}
+      {editLluvia && (
+        <LluviaDialog
+          titulo="Editar lluvia"
+          inicial={{ fecha: editLluvia.fecha.slice(0, 10), mm: editLluvia.mm != null ? String(editLluvia.mm) : '', nota: editLluvia.nota ?? '' }}
+          onCerrar={() => setEditLluvia(null)}
+          onGuardar={async (f) => { await guardarLluvia(f, editLluvia.id); setEditLluvia(null) }}
+        />
+      )}
+      {detLluvia && (
+        <DetalleLluvia
+          lluvia={detLluvia}
+          puedeEscribir={puedeEscribir}
+          onCerrar={() => setDetLluvia(null)}
+          onEditar={() => { setEditLluvia(detLluvia); setDetLluvia(null) }}
+          onBorrar={() => borrarLluvia(detLluvia.id)}
+        />
+      )}
+
+      {/* ---- Informes tecnicos ---- */}
+      {nuevoInforme && (
+        <InformeDialog
+          titulo="Nueva visita"
+          onCerrar={() => setNuevoInforme(false)}
+          onGuardar={async (f) => { await guardarInforme(f); setNuevoInforme(false) }}
+        />
+      )}
+      {editInforme && (
+        <InformeDialog
+          titulo="Editar visita"
+          inicial={{ fecha: editInforme.fecha.slice(0, 10), tecnico: editInforme.tecnico, notas: editInforme.notas ?? '' }}
+          onCerrar={() => setEditInforme(null)}
+          onGuardar={async (f) => { await guardarInforme(f, editInforme.id); setEditInforme(null) }}
+        />
+      )}
+      {detInforme && (
+        <DetalleInforme
+          informe={detInforme}
+          puedeEscribir={puedeEscribir}
+          onCerrar={() => setDetInforme(null)}
+          onEditar={() => { setEditInforme(detInforme); setDetInforme(null) }}
+          onBorrar={() => borrarInforme(detInforme.id)}
         />
       )}
     </div>
@@ -540,40 +684,116 @@ function ListaAplicaciones({ items, prodPorAplic, info, onAbrir }: {
   )
 }
 
-function ListaLabores({ items, info, onAbrir }: { items: LaborCampo[]; info: Map<string, CategoriaCampo>; onAbrir: (l: LaborCampo) => void }) {
-  if (items.length === 0) return <VacioMsg texto="No hay labores en este año." />
+// Fila de labor en la lista del cronograma de Manejo.
+function FilaLaborLista({ l, info, onAbrir }: { l: LaborCampo; info: Map<string, CategoriaCampo>; onAbrir: (l: LaborCampo) => void }) {
+  const dia = l.fecha.slice(8, 10)
+  const cat = info.get(l.tipo_labor)
+  return (
+    <button
+      onClick={() => onAbrir(l)}
+      className="w-full text-left flex gap-3 items-start bg-white border border-oliva-100 rounded-xl px-3.5 py-3 mb-2 hover:border-oliva-300 transition"
+    >
+      <div className="w-8 text-center shrink-0">
+        <div className="text-xl font-semibold text-oliva-900 leading-none">{dia}</div>
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 mb-1.5">
+          <span className="inline-flex items-center gap-1.5 bg-oliva-50 border border-oliva-100 rounded-full px-2.5 py-1 text-xs font-medium text-oliva-800">
+            <span className="h-2 w-2 rounded-full shrink-0" style={{ background: cat?.color ?? COLOR_FALLBACK }} />
+            {cat?.nombre ?? l.tipo_labor}
+          </span>
+          <BadgeSectores sectores={l.sectores} />
+          {l.estado === 'planificada' && <BadgePlanif />}
+        </div>
+        {l.descripcion && <p className="text-sm text-oliva-700 line-clamp-2">{l.descripcion}</p>}
+      </div>
+      <span className="text-oliva-300 shrink-0">›</span>
+    </button>
+  )
+}
+
+// Fila de lluvia (dia + mm) intercalada en el cronograma de Manejo.
+function FilaLluviaLista({ r, onAbrir }: { r: Lluvia; onAbrir: (r: Lluvia) => void }) {
+  const dia = r.fecha.slice(8, 10)
+  return (
+    <button
+      onClick={() => onAbrir(r)}
+      className="w-full text-left flex gap-3 items-center bg-sky-50/60 border border-sky-100 rounded-xl px-3.5 py-2.5 mb-2 hover:border-sky-300 transition"
+    >
+      <div className="w-8 text-center shrink-0">
+        <div className="text-lg font-semibold text-sky-800 leading-none">{dia}</div>
+      </div>
+      <span className="inline-flex items-center gap-1.5 text-sm font-medium text-sky-800">
+        💧 {r.mm} mm
+      </span>
+      {r.nota && <span className="text-xs text-sky-700/80 truncate">· {r.nota}</span>}
+      <span className="text-sky-300 shrink-0 ml-auto">›</span>
+    </button>
+  )
+}
+
+// Cronograma de Manejo: labores + lluvias intercaladas por fecha, con mm por mes.
+function ListaManejo({ labores, lluvias, info, onAbrirLabor, onAbrirLluvia }: {
+  labores: LaborCampo[]; lluvias: Lluvia[]; info: Map<string, CategoriaCampo>
+  onAbrirLabor: (l: LaborCampo) => void; onAbrirLluvia: (r: Lluvia) => void
+}) {
+  type Item =
+    | { kind: 'labor'; fecha: string; labor: LaborCampo }
+    | { kind: 'lluvia'; fecha: string; lluvia: Lluvia }
+  const items: Item[] = [
+    ...labores.map((l): Item => ({ kind: 'labor', fecha: l.fecha, labor: l })),
+    ...lluvias.map((r): Item => ({ kind: 'lluvia', fecha: r.fecha, lluvia: r })),
+  ].sort((a, b) => a.fecha.localeCompare(b.fecha))
+  if (items.length === 0) return <VacioMsg texto="No hay labores ni lluvias en este año." />
   return (
     <div>
-      {agruparPorMes(items).map(([mes, grupo]) => (
-        <div key={mes}>
-          <div className="text-xs font-medium uppercase tracking-wide text-oliva-400 mt-4 mb-2">{mes}</div>
-          {grupo.map((l) => {
-            const dia = l.fecha.slice(8, 10)
-            const cat = info.get(l.tipo_labor)
-            return (
-              <button
-                key={l.id}
-                onClick={() => onAbrir(l)}
-                className="w-full text-left flex gap-3 items-start bg-white border border-oliva-100 rounded-xl px-3.5 py-3 mb-2 hover:border-oliva-300 transition"
-              >
-                <div className="w-8 text-center shrink-0">
-                  <div className="text-xl font-semibold text-oliva-900 leading-none">{dia}</div>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <span className="inline-flex items-center gap-1.5 bg-oliva-50 border border-oliva-100 rounded-full px-2.5 py-1 text-xs font-medium text-oliva-800">
-                      <span className="h-2 w-2 rounded-full shrink-0" style={{ background: cat?.color ?? COLOR_FALLBACK }} />
-                      {cat?.nombre ?? l.tipo_labor}
-                    </span>
-                    <BadgeSectores sectores={l.sectores} />
-                    {l.estado === 'planificada' && <BadgePlanif />}
-                  </div>
-                  {l.descripcion && <p className="text-sm text-oliva-700 line-clamp-2">{l.descripcion}</p>}
-                </div>
-                <span className="text-oliva-300 shrink-0">›</span>
-              </button>
-            )
-          })}
+      {agruparPorMes(items).map(([mes, grupo]) => {
+        const mmMes = grupo.reduce((s, it) => s + (it.kind === 'lluvia' ? (it.lluvia.mm ?? 0) : 0), 0)
+        return (
+          <div key={mes}>
+            <div className="flex items-center gap-2 mt-4 mb-2">
+              <span className="text-xs font-medium uppercase tracking-wide text-oliva-400">{mes}</span>
+              {mmMes > 0 && <span className="text-[11px] font-medium text-sky-600">💧 {Math.round(mmMes)} mm</span>}
+            </div>
+            {grupo.map((it) => it.kind === 'labor'
+              ? <FilaLaborLista key={`l${it.labor.id}`} l={it.labor} info={info} onAbrir={onAbrirLabor} />
+              : <FilaLluviaLista key={`r${it.lluvia.id}`} r={it.lluvia} onAbrir={onAbrirLluvia} />)}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// Lista de visitas del tecnico, agrupadas por ano (todas, sin filtro de ano).
+function ListaInformes({ items, onAbrir }: { items: InformeTecnico[]; onAbrir: (i: InformeTecnico) => void }) {
+  if (items.length === 0) return <VacioMsg texto="No hay visitas registradas." />
+  const porAnio: [string, InformeTecnico[]][] = []
+  for (const it of items) {
+    const y = it.fecha.slice(0, 4)
+    const ultimo = porAnio[porAnio.length - 1]
+    if (ultimo && ultimo[0] === y) ultimo[1].push(it)
+    else porAnio.push([y, [it]])
+  }
+  return (
+    <div>
+      {porAnio.map(([y, grupo]) => (
+        <div key={y}>
+          <div className="text-xs font-medium uppercase tracking-wide text-oliva-400 mt-4 mb-2">{y}</div>
+          {grupo.map((i) => (
+            <button
+              key={i.id}
+              onClick={() => onAbrir(i)}
+              className="w-full text-left flex gap-3 items-center bg-white border border-oliva-100 rounded-xl px-3.5 py-3 mb-2 hover:border-oliva-300 transition"
+            >
+              <span className="shrink-0 text-base">🧑‍🌾</span>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium text-oliva-900">{fFecha(i.fecha)}</div>
+                <div className="text-xs text-oliva-500">{i.tecnico}{i.notas ? ` · ${i.notas}` : ''}</div>
+              </div>
+              <span className="text-oliva-300 shrink-0">›</span>
+            </button>
+          ))}
         </div>
       ))}
     </div>
@@ -582,7 +802,7 @@ function ListaLabores({ items, info, onAbrir }: { items: LaborCampo[]; info: Map
 
 interface EventoGrilla { id: number; fecha: string; color: string; planif: boolean; onAbrir: () => void }
 
-function GrillaEventos({ anio, eventos }: { anio: string; eventos: EventoGrilla[] }) {
+function GrillaEventos({ anio, eventos, mmPorMes }: { anio: string; eventos: EventoGrilla[]; mmPorMes?: Record<number, number> }) {
   const anioNum = Number(anio) || new Date().getFullYear()
   if (!anio) return <VacioMsg texto="Sin datos." />
   return (
@@ -592,11 +812,12 @@ function GrillaEventos({ anio, eventos }: { anio: string; eventos: EventoGrilla[
           const [y, mm] = e.fecha.slice(0, 10).split('-').map(Number)
           return y === anioNum && mm === m
         })
+        const lluviaMes = mmPorMes?.[m] ?? 0
         return (
           <div key={m} className="rounded-xl border border-oliva-100 bg-white p-2.5 min-h-[76px]">
             <div className="text-xs font-medium text-oliva-500 mb-1.5">{MESES[m - 1]} {String(anioNum).slice(2)}</div>
             <div className="flex flex-wrap gap-1">
-              {delMes.length === 0 && <span className="text-xs text-oliva-300">—</span>}
+              {delMes.length === 0 && lluviaMes === 0 && <span className="text-xs text-oliva-300">—</span>}
               {delMes.map((e) => (
                 <button
                   key={e.id}
@@ -609,6 +830,9 @@ function GrillaEventos({ anio, eventos }: { anio: string; eventos: EventoGrilla[
                 </button>
               ))}
             </div>
+            {lluviaMes > 0 && (
+              <div className="mt-1.5 text-[11px] font-medium text-sky-600">💧 {Math.round(lluviaMes)} mm</div>
+            )}
           </div>
         )
       })}
@@ -1073,5 +1297,133 @@ function FilaCategoria({ c, onColor, onNombre, onToggle, onDel }: {
       <button onClick={onToggle} title={c.activo ? 'Desactivar' : 'Activar'} className="shrink-0 h-8 w-8 rounded-md bg-oliva-50 hover:bg-oliva-100 text-sm">{c.activo ? '👁' : '↻'}</button>
       <button onClick={onDel} title="Eliminar" className="shrink-0 h-8 w-8 rounded-md bg-red-50 hover:bg-red-100 text-red-700 text-sm">🗑</button>
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Dialogs de clima (lluvia) e informes tecnicos
+// ---------------------------------------------------------------------------
+
+function LluviaDialog({ titulo, inicial, onCerrar, onGuardar }: {
+  titulo: string; inicial?: LluviaForm; onCerrar: () => void; onGuardar: (f: LluviaForm) => Promise<void>
+}) {
+  const [form, setForm] = useState<LluviaForm>(() => inicial ?? { fecha: hoyLocalStr(), mm: '', nota: '' })
+  const [guardando, setGuardando] = useState(false)
+  const set = <K extends keyof LluviaForm>(k: K, v: LluviaForm[K]) => setForm((f) => ({ ...f, [k]: v }))
+  async function submit() {
+    if (!form.fecha) { alert('Falta la fecha.'); return }
+    if (nOrNull(form.mm) == null) { alert('Ingresá los milímetros.'); return }
+    setGuardando(true)
+    try { await onGuardar(form) } finally { setGuardando(false) }
+  }
+  return (
+    <Dialog abierto onCerrar={onCerrar} titulo={titulo} ancho="md">
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className={labelCls}>Fecha</label>
+            <input type="date" value={form.fecha} onChange={(e) => set('fecha', e.target.value)} className={inputCls} />
+          </div>
+          <div>
+            <label className={labelCls}>Milímetros</label>
+            <input inputMode="decimal" value={form.mm} onChange={(e) => set('mm', e.target.value)} placeholder="0" className={inputCls} />
+          </div>
+        </div>
+        <div>
+          <label className={labelCls}>Nota (opcional)</label>
+          <input value={form.nota} onChange={(e) => set('nota', e.target.value)} placeholder="granizo, viento, helada…" className={inputCls} />
+        </div>
+        <div className="flex gap-2 pt-1">
+          <button onClick={submit} disabled={guardando} className="flex-1 rounded-lg bg-sky-700 text-white py-2.5 text-sm font-medium hover:bg-sky-800 disabled:opacity-50">
+            {guardando ? 'Guardando…' : 'Guardar'}
+          </button>
+          <button onClick={onCerrar} className="rounded-lg border border-oliva-200 px-4 py-2.5 text-sm text-oliva-700">Cancelar</button>
+        </div>
+      </div>
+    </Dialog>
+  )
+}
+
+function InformeDialog({ titulo, inicial, onCerrar, onGuardar }: {
+  titulo: string; inicial?: InformeForm; onCerrar: () => void; onGuardar: (f: InformeForm) => Promise<void>
+}) {
+  const [form, setForm] = useState<InformeForm>(() => inicial ?? { fecha: hoyLocalStr(), tecnico: TECNICO_DEFAULT, notas: '' })
+  const [guardando, setGuardando] = useState(false)
+  const set = <K extends keyof InformeForm>(k: K, v: InformeForm[K]) => setForm((f) => ({ ...f, [k]: v }))
+  async function submit() {
+    if (!form.fecha) { alert('Falta la fecha.'); return }
+    setGuardando(true)
+    try { await onGuardar(form) } finally { setGuardando(false) }
+  }
+  return (
+    <Dialog abierto onCerrar={onCerrar} titulo={titulo} ancho="md">
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className={labelCls}>Fecha</label>
+            <input type="date" value={form.fecha} onChange={(e) => set('fecha', e.target.value)} className={inputCls} />
+          </div>
+          <div>
+            <label className={labelCls}>Técnico</label>
+            <input value={form.tecnico} onChange={(e) => set('tecnico', e.target.value)} className={inputCls} />
+          </div>
+        </div>
+        <div>
+          <label className={labelCls}>Notas (opcional)</label>
+          <textarea value={form.notas} onChange={(e) => set('notas', e.target.value)} rows={3} placeholder="Observaciones de la visita…" className={inputCls} />
+        </div>
+        <div className="flex gap-2 pt-1">
+          <button onClick={submit} disabled={guardando} className="flex-1 rounded-lg bg-oliva-800 text-oliva-50 py-2.5 text-sm font-medium hover:bg-oliva-900 disabled:opacity-50">
+            {guardando ? 'Guardando…' : 'Guardar'}
+          </button>
+          <button onClick={onCerrar} className="rounded-lg border border-oliva-200 px-4 py-2.5 text-sm text-oliva-700">Cancelar</button>
+        </div>
+      </div>
+    </Dialog>
+  )
+}
+
+function DetalleLluvia({ lluvia, puedeEscribir, onCerrar, onEditar, onBorrar }: {
+  lluvia: Lluvia; puedeEscribir: boolean; onCerrar: () => void; onEditar: () => void; onBorrar: () => void
+}) {
+  return (
+    <Dialog abierto onCerrar={onCerrar} titulo={`Lluvia ${fFecha(lluvia.fecha)}`} ancho="md">
+      <div>
+        <Fila etiqueta="Fecha" valor={fFecha(lluvia.fecha)} />
+        <Fila etiqueta="Milímetros" valor={`${lluvia.mm} mm`} />
+        <Fila etiqueta="Nota" valor={lluvia.nota} />
+        {puedeEscribir && (
+          <div className="flex gap-2 mt-4">
+            <button onClick={onEditar} className="flex-1 rounded-lg bg-oliva-800 text-oliva-50 py-2 text-sm font-medium hover:bg-oliva-900">Editar</button>
+            <button onClick={onBorrar} className="rounded-lg border border-red-200 text-red-600 px-4 py-2 text-sm hover:bg-red-50">Borrar</button>
+          </div>
+        )}
+      </div>
+    </Dialog>
+  )
+}
+
+function DetalleInforme({ informe, puedeEscribir, onCerrar, onEditar, onBorrar }: {
+  informe: InformeTecnico; puedeEscribir: boolean; onCerrar: () => void; onEditar: () => void; onBorrar: () => void
+}) {
+  return (
+    <Dialog abierto onCerrar={onCerrar} titulo={`Visita ${fFecha(informe.fecha)}`} ancho="md">
+      <div>
+        <Fila etiqueta="Fecha" valor={fFecha(informe.fecha)} />
+        <Fila etiqueta="Técnico" valor={informe.tecnico} />
+        {informe.notas && (
+          <div className="mt-3">
+            <div className="text-xs font-medium uppercase tracking-wide text-oliva-400 mb-1">Notas</div>
+            <p className="text-sm text-oliva-700 whitespace-pre-wrap">{informe.notas}</p>
+          </div>
+        )}
+        {puedeEscribir && (
+          <div className="flex gap-2 mt-4">
+            <button onClick={onEditar} className="flex-1 rounded-lg bg-oliva-800 text-oliva-50 py-2 text-sm font-medium hover:bg-oliva-900">Editar</button>
+            <button onClick={onBorrar} className="rounded-lg border border-red-200 text-red-600 px-4 py-2 text-sm hover:bg-red-50">Borrar</button>
+          </div>
+        )}
+      </div>
+    </Dialog>
   )
 }
