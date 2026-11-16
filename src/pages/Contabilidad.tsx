@@ -2698,19 +2698,22 @@ function CargarMovimientosDialog({
   }
 
   return (
-    <Dialog abierto={abierto} onCerrar={onCerrar} titulo={`Cargar movimientos · ${cuenta?.nombre ?? ''}`} ancho="lg">
+    <Dialog abierto={abierto} onCerrar={onCerrar} titulo={`Cargar movimientos · ${cuenta?.nombre ?? ''}`} ancho="lg" cerrarAlClicAfuera={false}>
       <div className="space-y-4">
-        <div className="flex gap-1 rounded-lg bg-oliva-100 p-1 w-fit">
-          {([['excel', '📄 Subir Excel'], ['texto', '📋 Pegar texto']] as const).map(([v, label]) => (
-            <button
-              key={v}
-              type="button"
-              onClick={() => { setModo(v); setPreview(null); setError(null) }}
-              className={`text-xs font-semibold rounded-md px-3 py-1.5 transition ${modo === v ? 'bg-oliva-800 text-oliva-50 shadow-sm' : 'text-oliva-600 hover:bg-oliva-200/70'}`}
-            >
-              {label}
-            </button>
-          ))}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex gap-1 rounded-lg bg-oliva-100 p-1 w-fit">
+            {([['excel', '📄 Subir Excel'], ['texto', '📋 Pegar texto']] as const).map(([v, label]) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => { setModo(v); setPreview(null); setError(null) }}
+                className={`text-xs font-semibold rounded-md px-3 py-1.5 transition ${modo === v ? 'bg-oliva-800 text-oliva-50 shadow-sm' : 'text-oliva-600 hover:bg-oliva-200/70'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <span className="text-[10px] text-oliva-400">cargador v7</span>
         </div>
 
         {modo === 'excel' ? (

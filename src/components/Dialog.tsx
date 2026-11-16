@@ -13,9 +13,16 @@ interface Props {
    * punto sin perder de vista lo que se estaba completando.
    */
   scrollKey?: string
+  /**
+   * Si es false, el dialog NO se cierra al hacer clic en el fondo (solo con la x
+   * o Escape). Util para dialogs con inputs de archivo: el selector nativo, al
+   * cerrarse, puede disparar un click sobre el overlay y cerrar el dialog por
+   * sorpresa.
+   */
+  cerrarAlClicAfuera?: boolean
 }
 
-export function Dialog({ abierto, onCerrar, titulo, children, ancho = 'md', scrollKey }: Props) {
+export function Dialog({ abierto, onCerrar, titulo, children, ancho = 'md', scrollKey, cerrarAlClicAfuera = true }: Props) {
   const scrollRef = useRef<HTMLDivElement | null>(null)
   // Solo cerramos por "clic afuera" si el gesto EMPEZO y TERMINO sobre el fondo.
   // Sin esto, interacciones internas (p.ej. el selector de archivos nativo, que al
@@ -72,7 +79,7 @@ export function Dialog({ abierto, onCerrar, titulo, children, ancho = 'md', scro
     <div
       className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4"
       onMouseDown={(e) => { mouseDownEnFondo.current = e.target === e.currentTarget }}
-      onClick={(e) => { if (e.target === e.currentTarget && mouseDownEnFondo.current) onCerrar() }}
+      onClick={(e) => { if (cerrarAlClicAfuera && e.target === e.currentTarget && mouseDownEnFondo.current) onCerrar() }}
     >
       <div
         ref={scrollRef}
