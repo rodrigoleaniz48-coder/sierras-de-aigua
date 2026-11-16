@@ -24,7 +24,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(data.session ?? null)
     })
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
-      setSession(s ?? null)
+      // Supabase reemite la sesion cuando la pestana recupera el foco (por ej.
+      // al cerrarse un selector de archivos nativo). Si en cada reemision
+      // cambiamos el estado, se re-dispara la carga de perfil y ProtectedRoute
+      // desmonta y remonta toda la pantalla, cerrando cualquier dialog abierto.
+      // Por eso solo actualizamos cuando cambia de verdad la identidad o el token.
+      setSession((prev) =>
+        prev?.user?.id === s?.user?.id && prev?.access_token === s?.access_token
+          ? prev
+          : (s ?? null),
+      )
     })
     return () => sub.subscription.unsubscribe()
   }, [])
@@ -35,16 +44,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setCargando(false)
       return
     }
-    setCargando(true)
+    // No ponemos cargando=true aca: "cargando" arranca en true, asi que la carga
+    // inicial igual muestra "Cargando…". Un refresco de sesion posterior (mismo
+    // usuario, token nuevo) actualiza el perfil en segundo plano sin desmontar la
+    // UI, para no cerrar dialogos ni perder trabajo en curso.
+    let cancelado = false
     supabase
       .from('perfiles')
       .select('id,nombre,rol,activo,puede_modificar_stock,puede_trasladar_stock,ve_todo_crm,ve_todos_gastos,cuenta_default_id')
       .eq('id', session.user.id)
       .single()
       .then(({ data }) => {
+        if (cancelado) return
         setPerfil((data as Perfil) ?? null)
         setCargando(false)
       })
+    return () => { cancelado = true }
   }, [session])
 
   const signIn: AuthState['signIn'] = async (email, password) => {

@@ -2635,17 +2635,6 @@ function Kpi({ titulo, valor, tono }: { titulo: string; valor: string; tono?: 'a
 // ============================================================
 // Carga de movimientos (parseo BROU)
 // ============================================================
-// Diagnostico temporal: registra en localStorage que pasa al cargar el Excel,
-// para ver por que se cierra el dialog en algunos equipos. Persiste al cierre.
-function diagCarga(msg: string) {
-  try {
-    const arr: string[] = JSON.parse(localStorage.getItem('diagCarga') || '[]')
-    const t = new Date()
-    arr.push(`${String(t.getMinutes()).padStart(2, '0')}:${String(t.getSeconds()).padStart(2, '0')}.${String(t.getMilliseconds()).padStart(3, '0')} ${msg}`)
-    localStorage.setItem('diagCarga', JSON.stringify(arr.slice(-60)))
-  } catch { /* nada */ }
-}
-
 function CargarMovimientosDialog({
   abierto, cuenta, onCerrar, onOk,
 }: {
@@ -2661,39 +2650,10 @@ function CargarMovimientosDialog({
   const [analizando, setAnalizando] = useState(false)
   const [archivoNombre, setArchivoNombre] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [diagLog, setDiagLog] = useState<string[]>([])
 
   useEffect(() => {
     if (!abierto) { setModo('excel'); setTexto(''); setPreview(null); setError(null); setArchivoNombre(null) }
   }, [abierto])
-
-  // Instrumentacion temporal: al abrir, mostramos el log de la corrida anterior
-  // y registramos eventos que podrian cerrar el dialog (teclas, foco, desmontaje).
-  useEffect(() => {
-    if (!abierto) return
-    try { setDiagLog(JSON.parse(localStorage.getItem('diagCarga') || '[]')) } catch { /* nada */ }
-    diagCarga('=== dialog ABIERTO ===')
-    const onKey = (e: KeyboardEvent) => diagCarga(`keydown: "${e.key}"`)
-    const onVis = () => diagCarga(`visibilitychange: ${document.visibilityState}`)
-    const onBlur = () => diagCarga('window BLUR (se abrio el selector?)')
-    const onFocus = () => diagCarga('window FOCUS (se cerro el selector?)')
-    window.addEventListener('keydown', onKey, true)
-    document.addEventListener('visibilitychange', onVis)
-    window.addEventListener('blur', onBlur)
-    window.addEventListener('focus', onFocus)
-    return () => {
-      diagCarga('=== dialog DESMONTADO (cerrado) ===')
-      window.removeEventListener('keydown', onKey, true)
-      document.removeEventListener('visibilitychange', onVis)
-      window.removeEventListener('blur', onBlur)
-      window.removeEventListener('focus', onFocus)
-    }
-  }, [abierto])
-
-  function cerrarConLog() {
-    diagCarga('onCerrar() invocado (Escape / x / boton)')
-    onCerrar()
-  }
 
   function analizar() {
     setPreview(parsearExtractoBROU(texto))
@@ -2702,15 +2662,11 @@ function CargarMovimientosDialog({
 
   async function analizarArchivo(file: File) {
     setAnalizando(true); setError(null); setPreview(null); setArchivoNombre(file.name)
-    diagCarga('analizarArchivo: inicio')
     try {
       const buf = await file.arrayBuffer()
-      diagCarga(`analizarArchivo: leido ${(buf.byteLength / 1024).toFixed(0)} KB, parseando…`)
       const res = await parsearExcelBanco(buf)
-      diagCarga(`analizarArchivo: OK, ${res.movimientos.length} movimientos`)
       setPreview(res)
     } catch (e) {
-      diagCarga(`analizarArchivo: ERROR ${e instanceof Error ? e.message : String(e)}`)
       setError(`No se pudo leer el archivo: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setAnalizando(false)
@@ -2742,7 +2698,7 @@ function CargarMovimientosDialog({
   }
 
   return (
-    <Dialog abierto={abierto} onCerrar={cerrarConLog} titulo={`Cargar movimientos · ${cuenta?.nombre ?? ''}`} ancho="lg" cerrarAlClicAfuera={false}>
+    <Dialog abierto={abierto} onCerrar={onCerrar} titulo={`Cargar movimientos · ${cuenta?.nombre ?? ''}`} ancho="lg" cerrarAlClicAfuera={false}>
       <div className="space-y-4">
         <div className="flex items-center justify-between gap-2">
           <div className="flex gap-1 rounded-lg bg-oliva-100 p-1 w-fit">
@@ -2757,24 +2713,8 @@ function CargarMovimientosDialog({
               </button>
             ))}
           </div>
-          <span className="text-[10px] text-oliva-400">cargador v8</span>
+          <span className="text-[10px] text-oliva-400">cargador v9</span>
         </div>
-
-        {diagLog.length > 0 && (
-          <div className="rounded-lg border border-amber-300 bg-amber-50 p-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-semibold text-amber-800">Diagnóstico del intento anterior</span>
-              <button
-                type="button"
-                className="text-[11px] text-amber-700 underline"
-                onClick={() => { try { localStorage.removeItem('diagCarga') } catch { /* nada */ } setDiagLog([]) }}
-              >
-                limpiar
-              </button>
-            </div>
-            <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap text-[10px] leading-tight text-amber-900">{diagLog.join('\n')}</pre>
-          </div>
-        )}
 
         {modo === 'excel' ? (
           <div className="space-y-2">
@@ -2790,7 +2730,7 @@ function CargarMovimientosDialog({
               <input
                 type="file"
                 disabled={analizando}
-                onChange={(e) => { const f = e.target.files?.[0]; diagCarga(`input onChange: ${f ? `"${f.name}" (${(f.size / 1024).toFixed(0)} KB)` : 'sin archivo'}`); if (f) analizarArchivo(f); e.target.value = '' }}
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) analizarArchivo(f); e.target.value = '' }}
                 className="block w-full max-w-xs text-xs text-oliva-700 cursor-pointer file:mr-3 file:cursor-pointer file:rounded-md file:border-0 file:bg-oliva-800 file:px-3 file:py-1.5 file:font-semibold file:text-oliva-50"
               />
               <span className="text-[11px] text-oliva-500">{analizando ? 'Analizando…' : 'Archivos .xlsx o .xls del homebanking'}</span>
