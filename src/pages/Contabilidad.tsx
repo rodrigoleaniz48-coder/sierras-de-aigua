@@ -1380,6 +1380,10 @@ function Conciliacion() {
                         <span className="text-oliva-800">✅ Cobro a cuenta: {pg.cliente_id ? (clientePorId.get(pg.cliente_id)?.nombre ?? '') : ''}</span>
                       ) : nVarios > 0 ? (
                         <span className="text-oliva-800">✅ {nVarios} registros · {money(montoVarios)}</span>
+                      ) : conciliado ? (
+                        // El registro vinculado quedo fuera de la ventana cargada (p.ej. una
+                        // venta/ingreso/pago de otro mes). Esta conciliado igual: lo mostramos.
+                        <span className="text-oliva-800">✅ Conciliado{m.conciliado_venta_id ? ` · venta #${m.conciliado_venta_id}` : m.conciliado_pago_id ? ' · cobro a cuenta' : m.conciliado_ingreso_id ? ' · ingreso' : m.conciliado_gasto_id ? ' · gasto' : ''}</span>
                       ) : (
                         <span className="text-red-700">🔴 sin conciliar</span>
                       )}
@@ -2700,20 +2704,17 @@ function CargarMovimientosDialog({
   return (
     <Dialog abierto={abierto} onCerrar={onCerrar} titulo={`Cargar movimientos · ${cuenta?.nombre ?? ''}`} ancho="lg" cerrarAlClicAfuera={false}>
       <div className="space-y-4">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex gap-1 rounded-lg bg-oliva-100 p-1 w-fit">
-            {([['excel', '📄 Subir Excel'], ['texto', '📋 Pegar texto']] as const).map(([v, label]) => (
-              <button
-                key={v}
-                type="button"
-                onClick={() => { setModo(v); setPreview(null); setError(null) }}
-                className={`text-xs font-semibold rounded-md px-3 py-1.5 transition ${modo === v ? 'bg-oliva-800 text-oliva-50 shadow-sm' : 'text-oliva-600 hover:bg-oliva-200/70'}`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <span className="text-[10px] text-oliva-400">cargador v9</span>
+        <div className="flex gap-1 rounded-lg bg-oliva-100 p-1 w-fit">
+          {([['excel', '📄 Subir Excel'], ['texto', '📋 Pegar texto']] as const).map(([v, label]) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => { setModo(v); setPreview(null); setError(null) }}
+              className={`text-xs font-semibold rounded-md px-3 py-1.5 transition ${modo === v ? 'bg-oliva-800 text-oliva-50 shadow-sm' : 'text-oliva-600 hover:bg-oliva-200/70'}`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
 
         {modo === 'excel' ? (
