@@ -1161,19 +1161,29 @@ async function guardar(e: React.FormEvent) {
 
     let ventaId: number
     if (ventaAEditar) {
-      // Edición: revertir SOLO los movs_stock de tipo 'venta' (no devoluciones previas), borrar items viejos, actualizar cabecera
+      // Edición: devolver al stock el NETO realmente descontado por esta venta hasta
+      // ahora (suma de TODOS sus movimientos: ventas menos devoluciones previas),
+      // agrupado por stock. Antes se revertian solo las filas 'venta', incluidas las
+      // ya revertidas en ediciones anteriores, por lo que cada re-edicion inflaba el
+      // stock (bug de doble reversion: una venta editada 2+ veces devolvia de mas).
       const { data: { user } } = await supabase.auth.getUser()
       const { data: movsPrev } = await supabase.from('movimientos_stock')
-        .select('*')
+        .select('stock_id, unidades')
         .eq('venta_id', ventaAEditar.id)
-        .eq('tipo', 'venta')
+        .in('tipo', ['venta', 'devolucion'])
+      const netoPorStock = new Map<number, number>()
       for (const m of (movsPrev ?? [])) {
-        const { data: s } = await supabase.from('stock').select('unidades').eq('id', m.stock_id).maybeSingle()
+        if (m.stock_id == null) continue
+        netoPorStock.set(m.stock_id, (netoPorStock.get(m.stock_id) ?? 0) + Number(m.unidades))
+      }
+      for (const [stockId, neto] of netoPorStock) {
+        if (neto === 0) continue // ya esta todo revertido para este stock
+        const { data: s } = await supabase.from('stock').select('unidades').eq('id', stockId).maybeSingle()
         if (!s) continue
-        // m.unidades es negativa (fue venta) → restar un negativo = sumar de vuelta al stock
-        await supabase.from('stock').update({ unidades: Number(s.unidades) - Number(m.unidades), actualizado_en: new Date().toISOString() }).eq('id', m.stock_id)
+        // neto es negativo (lo que quedo descontado) → restarlo = devolverlo al stock
+        await supabase.from('stock').update({ unidades: Number(s.unidades) - neto, actualizado_en: new Date().toISOString() }).eq('id', stockId)
         await supabase.from('movimientos_stock').insert({
-          stock_id: m.stock_id, tipo: 'devolucion', unidades: -Number(m.unidades),
+          stock_id: stockId, tipo: 'devolucion', unidades: -neto,
           venta_id: ventaAEditar.id, usuario_id: user?.id ?? null,
           nota: `Reversion por edicion de venta #${ventaAEditar.id}`,
         })
