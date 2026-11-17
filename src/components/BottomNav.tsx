@@ -17,12 +17,12 @@ const IconClientes = <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
 // Bolsa de compras: universal para "ventas". Sustituye el icono anterior que
 // parecia un tacho de basura (por las lineas horizontales tipo tapa).
 const IconVentasBig = <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M5 8h14l-1.2 12.2a2 2 0 0 1-2 1.8H8.2a2 2 0 0 1-2-1.8L5 8z" /><path d="M9 8V6a3 3 0 0 1 6 0v2" /></svg>
-const IconTareas = <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>
+const IconFinanzas = <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 20V10M12 20V4M20 20v-6" /></svg>
 const IconStock = <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
 const IconMas = <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><circle cx="5" cy="12" r="1.4" /><circle cx="12" cy="12" r="1.4" /><circle cx="19" cy="12" r="1.4" /></svg>
 
 // Layout objetivo (6 columnas):
-//   [Inicio] [Clientes] [ VENTAS - grande, elevada ] [Tareas] [Stock] [Más]
+//   [Inicio] [Clientes] [ VENTAS - grande, elevada ] [Finanzas] [Stock] [Más]
 // Ventas es el CTA principal: circulo elevado sobre la barra, mas grande y coloreado.
 export function BottomNav({ onAbrirMas }: { onAbrirMas: () => void }) {
   const { perfil } = useAuth()
@@ -33,7 +33,7 @@ export function BottomNav({ onAbrirMas }: { onAbrirMas: () => void }) {
     { to: '/',         label: 'Inicio',   icon: IconHome,     roles: ['admin', 'ventas', 'marketing'] },
     { to: '/clientes', label: 'Clientes', icon: IconClientes, roles: ['admin', 'ventas', 'marketing'] },
     // slot 3: Ventas elevada (se renderea aparte)
-    { to: '/tareas',   label: 'Tareas',   icon: IconTareas,   roles: ['admin', 'ventas', 'marketing', 'campo'] },
+    { to: '/finanzas', label: 'Finanzas', icon: IconFinanzas, roles: ['admin', 'ventas', 'marketing'] },
     { to: '/stock',    label: 'Stock',    icon: IconStock,    roles: ['admin', 'ventas', 'marketing'] },
     { label: 'Más',    icon: IconMas,     roles: ['admin', 'ventas', 'marketing', 'campo'], onClick: onAbrirMas },
   ]
@@ -66,7 +66,7 @@ export function BottomNav({ onAbrirMas }: { onAbrirMas: () => void }) {
         {slots.map((t, i) => {
           if (!t) {
             // Slot reservado para el boton elevado de Ventas: ocupa su propia columna
-            // (asi no se pisa con Tareas) y muestra el CTA circular sobresaliendo hacia arriba.
+            // (asi no se pisa con los tabs vecinos) y muestra el CTA circular sobresaliendo hacia arriba.
             return (
               <div key={`slot-${i}`} className="relative min-h-[56px]">
                 <NavLink to="/ventas" className="absolute inset-x-0 -top-6 flex flex-col items-center">
