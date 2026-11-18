@@ -29,7 +29,7 @@ export function AlertasStockBajo() {
   useEffect(() => {
     Promise.all([
       supabase.from('presentaciones').select('id,producto_id,nombre,activo,es_pack,stock_minimo').eq('activo', true),
-      supabase.from('productos').select('id,nombre,categoria'),
+      supabase.from('productos').select('id,nombre,categoria').eq('activo', true),
       supabase.from('stock').select('presentacion_id,unidades,ubicacion_id'),
       supabase.from('ubicaciones').select('id,nombre').eq('activo', true),
     ]).then(([p, pr, s, u]) => {
