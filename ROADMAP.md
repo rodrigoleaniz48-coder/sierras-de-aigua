@@ -73,6 +73,8 @@ Módulo con 4 sub-vistas (pestañas scrolleables): Aplicaciones, Manejo de culti
 - [ ] **Jornales**: pendiente. La idea (a definir en conversación aparte) es un resumen mensual por operario derivado de las labores/aplicaciones (que ya guardan jornales/horas), sin depender del módulo Tareas. Tareas hoy no se aprovecha bien.
 - [ ] Clima 2023 no quedó cargado (el Excel solo lo tiene en detalle diario, sin agregado); 2018–2022 sin desglose. Se puede cargar a mano.
 - [ ] Granizo/viento/heladas: por ahora se anotan como nota de la lluvia; evaluar si merecen su propio registro.
+- [ ] **Cosecha ↔ Stock**: vincular el pasaje a tanque con el granel de Stock (hoy están separados). Que la cosecha alimente el stock por tanque y poder ver/gestionar lo disponible en tanques de años anteriores (mezclar, retirar). Falta definir cómo se conectan los dos módulos.
+- [ ] **Costo de cosecha desde los datos**: a futuro, deducir el costo de cosecha (más allá del destajo por kg: comida, traslados, etc.) a partir de lo que ya se carga en la app. Es complejo; queda para definir.
 
 ---
 
