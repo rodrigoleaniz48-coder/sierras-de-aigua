@@ -145,15 +145,24 @@ export interface CosechaProceso {
   id: number
   fecha: string
   anio: number
-  variedad: string
+  variedad: string         // legado: el detalle por variedad vive en cosecha_proceso_variedades
   kg_balanza: number | null
   kg_procesado: number | null
-  kg_aceite: number | null
-  litros: number | null
+  kg_aceite: number | null // legado
+  litros: number | null    // legado
   destino: string | null
   notas: string | null
   creado_por: string | null
   creado_en: string
+}
+
+// Lineas de un pasaje a tanque: permite que un tanque reciba mezcla de variedades.
+export interface CosechaProcesoVariedad {
+  id: number
+  proceso_id: number
+  variedad: string
+  litros: number | null
+  kg_aceite: number | null
 }
 
 export interface CosechaResumen {

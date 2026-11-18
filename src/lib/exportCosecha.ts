@@ -6,7 +6,7 @@
 // ExcelJS se importa dinamico para no engordar el chunk de Campo: solo se baja
 // cuando el usuario toca "Descargar".
 // ---------------------------------------------------------------------------
-import type { CosechaCarga, CosechaCargaOperario, CosechaOperario, CosechaProceso } from './types'
+import type { CosechaCarga, CosechaCargaOperario, CosechaOperario, CosechaProceso, CosechaProcesoVariedad } from './types'
 
 const VERDE = 'FF2F3D2A'        // titulo de seccion (texto blanco)
 const VERDE_MED = 'FF5A6E4A'    // encabezado de tabla (texto blanco)
@@ -17,8 +17,8 @@ const FMT_KG = '#,##0'
 const FMT_PCT = '0.0"%"'
 const FMT_PRECIO = '#,##0.00'
 
-function aceiteKgDe(p: CosechaProceso): number {
-  return p.kg_aceite ?? (p.litros != null ? p.litros * KG_POR_LITRO : 0)
+function aceiteKgDeLinea(v: CosechaProcesoVariedad): number {
+  return v.kg_aceite ?? (v.litros != null ? v.litros * KG_POR_LITRO : 0)
 }
 
 type WS = import('exceljs').Worksheet
@@ -69,6 +69,7 @@ export interface AnioExport {
   opsPorCarga: Map<number, CosechaCargaOperario[]>
   operarios: CosechaOperario[]
   procesos: CosechaProceso[]
+  procVarsPorProceso: Map<number, CosechaProcesoVariedad[]>
   liquidacion: { nombre: string; bruto: number; descuento: number; pagable: number }[]
   precioKg: number | null
   totKgCosecha: number
@@ -227,9 +228,11 @@ export async function descargarCosechaAnio(d: AnioExport) {
   tituloSeccion(pt, `Pasajes a tanque ${d.anio}`, 5)
   encabezado(pt, ['Fecha', 'Variedad', 'Litros', 'Kg aceite', 'Tanque'])
   for (const p of d.procesos) {
-    const fila = pt.addRow([p.fecha.slice(0, 10), p.variedad, p.litros ?? null, aceiteKgDe(p) || null, p.destino ?? ''])
-    fila.getCell(3).numFmt = FMT_KG; fila.getCell(4).numFmt = FMT_KG
-    fila.getCell(3).alignment = { horizontal: 'right' }; fila.getCell(4).alignment = { horizontal: 'right' }
+    for (const v of d.procVarsPorProceso.get(p.id) ?? []) {
+      const fila = pt.addRow([p.fecha.slice(0, 10), v.variedad, v.litros ?? null, aceiteKgDeLinea(v) || null, p.destino ?? ''])
+      fila.getCell(3).numFmt = FMT_KG; fila.getCell(4).numFmt = FMT_KG
+      fila.getCell(3).alignment = { horizontal: 'right' }; fila.getCell(4).alignment = { horizontal: 'right' }
+    }
   }
   if (d.procesos.length === 0) {
     const nota = pt.addRow(['Sin pasajes a tanque cargados para este ano.'])

@@ -755,3 +755,16 @@ create table if not exists public.informes_tecnicos (
 );
 create index if not exists idx_informes_fecha on public.informes_tecnicos(fecha);
 -- RLS: lectura autenticado, escritura admin+campo (ver migracion_campo_clima.sql).
+
+-- Lineas de un pasaje a tanque: un tanque puede recibir mezcla de variedades.
+-- Ver migracion_cosecha_proceso_variedades.sql. cosecha_proceso queda como
+-- cabecera (fecha, tanque, notas); variedad/litros/kg_aceite alli son legado.
+create table if not exists public.cosecha_proceso_variedades (
+  id bigserial primary key,
+  proceso_id bigint not null references public.cosecha_proceso(id) on delete cascade,
+  variedad text not null,
+  litros numeric(12,2),
+  kg_aceite numeric(12,2)
+);
+create index if not exists idx_cos_procvar_proceso on public.cosecha_proceso_variedades(proceso_id);
+-- RLS: lectura autenticado, escritura admin+campo (ver migracion_cosecha_proceso_variedades.sql).

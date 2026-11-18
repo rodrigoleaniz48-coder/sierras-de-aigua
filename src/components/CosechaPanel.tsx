@@ -4,7 +4,7 @@ import { Dialog } from './Dialog'
 import { fFecha } from '../lib/format'
 import { guardarFlag, leerFlag, guardarObj, leerObj, borrarKey } from '../lib/persistencia'
 import type {
-  CosechaOperario, CosechaTarifa, CosechaCarga, CosechaCargaOperario, CosechaProceso, CosechaResumen, CosechaSectorResumen,
+  CosechaOperario, CosechaTarifa, CosechaCarga, CosechaCargaOperario, CosechaProceso, CosechaProcesoVariedad, CosechaResumen, CosechaSectorResumen,
 } from '../lib/types'
 
 // ---------------------------------------------------------------------------
@@ -43,9 +43,9 @@ const fmt$ = (v: number) => new Intl.NumberFormat('es-UY', { maximumFractionDigi
 const fmtPrecio = (v: number) => new Intl.NumberFormat('es-UY', { maximumFractionDigits: 2 }).format(v) // precio/kg con decimales
 const KG_POR_LITRO = 0.918 // 1 L de aceite = 918 gr (factor del cuaderno)
 
-// Kg de aceite de un pasaje: el valor cargado, o estimado desde los litros.
-function aceiteKgDe(p: CosechaProceso): number {
-  return p.kg_aceite ?? (p.litros != null ? p.litros * KG_POR_LITRO : 0)
+// Kg de aceite de una linea de pasaje: el valor cargado, o estimado desde los litros.
+function aceiteKgDeLinea(v: CosechaProcesoVariedad): number {
+  return v.kg_aceite ?? (v.litros != null ? v.litros * KG_POR_LITRO : 0)
 }
 
 // ---------------------------------------------------------------------------
@@ -61,13 +61,12 @@ interface CargaForm {
   notas: string
   lineas: CargaLineaForm[]
 }
+interface ProcesoLineaForm { variedad: string; litros: string; kg_aceite: string }
 interface ProcesoForm {
   fecha: string
-  variedad: string
-  kg_aceite: string
-  litros: string
   destino: string // tanque de destino
   notas: string
+  lineas: ProcesoLineaForm[] // un tanque puede recibir mezcla de variedades
 }
 
 function hoyLocalStr(): string {
@@ -78,7 +77,7 @@ function cargaVacia(): CargaForm {
   return { fecha: hoyLocalStr(), sector: '', variedad: VARIEDADES[0], kg_balanza: '', kg_hojas: '', notas: '', lineas: [{ operario_id: '', kg: '' }] }
 }
 function procesoVacio(): ProcesoForm {
-  return { fecha: hoyLocalStr(), variedad: VARIEDADES[0], kg_aceite: '', litros: '', destino: '', notas: '' }
+  return { fecha: hoyLocalStr(), destino: '', notas: '', lineas: [{ variedad: VARIEDADES[0], litros: '', kg_aceite: '' }] }
 }
 function cargaAForm(c: CosechaCarga, ops: CosechaCargaOperario[]): CargaForm {
   return {
@@ -93,14 +92,14 @@ function cargaAForm(c: CosechaCarga, ops: CosechaCargaOperario[]): CargaForm {
       : [{ operario_id: '', kg: '' }],
   }
 }
-function procesoAForm(p: CosechaProceso): ProcesoForm {
+function procesoAForm(p: CosechaProceso, lineas: CosechaProcesoVariedad[]): ProcesoForm {
   return {
     fecha: p.fecha.slice(0, 10),
-    variedad: p.variedad,
-    kg_aceite: p.kg_aceite != null ? String(p.kg_aceite) : '',
-    litros: p.litros != null ? String(p.litros) : '',
     destino: p.destino ?? '',
     notas: p.notas ?? '',
+    lineas: lineas.length
+      ? lineas.map((v) => ({ variedad: v.variedad, litros: v.litros != null ? String(v.litros) : '', kg_aceite: v.kg_aceite != null ? String(v.kg_aceite) : '' }))
+      : [{ variedad: VARIEDADES[0], litros: '', kg_aceite: '' }],
   }
 }
 
@@ -146,6 +145,7 @@ export function CosechaPanel({ puedeEscribir }: { puedeEscribir: boolean }) {
   const [cargas, setCargas] = useState<CosechaCarga[]>([])
   const [cargaOps, setCargaOps] = useState<CosechaCargaOperario[]>([])
   const [procesos, setProcesos] = useState<CosechaProceso[]>([])
+  const [procVars, setProcVars] = useState<CosechaProcesoVariedad[]>([])
   const [operarios, setOperarios] = useState<CosechaOperario[]>([])
   const [tarifas, setTarifas] = useState<CosechaTarifa[]>([])
   const [resumen, setResumen] = useState<CosechaResumen[]>([])
@@ -168,10 +168,11 @@ export function CosechaPanel({ puedeEscribir }: { puedeEscribir: boolean }) {
 
   async function cargar() {
     setCargando(true)
-    const [c, co, p, o, t, r, sr] = await Promise.all([
+    const [c, co, p, pv, o, t, r, sr] = await Promise.all([
       supabase.from('cosecha_cargas').select('*').eq('anio', anioNum).order('fecha', { ascending: true }),
       supabase.from('cosecha_carga_operarios').select('*'),
       supabase.from('cosecha_proceso').select('*').eq('anio', anioNum).order('fecha', { ascending: true }),
+      supabase.from('cosecha_proceso_variedades').select('*'),
       supabase.from('cosecha_operarios').select('*').order('orden'),
       supabase.from('cosecha_tarifas').select('*'),
       supabase.from('cosecha_resumen').select('*'),
@@ -180,6 +181,7 @@ export function CosechaPanel({ puedeEscribir }: { puedeEscribir: boolean }) {
     setCargas((c.data as CosechaCarga[]) ?? [])
     setCargaOps((co.data as CosechaCargaOperario[]) ?? [])
     setProcesos((p.data as CosechaProceso[]) ?? [])
+    setProcVars((pv.data as CosechaProcesoVariedad[]) ?? [])
     setOperarios((o.data as CosechaOperario[]) ?? [])
     setTarifas((t.data as CosechaTarifa[]) ?? [])
     setResumen((r.data as CosechaResumen[]) ?? [])
@@ -223,6 +225,15 @@ export function CosechaPanel({ puedeEscribir }: { puedeEscribir: boolean }) {
     return m
   }, [cargaOps])
 
+  const procVarsPorProceso = useMemo(() => {
+    const m = new Map<number, CosechaProcesoVariedad[]>()
+    for (const v of procVars) {
+      const arr = m.get(v.proceso_id) ?? []
+      arr.push(v); m.set(v.proceso_id, arr)
+    }
+    return m
+  }, [procVars])
+
   const liquidacion = useMemo(
     () => liquidar(cargas, opsPorCarga, nombreOp, tolPct),
     [cargas, opsPorCarga, nombreOp, tolPct],
@@ -240,26 +251,32 @@ export function CosechaPanel({ puedeEscribir }: { puedeEscribir: boolean }) {
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0], 'es', { numeric: true }))
   }, [cargas])
 
-  // Rendimiento = aceite que salio (pasajes a tanque) / kg que entraron (cargas), por variedad.
+  // Lineas de pasaje del ano (las de los pasajes que se muestran).
+  const lineasAnio = useMemo(
+    () => procesos.flatMap((p) => procVarsPorProceso.get(p.id) ?? []),
+    [procesos, procVarsPorProceso],
+  )
+
+  // Rendimiento = aceite que salio (lineas de pasaje) / kg que entraron (cargas), por variedad.
   const rendPorVariedad = useMemo(() => {
     const kgIn = new Map<string, number>()
     for (const c of cargas) kgIn.set(c.variedad, (kgIn.get(c.variedad) ?? 0) + (c.kg_balanza || 0))
     const litrosM = new Map<string, number>()
     const aceiteM = new Map<string, number>()
-    for (const p of procesos) {
-      litrosM.set(p.variedad, (litrosM.get(p.variedad) ?? 0) + (p.litros || 0))
-      aceiteM.set(p.variedad, (aceiteM.get(p.variedad) ?? 0) + aceiteKgDe(p))
+    for (const v of lineasAnio) {
+      litrosM.set(v.variedad, (litrosM.get(v.variedad) ?? 0) + (v.litros || 0))
+      aceiteM.set(v.variedad, (aceiteM.get(v.variedad) ?? 0) + aceiteKgDeLinea(v))
     }
     const vars = new Set<string>([...kgIn.keys(), ...aceiteM.keys()])
     return [...vars].map((v) => {
       const kg = kgIn.get(v) ?? 0, litros = litrosM.get(v) ?? 0, aceite = aceiteM.get(v) ?? 0
       return { variedad: v, kg, litros, aceite, rend: kg > 0 ? (aceite / kg) * 100 : 0 }
     }).sort((a, b) => b.kg - a.kg)
-  }, [cargas, procesos])
+  }, [cargas, lineasAnio])
 
   const totKgCosecha = useMemo(() => cargas.reduce((s, c) => s + (c.kg_balanza || 0), 0), [cargas])
-  const totLitros = useMemo(() => procesos.reduce((s, p) => s + (p.litros || 0), 0), [procesos])
-  const totAceite = useMemo(() => procesos.reduce((s, p) => s + aceiteKgDe(p), 0), [procesos])
+  const totLitros = useMemo(() => lineasAnio.reduce((s, v) => s + (v.litros || 0), 0), [lineasAnio])
+  const totAceite = useMemo(() => lineasAnio.reduce((s, v) => s + aceiteKgDeLinea(v), 0), [lineasAnio])
   const rendTotal = totKgCosecha > 0 ? (totAceite / totKgCosecha) * 100 : 0
   const totPagable = useMemo(() => liquidacion.reduce((s, f) => s + f.pagable, 0), [liquidacion])
 
@@ -330,14 +347,23 @@ export function CosechaPanel({ puedeEscribir }: { puedeEscribir: boolean }) {
     const row = {
       fecha: form.fecha,
       anio: Number(form.fecha.slice(0, 4)),
-      variedad: form.variedad,
-      kg_aceite: nOrNull(form.kg_aceite),
-      litros: nOrNull(form.litros),
       destino: form.destino.trim() || null,
       notas: form.notas.trim() || null,
     }
-    if (id) await supabase.from('cosecha_proceso').update(row).eq('id', id)
-    else await supabase.from('cosecha_proceso').insert(row)
+    let procId = id
+    if (id) {
+      await supabase.from('cosecha_proceso').update(row).eq('id', id)
+      await supabase.from('cosecha_proceso_variedades').delete().eq('proceso_id', id)
+    } else {
+      const { data } = await supabase.from('cosecha_proceso').insert(row).select('id').single()
+      procId = (data as { id: number } | null)?.id
+    }
+    if (procId) {
+      const lineas = form.lineas
+        .filter((l) => l.variedad && (nOrNull(l.litros) != null || nOrNull(l.kg_aceite) != null))
+        .map((l) => ({ proceso_id: procId!, variedad: l.variedad, litros: nOrNull(l.litros), kg_aceite: nOrNull(l.kg_aceite) }))
+      if (lineas.length) await supabase.from('cosecha_proceso_variedades').insert(lineas)
+    }
     await cargar()
   }
 
@@ -361,7 +387,7 @@ export function CosechaPanel({ puedeEscribir }: { puedeEscribir: boolean }) {
       const { descargarCosechaAnio } = await import('../lib/exportCosecha')
       const resumenAnio = historial.find((h) => h.anio === anioNum) ?? null
       await descargarCosechaAnio({
-        anio: anioNum, cargas, opsPorCarga, operarios, procesos, liquidacion,
+        anio: anioNum, cargas, opsPorCarga, operarios, procesos, procVarsPorProceso, liquidacion,
         precioKg, totKgCosecha, totLitros, totAceite, rendTotal, kgPorSector: kgSecView, rendPorVariedad,
         resumenAnio,
       })
@@ -569,13 +595,18 @@ export function CosechaPanel({ puedeEscribir }: { puedeEscribir: boolean }) {
             <Seccion titulo={`Pasajes a tanque (${procesos.length})`}>
               {procesos.length === 0 ? <VacioMini texto="Sin pasajes a tanque." /> : (
                 <div className="space-y-1.5">
-                  {procesos.map((p) => (
-                    <button key={p.id} onClick={() => puedeEscribir && setEditProceso(p)} className="w-full text-left flex items-center gap-2 rounded-lg border border-oliva-100 bg-white px-3 py-2 hover:border-oliva-300 transition">
-                      <span className="text-xs text-oliva-500 w-12 shrink-0">{fFecha(p.fecha).slice(0, 5)}</span>
-                      <span className="text-sm text-oliva-800 flex-1 min-w-0 truncate">{p.variedad}{p.destino ? ` · ${p.destino}` : ''}</span>
-                      <span className="text-sm tabular-nums text-oliva-700 shrink-0">{p.litros != null ? `${fmtKg(p.litros)} L` : '—'}</span>
-                    </button>
-                  ))}
+                  {procesos.map((p) => {
+                    const lineas = procVarsPorProceso.get(p.id) ?? []
+                    const vars = lineas.map((l) => l.variedad).join(' + ') || '—'
+                    const litros = lineas.reduce((s, l) => s + (l.litros ?? 0), 0)
+                    return (
+                      <button key={p.id} onClick={() => puedeEscribir && setEditProceso(p)} className="w-full text-left flex items-center gap-2 rounded-lg border border-oliva-100 bg-white px-3 py-2 hover:border-oliva-300 transition">
+                        <span className="text-xs text-oliva-500 w-12 shrink-0">{fFecha(p.fecha).slice(0, 5)}</span>
+                        <span className="text-sm text-oliva-800 flex-1 min-w-0 truncate">{vars}{p.destino ? ` · ${p.destino}` : ''}</span>
+                        <span className="text-sm tabular-nums text-oliva-700 shrink-0">{litros > 0 ? `${fmtKg(litros)} L` : '—'}</span>
+                      </button>
+                    )
+                  })}
                 </div>
               )}
             </Seccion>
@@ -608,7 +639,7 @@ export function CosechaPanel({ puedeEscribir }: { puedeEscribir: boolean }) {
       )}
       {editProceso && (
         <ProcesoDialog
-          titulo="Editar pasaje a tanque" inicial={procesoAForm(editProceso)}
+          titulo="Editar pasaje a tanque" inicial={procesoAForm(editProceso, procVarsPorProceso.get(editProceso.id) ?? [])}
           onBorrar={async () => { await borrarProceso(editProceso.id); setEditProceso(null) }}
           onCerrar={() => setEditProceso(null)}
           onGuardar={async (f) => { await guardarProceso(f, editProceso.id); setEditProceso(null) }}
@@ -789,6 +820,11 @@ function ProcesoDialog({ titulo, inicial, borradorKey, onCerrar, onGuardar, onBo
   useEffect(() => { if (borradorKey) guardarObj(borradorKey, form) }, [form, borradorKey])
 
   const set = <K extends keyof ProcesoForm>(k: K, v: ProcesoForm[K]) => setForm((f) => ({ ...f, [k]: v }))
+  const setLinea = (i: number, patch: Partial<ProcesoLineaForm>) => setForm((f) => ({ ...f, lineas: f.lineas.map((l, j) => (j === i ? { ...l, ...patch } : l)) }))
+  const addLinea = () => setForm((f) => ({ ...f, lineas: [...f.lineas, { variedad: VARIEDADES[0], litros: '', kg_aceite: '' }] }))
+  const delLinea = (i: number) => setForm((f) => ({ ...f, lineas: f.lineas.filter((_, j) => j !== i) }))
+
+  const sumLitros = form.lineas.reduce((s, l) => s + n0(l.litros), 0)
 
   async function submit() {
     if (!form.fecha) { alert('Falta la fecha.'); return }
@@ -805,26 +841,39 @@ function ProcesoDialog({ titulo, inicial, borradorKey, onCerrar, onGuardar, onBo
             <input type="date" value={form.fecha} onChange={(e) => set('fecha', e.target.value)} className={inputCls} />
           </div>
           <div>
-            <label className={labelCls}>Variedad</label>
-            <select value={form.variedad} onChange={(e) => set('variedad', e.target.value)} className={inputCls}>
-              {VARIEDADES.map((v) => <option key={v} value={v}>{v}</option>)}
-            </select>
+            <label className={labelCls}>Tanque</label>
+            <input value={form.destino} onChange={(e) => set('destino', e.target.value)} placeholder="T1" className={inputCls} />
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className={labelCls}>Litros a tanque</label>
-            <input inputMode="decimal" value={form.litros} onChange={(e) => set('litros', e.target.value)} className={inputCls} />
-          </div>
-          <div>
-            <label className={labelCls}>Kg de aceite (opcional)</label>
-            <input inputMode="decimal" value={form.kg_aceite} onChange={(e) => set('kg_aceite', e.target.value)} placeholder="si no, se estima de litros" className={inputCls} />
-          </div>
-        </div>
+
         <div>
-          <label className={labelCls}>Tanque</label>
-          <input value={form.destino} onChange={(e) => set('destino', e.target.value)} placeholder="T1" className={inputCls} />
+          <div className="flex items-center justify-between mb-1">
+            <span className={labelCls + ' mb-0'}>Variedades al tanque</span>
+            <button onClick={addLinea} className="text-xs font-medium text-oliva-700 hover:text-oliva-900">+ Agregar variedad</button>
+          </div>
+          <div className="flex items-center gap-2 mb-1 text-[11px] text-oliva-400">
+            <span className="flex-1 min-w-0">Variedad</span>
+            <span className="w-20 text-right">Litros</span>
+            <span className="w-20 text-right">Kg aceite</span>
+            <span className="w-4" />
+          </div>
+          <div className="space-y-2">
+            {form.lineas.map((l, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <select value={l.variedad} onChange={(e) => setLinea(i, { variedad: e.target.value })} className={inputCls + ' flex-1 min-w-0'}>
+                  {VARIEDADES.map((v) => <option key={v} value={v}>{v}</option>)}
+                </select>
+                <input inputMode="decimal" value={l.litros} onChange={(e) => setLinea(i, { litros: e.target.value })} placeholder="litros" className={inputCls + ' w-20'} />
+                <input inputMode="decimal" value={l.kg_aceite} onChange={(e) => setLinea(i, { kg_aceite: e.target.value })} placeholder="opc." className={inputCls + ' w-20'} />
+                {form.lineas.length > 1 ? (
+                  <button onClick={() => delLinea(i)} className="text-red-500 hover:text-red-700 text-sm w-4" aria-label="Quitar variedad">✕</button>
+                ) : <span className="w-4" />}
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-oliva-400 mt-1">Total litros: {fmtKg(sumLitros)} L · el kg de aceite es opcional (si falta, se estima de los litros con 1 L = 918 g).</p>
         </div>
+
         <div>
           <label className={labelCls}>Notas</label>
           <input value={form.notas} onChange={(e) => set('notas', e.target.value)} className={inputCls} />
