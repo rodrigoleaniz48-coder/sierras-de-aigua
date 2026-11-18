@@ -92,6 +92,7 @@ export function Pendientes() {
     e.preventDefault()
     if (!titulo.trim() || guardando) return
     setGuardando(true)
+    const quien = paraQuien || soyYo // siempre asignado; por defecto, el usuario actual
     const { error } = await supabase.from('tareas').insert({
       titulo: titulo.trim(),
       descripcion: null,
@@ -99,8 +100,8 @@ export function Pendientes() {
       tipo: 'agenda',
       jornales: 0,
       estado: 'pendiente',
-      asignado_a: paraQuien || null,
-      asignados_a: paraQuien ? [paraQuien] : [],
+      asignado_a: quien,
+      asignados_a: [quien],
       fecha_vence: fecha || null,
       notas: null,
       creado_por: soyYo,
@@ -181,8 +182,7 @@ export function Pendientes() {
         />
         <div className="flex flex-wrap items-center gap-2">
           <input className="input w-auto" type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} title="Fecha (opcional)" />
-          <select className="input w-auto" value={paraQuien} onChange={(e) => setParaQuien(e.target.value)} title="Para quién (opcional)">
-            <option value="">Para todos</option>
+          <select className="input w-auto" value={paraQuien || soyYo} onChange={(e) => setParaQuien(e.target.value)} title="Para quién">
             {perfiles.map((p) => <option key={p.id} value={p.id}>{p.nombre.split(' ')[0]}</option>)}
           </select>
           <button type="submit" className="btn-primary ml-auto" disabled={!titulo.trim() || guardando}>

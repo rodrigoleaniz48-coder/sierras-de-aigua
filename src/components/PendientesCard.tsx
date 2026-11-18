@@ -54,9 +54,10 @@ export function PendientesCard() {
     e.preventDefault()
     if (!titulo.trim() || guardando) return
     setGuardando(true)
+    // Alta rapida: siempre asignado al usuario actual (se puede reasignar desde /pendientes).
     const { error } = await supabase.from('tareas').insert({
       titulo: titulo.trim(), descripcion: null, prioridad: 'media', tipo: 'agenda',
-      jornales: 0, estado: 'pendiente', asignado_a: null, asignados_a: [], fecha_vence: null,
+      jornales: 0, estado: 'pendiente', asignado_a: soyYo, asignados_a: [soyYo], fecha_vence: null,
       notas: null, creado_por: soyYo, actualizado_en: new Date().toISOString(),
     })
     setGuardando(false)
