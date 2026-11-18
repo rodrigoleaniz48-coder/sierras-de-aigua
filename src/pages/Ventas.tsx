@@ -2553,6 +2553,9 @@ function ResumenMensualCadeteDialog({
   const [mes, setMes] = useState<string>(String(hoyD.getMonth() + 1).padStart(2, '0'))
   const [copiado, setCopiado] = useState(false)
   const [precioUnitario, setPrecioUnitario] = useState<string>('')
+  // Tarifa estandar del cadete: se usa cuando el envio se cobro en 0 al cliente
+  // (p. ej. promo de pedido grande = envio bonificado). Al cadete igual se le paga.
+  const [tarifaCadete, setTarifaCadete] = useState<string>('190')
   const [enviosRPC, setEnviosRPC] = useState<EnvioCadete[]>([])
   // Registrar el pago como gasto (categoria Cadete / Fletes), para conciliar despues con el banco.
   const [cuentasUyu, setCuentasUyu] = useState<{ id: number; nombre: string }[]>([])
@@ -2595,13 +2598,19 @@ function ResumenMensualCadeteDialog({
       .sort((a, b) => fe(a) === fe(b) ? a.id - b.id : fe(a).localeCompare(fe(b)))
   }, [enviosRPC])
 
-  // Precio efectivo por envío: si el usuario ingresó un precio unitario, se usa ése;
-  // si no, usa el costo_envio guardado en cada venta.
+  // Precio efectivo por envío:
+  //  1. Si el usuario puso un "precio por envío" fijo, se usa ése para todos.
+  //  2. Si no, usa el costo_envio cargado en la venta.
+  //  3. Si ese costo quedó en 0 (envío bonificado al cliente), igual se le paga
+  //     al cadete la tarifa estándar (el reparto se hizo igual).
   const precioUnit = Number(precioUnitario) || 0
-  const totalPago = enviosMes.reduce((s, v) => {
-    const p = precioUnit > 0 ? precioUnit : Number(v.costo_envio) || 0
-    return s + p
-  }, 0)
+  const tarifaBase = Number(tarifaCadete) || 0
+  const pagoCadete = (v: EnvioCadete) => {
+    if (precioUnit > 0) return precioUnit
+    const costo = Number(v.costo_envio) || 0
+    return costo > 0 ? costo : tarifaBase
+  }
+  const totalPago = enviosMes.reduce((s, v) => s + pagoCadete(v), 0)
 
   // El monto del gasto arranca igual al total a pagar; si el usuario lo editó a mano,
   // no se pisa (para poder descontar el saldo a favor de meses anteriores).
@@ -2645,7 +2654,7 @@ function ResumenMensualCadeteDialog({
     }
     enviosMes.forEach((v, i) => {
       const fecha = new Date((v.fecha_entrega ?? v.fecha) + 'T00:00:00').toLocaleDateString('es-UY', { day: '2-digit', month: '2-digit' })
-      const p = precioUnit > 0 ? precioUnit : Number(v.costo_envio) || 0
+      const p = pagoCadete(v)
       const socio = (v.socio_nombre || '').split(' ')[0]
       partes.push(`${i + 1}. ${fecha} · ${v.cliente_nombre ?? 'sin cliente'} (${socio}) — ${money(p)}`)
     })
@@ -2702,6 +2711,18 @@ function ResumenMensualCadeteDialog({
               onChange={(e) => setPrecioUnitario(e.target.value)}
             />
             <div className="text-[10px] text-oliva-500 mt-1">Si lo dejás vacío, cuenta el costo de envío que cargaste en cada venta.</div>
+          </div>
+          <div>
+            <label className="label">Tarifa cadete (envíos en 0)</label>
+            <input
+              className="input tabular-nums"
+              type="number"
+              min="0"
+              step="1"
+              value={tarifaCadete}
+              onChange={(e) => setTarifaCadete(e.target.value)}
+            />
+            <div className="text-[10px] text-oliva-500 mt-1">Para envíos bonificados al cliente (costo 0): al cadete igual se le paga esta tarifa.</div>
           </div>
         </div>
 
@@ -2772,14 +2793,19 @@ function ResumenMensualCadeteDialog({
               </thead>
               <tbody>
                 {enviosMes.map((v, i) => {
-                  const p = precioUnit > 0 ? precioUnit : Number(v.costo_envio) || 0
+                  const p = pagoCadete(v)
+                  // Envio bonificado al cliente (costo 0) pero igual se le paga al cadete la tarifa.
+                  const bonificado = precioUnit <= 0 && (Number(v.costo_envio) || 0) === 0
                   return (
                     <tr key={v.id} className="border-t border-oliva-100">
                       <td className="py-2 px-3 tabular-nums font-semibold text-oliva-900">{i + 1}</td>
                       <td className="py-2 px-3 text-oliva-700">{fFecha(v.fecha_entrega ?? v.fecha)}</td>
                       <td className="py-2 px-3 text-oliva-800">{v.cliente_nombre ?? '—'}</td>
                       <td className="py-2 px-3 text-oliva-600 text-xs">{v.socio_nombre?.split(' ')[0] ?? '—'}</td>
-                      <td className="py-2 px-3 text-right tabular-nums font-medium">{money(p)}</td>
+                      <td className="py-2 px-3 text-right tabular-nums font-medium">
+                        {money(p)}
+                        {bonificado && <span className="ml-1 text-[10px] text-aceite-600" title="Envío bonificado al cliente — se paga la tarifa estándar del cadete">tarifa</span>}
+                      </td>
                     </tr>
                   )
                 })}
