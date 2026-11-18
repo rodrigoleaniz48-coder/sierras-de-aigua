@@ -22,7 +22,7 @@ export function Fab() {
     const path = loc.pathname
     if (path.startsWith('/ventas')  && rol && ['admin','ventas'].includes(rol))              return { label: 'Nueva venta',   destino: '/ventas' }
     if (path.startsWith('/clientes')&& rol && ['admin','ventas','marketing'].includes(rol))  return { label: 'Nuevo cliente', destino: '/clientes' }
-    if (path.startsWith('/tareas'))                                                            return { label: 'Nueva tarea',   destino: '/tareas' }
+    if (path.startsWith('/pendientes'))                                                        return { label: 'Nuevo pendiente', destino: '/pendientes' }
     if (path.startsWith('/campo')   && rol && ['admin','campo'].includes(rol))                 return { label: 'Nuevo',         destino: '/campo' }
     if (path.startsWith('/finanzas')&& rol && ['admin','ventas','marketing'].includes(rol))  return { label: 'Nuevo',         destino: '/finanzas' }
     return null

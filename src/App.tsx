@@ -14,7 +14,7 @@ const Ventas = lazy(() => import('./pages/Ventas').then((m) => ({ default: m.Ven
 const Clientes = lazy(() => import('./pages/Clientes').then((m) => ({ default: m.Clientes })))
 const Contabilidad = lazy(() => import('./pages/Contabilidad').then((m) => ({ default: m.Contabilidad })))
 const Admin = lazy(() => import('./pages/Admin').then((m) => ({ default: m.Admin })))
-const Tareas = lazy(() => import('./pages/Tareas').then((m) => ({ default: m.Tareas })))
+const Pendientes = lazy(() => import('./pages/Pendientes').then((m) => ({ default: m.Pendientes })))
 const Campo = lazy(() => import('./pages/Campo').then((m) => ({ default: m.Campo })))
 const Finanzas = lazy(() => import('./pages/Finanzas').then((m) => ({ default: m.Finanzas })))
 const Manual = lazy(() => import('./pages/Manual').then((m) => ({ default: m.Manual })))
@@ -47,7 +47,8 @@ export function App() {
               }
             />
             <Route path="clientes" element={<Clientes />} />
-            <Route path="tareas" element={<Tareas />} />
+            <Route path="pendientes" element={<Pendientes />} />
+            <Route path="tareas" element={<Navigate to="/pendientes" replace />} />
             <Route path="campo" element={<Campo />} />
             <Route path="manual" element={<Manual />} />
             <Route path="finanzas" element={<Finanzas />} />

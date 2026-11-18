@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { money, num } from '../lib/format'
 import { AlertasStockBajo } from '../components/AlertasStockBajo'
+import { PendientesCard } from '../components/PendientesCard'
 
 interface AvisoCadete { socio: string; cantidad: number; ubicacion: string }
 
@@ -302,7 +303,8 @@ export function Dashboard() {
       {/* Mini gráfica ingresos vs egresos */}
       {meses.length > 0 && <GraficaMeses meses={meses} />}
 
-      {/* Al pie: alertas menos urgentes que el resumen del dia */}
+      {/* Al pie: pendientes y alertas menos urgentes que el resumen del dia */}
+      {!soloReporte && <PendientesCard />}
       {!soloReporte && <AlertasStockBajo />}
 
     </div>
