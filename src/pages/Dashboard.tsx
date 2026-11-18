@@ -4,7 +4,6 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { money, num } from '../lib/format'
 import { AlertasStockBajo } from '../components/AlertasStockBajo'
-import { AlertasTareas } from '../components/AlertasTareas'
 
 interface AvisoCadete { socio: string; cantidad: number; ubicacion: string }
 
@@ -304,7 +303,6 @@ export function Dashboard() {
       {meses.length > 0 && <GraficaMeses meses={meses} />}
 
       {/* Al pie: alertas menos urgentes que el resumen del dia */}
-      {!soloReporte && <AlertasTareas />}
       {!soloReporte && <AlertasStockBajo />}
 
     </div>
