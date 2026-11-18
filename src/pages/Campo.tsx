@@ -117,7 +117,7 @@ export function Campo() {
   const navigate = useNavigate()
   const abrirNueva = (location.state as { abrirNueva?: boolean } | null)?.abrirNueva === true
 
-  const [cronograma, setCronograma] = useState<Cronograma>('aplicaciones')
+  const [cronograma, setCronograma] = useState<Cronograma>('cosecha')
   const [vista, setVista] = useState<Vista>('lista')
   const [anio, setAnio] = useState<string>('')
   const [cargando, setCargando] = useState(true)
@@ -175,7 +175,9 @@ export function Campo() {
 
   useEffect(() => {
     if (abrirNueva) {
-      if (cronograma === 'aplicaciones') setNuevaAplic(true); else setNuevaLabor(true)
+      if (cronograma === 'aplicaciones') setNuevaAplic(true)
+      else if (cronograma === 'manejo') setNuevaLabor(true)
+      // cosecha/informes manejan su propio alta
       navigate(location.pathname, { replace: true, state: {} })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -359,7 +361,7 @@ export function Campo() {
           <Segmento
             valor={cronograma}
             onChange={(v) => setCronograma(v as Cronograma)}
-            opciones={[['aplicaciones', 'Aplicaciones'], ['manejo', 'Manejo de cultivo'], ['cosecha', 'Cosecha'], ['informes', 'Informes']]}
+            opciones={[['cosecha', 'Cosecha'], ['aplicaciones', 'Aplicaciones'], ['manejo', 'Manejo de cultivo'], ['informes', 'Informes']]}
           />
         </div>
         {puedeEscribir && cronograma !== 'cosecha' && (
