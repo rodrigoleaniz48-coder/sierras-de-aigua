@@ -38,6 +38,28 @@ function fmtFecha(f: string): string {
   return new Date(f + 'T00:00:00').toLocaleDateString('es-UY', { day: '2-digit', month: '2-digit' })
 }
 
+// Chips para elegir una o varias personas.
+function SelectorPersonas({ perfiles, valor, onCambio }: { perfiles: Perfil[]; valor: string[]; onCambio: (v: string[]) => void }) {
+  const toggle = (id: string) => onCambio(valor.includes(id) ? valor.filter((x) => x !== id) : [...valor, id])
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {perfiles.map((p) => {
+        const on = valor.includes(p.id)
+        return (
+          <button
+            key={p.id}
+            type="button"
+            onClick={() => toggle(p.id)}
+            className={`px-2.5 py-1 rounded-full text-xs transition ${on ? 'bg-oliva-800 text-oliva-50' : 'bg-oliva-100 text-oliva-600 hover:bg-oliva-200'}`}
+          >
+            {p.nombre.split(' ')[0]}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 export function Pendientes() {
   const { session } = useAuth()
   const soyYo = session?.user.id ?? ''
@@ -52,13 +74,16 @@ export function Pendientes() {
 
   const [titulo, setTitulo] = useState('')
   const [fecha, setFecha] = useState('')
-  const [paraQuien, setParaQuien] = useState('')
+  const [asignados, setAsignados] = useState<string[]>([])
   const [guardando, setGuardando] = useState(false)
   const [filtro, setFiltro] = useState<'todos' | 'mios'>('todos')
   const [verHechas, setVerHechas] = useState(false)
   const tituloRef = useRef<HTMLInputElement>(null)
-  // Edicion en linea: al tocar un pendiente se puede cambiar titulo, fecha y a quien.
-  const [edit, setEdit] = useState<{ id: number; titulo: string; fecha: string; quien: string } | null>(null)
+  // Edicion en linea: al tocar un pendiente se puede cambiar titulo, fecha y a quienes.
+  const [edit, setEdit] = useState<{ id: number; titulo: string; fecha: string; quienes: string[] } | null>(null)
+
+  // Por defecto, el nuevo pendiente queda asignado al usuario actual.
+  useEffect(() => { if (soyYo) setAsignados((a) => a.length ? a : [soyYo]) }, [soyYo])
 
   async function cargar() {
     setCargando(true)
@@ -94,7 +119,7 @@ export function Pendientes() {
     e.preventDefault()
     if (!titulo.trim() || guardando) return
     setGuardando(true)
-    const quien = paraQuien || soyYo // siempre asignado; por defecto, el usuario actual
+    const quienes = asignados.length ? asignados : [soyYo] // siempre al menos uno; por defecto el usuario actual
     const { error } = await supabase.from('tareas').insert({
       titulo: titulo.trim(),
       descripcion: null,
@@ -102,8 +127,8 @@ export function Pendientes() {
       tipo: 'agenda',
       jornales: 0,
       estado: 'pendiente',
-      asignado_a: quien,
-      asignados_a: [quien],
+      asignado_a: quienes[0],
+      asignados_a: quienes,
       fecha_vence: fecha || null,
       notas: null,
       creado_por: soyYo,
@@ -111,7 +136,7 @@ export function Pendientes() {
     })
     setGuardando(false)
     if (error) { alert('No se pudo agregar: ' + error.message); return }
-    setTitulo(''); setFecha(''); setParaQuien('')
+    setTitulo(''); setFecha(''); setAsignados(soyYo ? [soyYo] : [])
     tituloRef.current?.focus()
     cargar()
   }
@@ -135,15 +160,16 @@ export function Pendientes() {
   }
 
   function abrirEdit(p: Pendiente) {
-    setEdit({ id: p.id, titulo: p.titulo, fecha: p.fecha_vence ?? '', quien: asignadosDe(p)[0] ?? soyYo })
+    const quienes = asignadosDe(p)
+    setEdit({ id: p.id, titulo: p.titulo, fecha: p.fecha_vence ?? '', quienes: quienes.length ? quienes : [soyYo] })
   }
   async function guardarEdit() {
     if (!edit) return
     const tituloT = edit.titulo.trim()
     if (!tituloT) return
-    const quien = edit.quien || soyYo
-    setItems((prev) => prev.map((x) => x.id === edit.id ? { ...x, titulo: tituloT, fecha_vence: edit.fecha || null, asignado_a: quien, asignados_a: [quien] } : x))
-    const payload = { titulo: tituloT, fecha_vence: edit.fecha || null, asignado_a: quien, asignados_a: [quien], actualizado_en: new Date().toISOString() }
+    const quienes = edit.quienes.length ? edit.quienes : [soyYo]
+    setItems((prev) => prev.map((x) => x.id === edit.id ? { ...x, titulo: tituloT, fecha_vence: edit.fecha || null, asignado_a: quienes[0], asignados_a: quienes } : x))
+    const payload = { titulo: tituloT, fecha_vence: edit.fecha || null, asignado_a: quienes[0], asignados_a: quienes, actualizado_en: new Date().toISOString() }
     setEdit(null)
     const { error } = await supabase.from('tareas').update(payload).eq('id', edit.id)
     if (error) { alert('No se pudo guardar: ' + error.message); cargar() }
@@ -199,12 +225,13 @@ export function Pendientes() {
         />
         <div className="flex flex-wrap items-center gap-2">
           <input className="input w-auto" type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} title="Fecha (opcional)" />
-          <select className="input w-auto" value={paraQuien || soyYo} onChange={(e) => setParaQuien(e.target.value)} title="Para quién">
-            {perfiles.map((p) => <option key={p.id} value={p.id}>{p.nombre.split(' ')[0]}</option>)}
-          </select>
           <button type="submit" className="btn-primary ml-auto" disabled={!titulo.trim() || guardando}>
             {guardando ? 'Agregando…' : 'Agregar'}
           </button>
+        </div>
+        <div>
+          <div className="text-[11px] text-oliva-500 mb-1">Para:</div>
+          <SelectorPersonas perfiles={perfiles} valor={asignados} onCambio={setAsignados} />
         </div>
       </form>
 
@@ -245,13 +272,14 @@ export function Pendientes() {
                     />
                     <div className="flex flex-wrap items-center gap-2">
                       <input className="input w-auto" type="date" value={edit.fecha} onChange={(e) => setEdit({ ...edit, fecha: e.target.value })} title="Fecha" />
-                      <select className="input w-auto" value={edit.quien || soyYo} onChange={(e) => setEdit({ ...edit, quien: e.target.value })} title="Para quién">
-                        {perfiles.map((pf) => <option key={pf.id} value={pf.id}>{pf.nombre.split(' ')[0]}</option>)}
-                      </select>
                       <div className="ml-auto flex items-center gap-2">
                         <button onClick={() => setEdit(null)} className="btn-secondary text-sm">Cancelar</button>
                         <button onClick={guardarEdit} className="btn-primary text-sm" disabled={!edit.titulo.trim()}>Guardar</button>
                       </div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] text-oliva-500 mb-1">Para:</div>
+                      <SelectorPersonas perfiles={perfiles} valor={edit.quienes} onCambio={(v) => setEdit({ ...edit, quienes: v })} />
                     </div>
                   </div>
                 </li>
