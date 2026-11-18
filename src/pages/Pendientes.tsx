@@ -57,6 +57,8 @@ export function Pendientes() {
   const [filtro, setFiltro] = useState<'todos' | 'mios'>('todos')
   const [verHechas, setVerHechas] = useState(false)
   const tituloRef = useRef<HTMLInputElement>(null)
+  // Edicion en linea: al tocar un pendiente se puede cambiar titulo, fecha y a quien.
+  const [edit, setEdit] = useState<{ id: number; titulo: string; fecha: string; quien: string } | null>(null)
 
   async function cargar() {
     setCargando(true)
@@ -130,6 +132,21 @@ export function Pendientes() {
     setItems((prev) => prev.filter((x) => x.id !== p.id))
     const { error } = await supabase.from('tareas').update({ estado: 'cancelada', actualizado_en: new Date().toISOString() }).eq('id', p.id)
     if (error) { alert('No se pudo quitar: ' + error.message); cargar() }
+  }
+
+  function abrirEdit(p: Pendiente) {
+    setEdit({ id: p.id, titulo: p.titulo, fecha: p.fecha_vence ?? '', quien: asignadosDe(p)[0] ?? soyYo })
+  }
+  async function guardarEdit() {
+    if (!edit) return
+    const tituloT = edit.titulo.trim()
+    if (!tituloT) return
+    const quien = edit.quien || soyYo
+    setItems((prev) => prev.map((x) => x.id === edit.id ? { ...x, titulo: tituloT, fecha_vence: edit.fecha || null, asignado_a: quien, asignados_a: [quien] } : x))
+    const payload = { titulo: tituloT, fecha_vence: edit.fecha || null, asignado_a: quien, asignados_a: [quien], actualizado_en: new Date().toISOString() }
+    setEdit(null)
+    const { error } = await supabase.from('tareas').update(payload).eq('id', edit.id)
+    if (error) { alert('No se pudo guardar: ' + error.message); cargar() }
   }
 
   const mios = (p: Pendiente) => asignadosDe(p).includes(soyYo) || p.creado_por === soyYo
@@ -215,6 +232,31 @@ export function Pendientes() {
             const persona = etiquetaPersona(p)
             const atrasada = !!p.fecha_vence && p.fecha_vence < hoy
             const esHoy = p.fecha_vence === hoy
+            if (edit && edit.id === p.id) {
+              return (
+                <li key={p.id} className="p-3 bg-oliva-50/60">
+                  <div className="space-y-2">
+                    <input
+                      className="input"
+                      value={edit.titulo}
+                      autoFocus
+                      onChange={(e) => setEdit({ ...edit, titulo: e.target.value })}
+                      onKeyDown={(e) => { if (e.key === 'Enter') guardarEdit(); if (e.key === 'Escape') setEdit(null) }}
+                    />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input className="input w-auto" type="date" value={edit.fecha} onChange={(e) => setEdit({ ...edit, fecha: e.target.value })} title="Fecha" />
+                      <select className="input w-auto" value={edit.quien || soyYo} onChange={(e) => setEdit({ ...edit, quien: e.target.value })} title="Para quién">
+                        {perfiles.map((pf) => <option key={pf.id} value={pf.id}>{pf.nombre.split(' ')[0]}</option>)}
+                      </select>
+                      <div className="ml-auto flex items-center gap-2">
+                        <button onClick={() => setEdit(null)} className="btn-secondary text-sm">Cancelar</button>
+                        <button onClick={guardarEdit} className="btn-primary text-sm" disabled={!edit.titulo.trim()}>Guardar</button>
+                      </div>
+                    </div>
+                  </div>
+                </li>
+              )
+            }
             return (
               <li key={p.id} className="flex items-start gap-3 p-3">
                 <button
@@ -222,7 +264,12 @@ export function Pendientes() {
                   className="mt-0.5 h-5 w-5 shrink-0 rounded-md border-2 border-oliva-300 hover:border-oliva-600 hover:bg-oliva-50 transition"
                   aria-label="Marcar hecho"
                 />
-                <div className="min-w-0 flex-1">
+                <button
+                  type="button"
+                  onClick={() => abrirEdit(p)}
+                  className="min-w-0 flex-1 text-left"
+                  title="Tocar para editar"
+                >
                   <div className="text-sm text-oliva-900 break-words">{p.titulo}</div>
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px]">
                     {p.fecha_vence && (
@@ -232,7 +279,7 @@ export function Pendientes() {
                     )}
                     {persona && <span className="text-oliva-500">· {persona}</span>}
                   </div>
-                </div>
+                </button>
                 <button
                   onClick={() => archivar(p)}
                   className="shrink-0 text-oliva-300 hover:text-red-600 transition text-lg leading-none"
