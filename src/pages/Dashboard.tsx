@@ -25,8 +25,8 @@ export function Dashboard() {
   const { perfil, puede } = useAuth()
   const nav = useNavigate()
   const puedeVender = puede(['admin', 'ventas'])
-  // Empleados de campo (Emiliano) no ven el Inicio: van directo a Tareas.
-  if (perfil && perfil.rol === 'campo') return <Navigate to="/tareas" replace />
+  // Empleados de campo (Emiliano) no ven el Inicio: van directo a Pendientes.
+  if (perfil && perfil.rol === 'campo') return <Navigate to="/pendientes" replace />
 
   const [r, setR] = useState<Resumen>({
     totalMes: 0, cantVentasMes: 0, totalMesAnterior: 0, litrosAceiteMes: 0,

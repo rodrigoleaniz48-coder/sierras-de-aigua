@@ -18,7 +18,7 @@ Moneda UYU, IVA 10% default. **En BD nunca usar `ñ`** (rompe el SDK).
 - `src/pages/Ventas.tsx` — Ventas + dialogs (Nueva/Editar, Cadete, Pago mensual, Detalle, Envío WA)
 - `src/pages/Clientes.tsx` — CRM + envío masivo WhatsApp (multi-select)
 - `src/pages/Stock.tsx` — Tanques, envasado, envases vacíos, movimientos, traslados
-- `src/pages/Tareas.tsx` — Agenda / Equipo, multi-asignado, comentarios
+- `src/pages/Pendientes.tsx` — checklist compartido simple (reusa tabla `tareas`). Reemplazó al viejo `Tareas.tsx` (borrado). `src/components/PendientesCard.tsx` = bloque en Inicio
 - `src/pages/Finanzas.tsx` → renderiza `Gastos.tsx` (egresos + reembolsables + adelantos) + `IngresosPanel.tsx`
 - `src/pages/Contabilidad.tsx` — EstadoResultados mensual + conciliación bancaria
 - `src/pages/Admin.tsx` — productos, presentaciones, precios (USD/UYU + BCU), cuentas bancarias
@@ -26,7 +26,7 @@ Moneda UYU, IVA 10% default. **En BD nunca usar `ñ`** (rompe el SDK).
 - `src/components/Layout.tsx` — sidebar desktop, topbar mobile, BottomNav, Fab, sheet "Más"
 - `src/components/BottomNav.tsx` + `Fab.tsx` — nav fija mobile (5 tabs + FAB contextual, ocultarse al bajar)
 - `src/components/Dialog.tsx` — dialog base con `scrollKey` (persiste scroll entre app-switches)
-- `src/components/ClienteDialog.tsx`, `EnviarWhatsAppDialog.tsx`, `AlertasStockBajo/Tareas.tsx`, `ReporteSemanalCard.tsx`, `EditorCategoriasDialog.tsx`
+- `src/components/ClienteDialog.tsx`, `EnviarWhatsAppDialog.tsx`, `AlertasStockBajo.tsx`, `ReporteSemanalCard.tsx`, `EditorCategoriasDialog.tsx`
 - `src/lib/supabase.ts` — cliente. `auth.tsx` — sesión + perfil. `permisos.ts` — roles.
 - `src/lib/persistencia.ts` — localStorage con TTL 24h para borradores + flags de dialogs abiertos
 - `src/lib/format.ts`, `colores.ts`, `reporte.ts`, `backupExcel.ts`, `bcu.ts`, `parserBROU.ts`
@@ -53,12 +53,12 @@ Token: guardar una sola vez en `.claude/supabase.token` (gitignored) o setear `$
 
 **Migraciones destructivas**: siempre `select coalesce(max(id),0)+1 from tabla` antes de insertar con id manual (tabla `tanques` no tiene sequence).
 
-**RLS**: `gastos` y `ventas` filtran por `socio_id = auth.uid()` OR flag `ve_todos_gastos`. `ingresos` mirror. `tareas` incluye `asignados_a` array.
+**RLS**: `gastos` y `ventas` filtran por `socio_id = auth.uid()` OR flag `ve_todos_gastos`. `ingresos` mirror. `tareas` (la usa Pendientes): RLS por nombre — Rodrigo/Santiago/Ayelen ven y editan todo; el resto solo lo suyo (`asignados_a`/`creado_por`); insert general solo esos 3.
 
 ## Flujo de trabajo
 
-- **Sesiones por área**: cada conversación toca 1 módulo (Ventas, Stock, Tareas…). No mezclar.
-- **Antes de tocar código**: Grep del símbolo relevante, no leer archivo entero. Los archivos grandes (Ventas 2500L, Stock 1700L, Tareas 1200L) están mezclando dialogs anidados.
+- **Sesiones por área**: cada conversación toca 1 módulo (Ventas, Stock, Pendientes…). No mezclar.
+- **Antes de tocar código**: Grep del símbolo relevante, no leer archivo entero. Los archivos grandes (Ventas 2500L, Stock 1700L) están mezclando dialogs anidados.
 - **Commits**: descriptivos en español, sin emojis, firma `Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>`. `git push origin main` deploy automático.
 - **Nunca**: `--no-verify`, `force push` a main, ejecutar SQL destructivo sin confirmar con el usuario.
 - **Preferencia de hosting**: GitHub Pages. No montar Vercel/Netlify/servicios extra sin preguntar.
