@@ -19,7 +19,7 @@ const MAX_MENSAJES_RESCAN = 70
 // Tope global de parseo de adjuntos por corrida: bajar/descomprimir PDFs es lo
 // mas caro en CPU. Sin este limite, un escaneo con muchos correos sin monto en
 // el cuerpo revienta el worker (WORKER_RESOURCE_LIMIT).
-const MAX_MSGS_CON_ADJUNTOS = 25
+const MAX_MSGS_CON_ADJUNTOS = 12
 
 const GMAIL_QUERY_FILTER = [
   // Remitentes fiscales / plataformas de factura electronica
@@ -326,7 +326,7 @@ async function extraerTextoPdfBasico(data: Uint8Array): Promise<string> {
   const textos: string[] = []
 
   let pos = 0, streams = 0
-  while (pos < raw.length && streams < 30 && textos.length < MAX_OPS) {
+  while (pos < raw.length && streams < 20 && textos.length < MAX_OPS) {
     const idx = raw.indexOf('stream', pos)
     if (idx === -1) break
     let start = idx + 6
@@ -338,9 +338,11 @@ async function extraerTextoPdfBasico(data: Uint8Array): Promise<string> {
 
     const content = raw.substring(start, end)
     // Streams grandes (imagenes/fuentes) no son texto: saltarlos para no gastar CPU/memoria.
-    if (content.length > 400_000) { pos = end + 9; continue }
-    const bytes = new Uint8Array(content.length)
-    for (let i = 0; i < content.length; i++) bytes[i] = content.charCodeAt(i)
+    if (content.length > 300_000) { pos = end + 9; continue }
+    // raw se decodifico latin1 (1 char = 1 byte), asi que los offsets de string
+    // coinciden con los de bytes: cortar directo del array evita un loop byte-a-byte
+    // (era el mayor costo de CPU y disparaba WORKER_RESOURCE_LIMIT).
+    const bytes = data.subarray(start, end)
 
     let decompressed = ''
     for (const fmt of ['deflate', 'deflate-raw'] as CompressionFormat[]) {
@@ -423,7 +425,7 @@ async function extraerTextoAdjuntos(
     .filter((a) => a.size < 1_200_000)
     // El XML (CFE) trae monto y vencimiento en campos estructurados: priorizarlo.
     .sort((a, b) => (esXml(b) ? 1 : 0) - (esXml(a) ? 1 : 0))
-    .slice(0, 3)
+    .slice(0, 2)
 
   const textos: string[] = []
   for (const att of relevantes) {
