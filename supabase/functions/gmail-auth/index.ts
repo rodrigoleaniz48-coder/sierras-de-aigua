@@ -106,13 +106,13 @@ Deno.serve(async (req) => {
       b.toString(16).padStart(2, '0'),
     ).join('')
 
-    // Si hay una cuenta con token caducado/revocado, REUTILIZAR su fila (mismo id)
-    // en vez de borrarla: asi se preservan los correos ya sincronizados y clasificados
-    // (la FK correos_sincronizados.cuenta_correo_id es ON DELETE CASCADE).
+    // Si hay una cuenta con token caducado (error_token) o desconectada (revocada),
+    // REUTILIZAR su fila (mismo id) en vez de borrarla: asi se preservan los correos
+    // ya sincronizados y su clasificacion manual (pagada/descartada/revisar).
     const { data: rota } = await admin
       .from('cuentas_correo')
       .select('id')
-      .eq('estado', 'error_token')
+      .in('estado', ['error_token', 'revocada'])
       .limit(1)
       .maybeSingle()
 
@@ -154,7 +154,7 @@ Deno.serve(async (req) => {
 
     const { data: cuenta } = await admin
       .from('cuentas_correo')
-      .select('id')
+      .select('id, email')
       .eq('oauth_state', state)
       .eq('estado', 'pendiente_oauth')
       .single()
@@ -195,17 +195,23 @@ Deno.serve(async (req) => {
 
     // Encriptar refresh token y guardar
     const enc = await encryptToken(tokens.refresh_token)
-    await admin
-      .from('cuentas_correo')
-      .update({
-        email: prof.emailAddress ?? '',
-        refresh_token_enc: enc,
-        estado: 'activa',
-        oauth_state: null,
-        error_detalle: null,
-        ultimo_history_id: prof.historyId ? String(prof.historyId) : null,
-      })
-      .eq('id', cuenta.id)
+    const nuevoEmail = prof.emailAddress ?? ''
+    // Si reutilizamos una fila pero la cuenta reconectada es OTRA (email distinto),
+    // limpiar los correos viejos (eran de otra cuenta) y re-sincronizar desde cero.
+    const emailCambio = !!cuenta.email && !!nuevoEmail && cuenta.email.toLowerCase() !== nuevoEmail.toLowerCase()
+    const updatePayload: Record<string, unknown> = {
+      email: nuevoEmail,
+      refresh_token_enc: enc,
+      estado: 'activa',
+      oauth_state: null,
+      error_detalle: null,
+      ultimo_history_id: prof.historyId ? String(prof.historyId) : null,
+    }
+    if (emailCambio) {
+      await admin.from('correos_sincronizados').delete().eq('cuenta_correo_id', cuenta.id)
+      updatePayload.ultima_sync = null
+    }
+    await admin.from('cuentas_correo').update(updatePayload).eq('id', cuenta.id)
 
     return json({ ok: true, email: prof.emailAddress })
   }
@@ -232,10 +238,16 @@ Deno.serve(async (req) => {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       })
     } catch {
-      // Si falla la revocacion, seguimos con la limpieza local
+      // Si falla la revocacion, seguimos igual
     }
 
-    await admin.from('cuentas_correo').delete().eq('id', cuenta.id)
+    // NO borrar la fila: eso dispararia el ON DELETE CASCADE y perderia los correos
+    // sincronizados con su clasificacion manual. La marcamos 'revocada' (conserva todo);
+    // al reconectar se reutiliza esta misma fila y las clasificaciones sobreviven.
+    await admin
+      .from('cuentas_correo')
+      .update({ estado: 'revocada', oauth_state: null, error_detalle: null })
+      .eq('id', cuenta.id)
     return json({ ok: true })
   }
 
