@@ -30,6 +30,7 @@ const GMAIL_QUERY_FILTER = [
   'from:efactura',
   'from:surproductivo1@gmail.com', // proveedor que factura desde un gmail (sin palabras clave en asunto)
   'from:printa.workspc@gmail.com', // Printa (imprenta): factura desde un gmail, asunto sin palabras clave
+  'from:harriasrl@gmail.com', // facturas que los socios REENVIAN a la casilla desde la propia cuenta
   // Asuntos tipicos de factura/comprobante
   'subject:factura',
   'subject:e-factura',
