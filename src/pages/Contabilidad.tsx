@@ -181,7 +181,7 @@ function Obligaciones({ gmailMsg }: { gmailMsg: { ok?: boolean; error?: string }
       res.primera_sync
         ? `Primera sincronizacion: ${res.correos_nuevos} correos fiscales importados.`
         : deep
-          ? `Re-escaneo (45 dias): ${res.correos_nuevos} correos fiscales revisados.`
+          ? `Re-escaneo (60 dias): ${res.correos_nuevos} correos fiscales revisados.`
           : `${res.correos_nuevos} correos nuevos sincronizados.`,
     )
     cargarDatos()
@@ -268,8 +268,8 @@ function Obligaciones({ gmailMsg }: { gmailMsg: { ok?: boolean; error?: string }
                 {sincronizando ? 'Sincronizando…' : cuenta.ultima_sync ? 'Sincronizar nuevas' : 'Primera sincronizacion'}
               </button>
               {cuenta.ultima_sync && (
-                <button className="btn-secondary text-xs" onClick={() => handleSync(true)} disabled={sincronizando} title="Vuelve a revisar los últimos 45 días (recupera facturas que no se habían reconocido)">
-                  🔄 Re-escanear 45 días
+                <button className="btn-secondary text-xs" onClick={() => handleSync(true)} disabled={sincronizando} title="Vuelve a revisar los últimos 60 días (recupera facturas que no se habían reconocido)">
+                  🔄 Re-escanear 60 días
                 </button>
               )}
             </div>

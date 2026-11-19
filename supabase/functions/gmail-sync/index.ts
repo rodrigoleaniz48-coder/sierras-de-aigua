@@ -13,7 +13,7 @@ const CLIENT_SECRET = Deno.env.get('GMAIL_CLIENT_SECRET')!
 const ENC_KEY = Deno.env.get('GMAIL_ENCRYPTION_KEY')!
 
 const DIAS_PRIMERA_SYNC = 30
-const DIAS_RESCAN = 45          // re-escaneo profundo (recupera correos perdidos)
+const DIAS_RESCAN = 60          // re-escaneo profundo (recupera correos perdidos)
 const MAX_MENSAJES = 40
 const MAX_MENSAJES_RESCAN = 90
 
@@ -29,6 +29,7 @@ const GMAIL_QUERY_FILTER = [
   'from:facturacion',
   'from:efactura',
   'from:surproductivo1@gmail.com', // proveedor que factura desde un gmail (sin palabras clave en asunto)
+  'from:printa.workspc@gmail.com', // Printa (imprenta): factura desde un gmail, asunto sin palabras clave
   // Asuntos tipicos de factura/comprobante
   'subject:factura',
   'subject:e-factura',
