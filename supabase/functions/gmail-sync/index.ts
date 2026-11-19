@@ -15,7 +15,11 @@ const ENC_KEY = Deno.env.get('GMAIL_ENCRYPTION_KEY')!
 const DIAS_PRIMERA_SYNC = 30
 const DIAS_RESCAN = 60          // re-escaneo profundo (recupera correos perdidos)
 const MAX_MENSAJES = 40
-const MAX_MENSAJES_RESCAN = 90
+const MAX_MENSAJES_RESCAN = 70
+// Tope global de parseo de adjuntos por corrida: bajar/descomprimir PDFs es lo
+// mas caro en CPU. Sin este limite, un escaneo con muchos correos sin monto en
+// el cuerpo revienta el worker (WORKER_RESOURCE_LIMIT).
+const MAX_MSGS_CON_ADJUNTOS = 25
 
 const GMAIL_QUERY_FILTER = [
   // Remitentes fiscales / plataformas de factura electronica
@@ -30,9 +34,11 @@ const GMAIL_QUERY_FILTER = [
   'from:efactura',
   'from:surproductivo1@gmail.com', // proveedor que factura desde un gmail (sin palabras clave en asunto)
   'from:printa.workspc@gmail.com', // Printa (imprenta): factura desde un gmail, asunto sin palabras clave
-  'from:harriasrl@gmail.com', // facturas que los socios REENVIAN a la casilla desde la propia cuenta
-  'subject:RV', // reenvios (ES): un socio reenvia una factura a la casilla desde su cuenta personal
-  'subject:Fwd', // reenvios (EN): idem con Gmail en ingles
+  // Senal generica a prueba de proveedores nuevos: casi toda factura llega como
+  // PDF/XML adjunto. Capta cualquier correo con uno, sin depender de la lista de
+  // remitentes/asuntos (incluye reenvios, que arrastran el PDF).
+  'filename:pdf',
+  'filename:xml',
   // Asuntos tipicos de factura/comprobante
   'subject:factura',
   'subject:e-factura',
@@ -601,6 +607,7 @@ async function listarYProcesar(
 
   // Fetch full messages en lotes de 5
   const allRows: CorreoRow[] = []
+  let msgsConAdjuntos = 0 // presupuesto global de parseo de adjuntos (ver MAX_MSGS_CON_ADJUNTOS)
   for (let i = 0; i < allIds.length; i += 3) {
     const batch = allIds.slice(i, i + 3)
     const results = await Promise.all(
@@ -624,7 +631,8 @@ async function listarYProcesar(
 
       // Leer adjuntos (PDF, TXT, HTML) para monto, moneda y fecha
       let textoAdj = ''
-      if (montoDetectado == null) {
+      if (montoDetectado == null && msgsConAdjuntos < MAX_MSGS_CON_ADJUNTOS) {
+        msgsConAdjuntos++
         try {
           textoAdj = await extraerTextoAdjuntos(accessToken, m.id, m.payload)
           if (textoAdj) {
