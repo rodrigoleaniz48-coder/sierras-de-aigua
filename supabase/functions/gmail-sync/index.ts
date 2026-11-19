@@ -266,6 +266,20 @@ function decodePdfStr(s: string): string {
   })
 }
 
+// Decodifica una cadena PDF en hexadecimal (<48656c6c6f>). Soporta 1 byte por char
+// y UTF-16BE de ASCII (ignora el byte alto 0x00), para rescatar numeros/letras.
+function decodePdfHex(hex: string): string {
+  const clean = hex.replace(/[^0-9a-fA-F]/g, '')
+  let out = ''
+  for (let i = 0; i + 1 < clean.length; i += 2) {
+    const code = parseInt(clean.substr(i, 2), 16)
+    if (code === 0) continue
+    if (code >= 32 && code < 127) out += String.fromCharCode(code)
+    else out += ' '
+  }
+  return out
+}
+
 // Extrae operadores de texto PDF (Tj / TJ) de un fragmento. Acotado para no agotar
 // el worker: input limitado, cuantificadores limitados (anti-backtracking) y tope de salida.
 const MAX_OPS = 4000
@@ -279,10 +293,18 @@ function extraerOpsTexto(stream: string, out: string[]) {
     if (t.trim()) out.push(t)
     if (out.length >= MAX_OPS) return
   }
-  const tjArrRe = /\[((?:\([^)]{0,500}\)|[^[\]]){0,2000})\]\s*TJ/gi
+  // Variante hexadecimal: <...> Tj
+  const tjHexRe = /<([0-9a-fA-F\s]{2,2000}?)>\s*Tj/g
+  while ((match = tjHexRe.exec(s)) !== null) {
+    const t = decodePdfHex(match[1])
+    if (t.trim()) out.push(t)
+    if (out.length >= MAX_OPS) return
+  }
+  // Arrays TJ: pueden mezclar (texto) y <hex>; se toman ambos en orden.
+  const tjArrRe = /\[((?:\([^)]{0,500}\)|<[0-9a-fA-F\s]{0,500}>|[^[\]]){0,2000})\]\s*TJ/gi
   while ((match = tjArrRe.exec(s)) !== null) {
-    const parts = [...match[1].matchAll(/\(([^)]{0,500})\)/g)]
-    const combined = parts.map((p) => decodePdfStr(p[1])).join('')
+    const partes = [...match[1].matchAll(/\(([^)]{0,500})\)|<([0-9a-fA-F\s]{0,500})>/g)]
+    const combined = partes.map((p) => p[1] != null ? decodePdfStr(p[1]) : decodePdfHex(p[2] ?? '')).join('')
     if (combined.trim()) out.push(combined)
     if (out.length >= MAX_OPS) return
   }
@@ -344,6 +366,31 @@ async function extraerTextoPdfBasico(data: Uint8Array): Promise<string> {
   return textos.join(' ').replace(/\s+/g, ' ').trim().slice(0, 20_000)
 }
 
+// Parseo del XML de un CFE (factura electronica DGI): saca total y vencimiento de
+// los campos estructurados y los devuelve como texto que el extractor sabe leer.
+function extraerCamposXml(xml: string): string {
+  const num = (tags: string[]): string | null => {
+    for (const t of tags) {
+      const m = new RegExp(`<[^>]*\\b${t}\\b[^>]*>\\s*([\\d.,]+)\\s*<`, 'i').exec(xml)
+      if (m) return m[1]
+    }
+    return null
+  }
+  const fecha = (tags: string[]): string | null => {
+    for (const t of tags) {
+      const m = new RegExp(`<[^>]*\\b${t}\\b[^>]*>\\s*(\\d{4})-(\\d{2})-(\\d{2})`, 'i').exec(xml)
+      if (m) return `${m[3]}/${m[2]}/${m[1]}`
+    }
+    return null
+  }
+  const total = num(['MntPagar', 'MntTotal', 'TotalPagar', 'ImporteTotal'])
+  const venc = fecha(['FchVto', 'FchVenc', 'FecVto', 'FechaVencimiento'])
+  const partes: string[] = []
+  if (total) partes.push(`Total a pagar ${total}`)
+  if (venc) partes.push(`Vence ${venc}`)
+  return partes.join(' . ')
+}
+
 // ---- Extraer texto de adjuntos ----
 
 async function extraerTextoAdjuntos(
@@ -352,18 +399,22 @@ async function extraerTextoAdjuntos(
   payload: GmailPayload,
 ): Promise<string> {
   const adjuntos = getAdjuntos(payload)
+  const esXml = (a: AdjuntoPart) => a.mimeType.toLowerCase().includes('xml') || a.filename.toLowerCase().endsWith('.xml')
   const relevantes = adjuntos
     .filter((a) => {
       const n = a.filename.toLowerCase()
       const m = a.mimeType.toLowerCase()
       return (
         m === 'application/pdf' || n.endsWith('.pdf') ||
+        m.includes('xml') || n.endsWith('.xml') ||
         m.startsWith('text/') || n.endsWith('.txt') || n.endsWith('.csv') ||
         n.endsWith('.html') || n.endsWith('.htm')
       )
     })
     .filter((a) => a.size < 1_200_000)
-    .slice(0, 1)
+    // El XML (CFE) trae monto y vencimiento en campos estructurados: priorizarlo.
+    .sort((a, b) => (esXml(b) ? 1 : 0) - (esXml(a) ? 1 : 0))
+    .slice(0, 3)
 
   const textos: string[] = []
   for (const att of relevantes) {
@@ -374,6 +425,8 @@ async function extraerTextoAdjuntos(
 
       if (mime === 'application/pdf' || nombre.endsWith('.pdf')) {
         textos.push(await extraerTextoPdf(bytes))
+      } else if (mime.includes('xml') || nombre.endsWith('.xml')) {
+        textos.push(extraerCamposXml(new TextDecoder('utf-8', { fatal: false }).decode(bytes)))
       } else if (mime === 'text/html' || nombre.endsWith('.html') || nombre.endsWith('.htm')) {
         textos.push(stripHtml(new TextDecoder('utf-8', { fatal: false }).decode(bytes)))
       } else {
@@ -462,7 +515,9 @@ function detectarMonto(texto: string): number | null {
 function detectarFechaVencimiento(texto: string): string | null {
   const patterns = [
     /venc\w*[\s.:]*(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})/gi,
+    /\bvto\.?[\s:]*(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})/gi,
     /fecha\s*l[ií]mite[\s.:]*(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})/gi,
+    /fecha\s+de\s+pago[\s.:]*(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})/gi,
     /plazo[\s.:]*(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})/gi,
     /venc\w*[\s.:]*(\d{1,2})\s+de\s+(\w+)\s+(?:de\s+)?(\d{2,4})/gi,
     /(?:pagar|abonar)\s+(?:antes|hasta)\s+(?:el\s+)?(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})/gi,
