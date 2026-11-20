@@ -47,14 +47,9 @@ export function PendientesCard() {
   const mios = (p: Pendiente) =>
     (p.asignados_a?.includes(soyYo) ?? false) || p.asignado_a === soyYo || p.creado_por === soyYo
   const misItems = useMemo(() => items.filter(mios), [items, soyYo]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Orden: mas nuevo primero (id crece con cada alta), asi en Inicio se ven los recien agregados.
   const proximos = useMemo(() => {
-    return [...misItems].sort((a, b) => {
-      const fa = a.fecha_vence, fb = b.fecha_vence
-      if (fa && fb) return fa.localeCompare(fb)
-      if (fa && !fb) return -1
-      if (!fa && fb) return 1
-      return b.id - a.id
-    }).slice(0, 5)
+    return [...misItems].sort((a, b) => b.id - a.id).slice(0, 5)
   }, [misItems])
 
   async function agregar(e: React.FormEvent) {
