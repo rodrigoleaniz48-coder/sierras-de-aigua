@@ -101,7 +101,8 @@ function laborFormVacio(catDefault: string): LaborForm {
 // Componente principal
 // ---------------------------------------------------------------------------
 
-type Cronograma = 'aplicaciones' | 'manejo' | 'cosecha' | 'informes'
+// 'manejo' unifica labores + aplicaciones + clima en un solo cronograma.
+type Cronograma = 'manejo' | 'cosecha' | 'informes'
 type Vista = 'lista' | 'grilla'
 
 // Formularios cortos de clima / informes (sin borrador: son chicos)
@@ -148,8 +149,6 @@ export function Campo() {
   const [editInforme, setEditInforme] = useState<InformeTecnico | null>(null)
   const [detInforme, setDetInforme] = useState<InformeTecnico | null>(null)
 
-  const ambito: AmbitoCategoria = cronograma === 'aplicaciones' ? 'aplicacion' : 'labor'
-
   async function cargarCats() {
     const { data } = await supabase.from('categorias_campo').select('*').order('orden').order('nombre')
     setCats((data as CategoriaCampo[]) ?? [])
@@ -176,8 +175,7 @@ export function Campo() {
 
   useEffect(() => {
     if (abrirNueva) {
-      if (cronograma === 'aplicaciones') setNuevaAplic(true)
-      else if (cronograma === 'manejo') setNuevaLabor(true)
+      if (cronograma === 'manejo') setNuevaLabor(true)
       // cosecha/informes manejan su propio alta
       navigate(location.pathname, { replace: true, state: {} })
     }
@@ -187,8 +185,7 @@ export function Campo() {
   useEffect(() => {
     function h() {
       if (cronograma === 'cosecha') return // CosechaPanel maneja su propio FAB
-      if (cronograma === 'aplicaciones') setNuevaAplic(true)
-      else if (cronograma === 'manejo') setNuevaLabor(true)
+      if (cronograma === 'manejo') setNuevaLabor(true)
       else if (cronograma === 'informes') setNuevoInforme(true)
     }
     window.addEventListener('app:fab-nuevo', h)
@@ -201,7 +198,6 @@ export function Campo() {
   const infoLabor = useMemo(() => new Map(cats.filter((c) => c.ambito === 'labor').map((c) => [c.slug, c])), [cats])
   const activasApp = useMemo(() => cats.filter((c) => c.ambito === 'aplicacion' && c.activo), [cats])
   const activasLabor = useMemo(() => cats.filter((c) => c.ambito === 'labor' && c.activo), [cats])
-  const activasActual = ambito === 'aplicacion' ? activasApp : activasLabor
 
   const colorDe = (map: Map<string, CategoriaCampo>, slug: string) => map.get(slug)?.color ?? COLOR_FALLBACK
 
@@ -345,13 +341,7 @@ export function Campo() {
     await cargar()
   }
 
-  const labelNuevo = cronograma === 'aplicaciones' ? 'Nueva aplicación'
-    : cronograma === 'manejo' ? 'Nueva labor' : 'Nueva visita'
-  function abrirNuevo() {
-    if (cronograma === 'aplicaciones') setNuevaAplic(true)
-    else if (cronograma === 'manejo') setNuevaLabor(true)
-    else if (cronograma === 'informes') setNuevoInforme(true)
-  }
+  const activasTodas = useMemo(() => [...activasApp, ...activasLabor], [activasApp, activasLabor])
 
   // ------------------------------------------------------------------ render
   return (
@@ -362,31 +352,43 @@ export function Campo() {
           <Segmento
             valor={cronograma}
             onChange={(v) => setCronograma(v as Cronograma)}
-            opciones={[['cosecha', 'Cosecha'], ['aplicaciones', 'Aplicaciones'], ['manejo', 'Manejo de cultivo'], ['informes', 'Informes']]}
+            opciones={[['cosecha', 'Cosecha'], ['manejo', 'Manejo de cultivo'], ['informes', 'Informes']]}
           />
         </div>
-        {puedeEscribir && cronograma !== 'cosecha' && (
-          <div className="flex items-center gap-2">
+        {puedeEscribir && cronograma === 'manejo' && (
+          <div className="flex items-center gap-2 flex-wrap">
             <button
-              onClick={abrirNuevo}
+              onClick={() => setNuevaLabor(true)}
               className="inline-flex items-center gap-1.5 rounded-lg bg-oliva-800 text-oliva-50 px-3.5 py-2 text-sm font-medium hover:bg-oliva-900"
             >
-              <span className="text-base leading-none">+</span> {labelNuevo}
+              <span className="text-base leading-none">+</span> Labor
             </button>
-            {cronograma === 'manejo' && (
-              <button
-                onClick={() => setNuevaLluvia(true)}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 text-sky-800 px-3 py-2 text-sm font-medium hover:bg-sky-100"
-              >
-                💧 Lluvia
-              </button>
-            )}
+            <button
+              onClick={() => setNuevaAplic(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-oliva-300 bg-white text-oliva-800 px-3.5 py-2 text-sm font-medium hover:border-oliva-400"
+            >
+              <span className="text-base leading-none">+</span> Aplicación
+            </button>
+            <button
+              onClick={() => setNuevaLluvia(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 text-sky-800 px-3 py-2 text-sm font-medium hover:bg-sky-100"
+            >
+              💧 Lluvia
+            </button>
           </div>
+        )}
+        {puedeEscribir && cronograma === 'informes' && (
+          <button
+            onClick={() => setNuevoInforme(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-oliva-800 text-oliva-50 px-3.5 py-2 text-sm font-medium hover:bg-oliva-900"
+          >
+            <span className="text-base leading-none">+</span> Nueva visita
+          </button>
         )}
       </div>
 
-      {/* Fila 2: ano + vista (solo cronogramas con linea de tiempo) */}
-      {(cronograma === 'aplicaciones' || cronograma === 'manejo') && (
+      {/* Fila 2: ano + vista (solo el cronograma de manejo) */}
+      {cronograma === 'manejo' && (
         <div className="flex items-center justify-between gap-2 flex-wrap mb-4">
           <label className="flex items-center gap-2 text-sm">
             <span className="text-oliva-600">Año</span>
@@ -413,12 +415,11 @@ export function Campo() {
         </div>
       )}
 
-      {/* Leyenda + editar categorias (solo cronogramas de labores/aplicaciones) */}
-      {(cronograma === 'aplicaciones' || cronograma === 'manejo') && (
+      {/* Leyenda unificada (labores + aplicaciones), con descripcion al tocar */}
+      {cronograma === 'manejo' && (
         <Leyenda
-          cats={activasActual}
+          cats={activasTodas}
           onInfo={() => setVerLeyenda(true)}
-          onEditar={puedeEscribir ? () => setEditorAmbito(ambito) : undefined}
         />
       )}
 
@@ -428,26 +429,26 @@ export function Campo() {
         <CosechaPanel puedeEscribir={puedeEscribir} />
       ) : cronograma === 'informes' ? (
         <ListaInformes items={informes} onAbrir={setDetInforme} />
-      ) : cronograma === 'aplicaciones' ? (
-        vista === 'lista'
-          ? <ListaAplicaciones items={aplicAnio} prodPorAplic={prodPorAplic} info={infoApp} onAbrir={setDetAplic} />
-          : <GrillaEventos
-              anio={anio}
-              eventos={aplicAnio.map((a) => ({ id: a.id, fecha: a.fecha, colores: [...new Set((prodPorAplic.get(a.id) ?? []).map((p) => p.categoria))].map((slug) => colorDe(infoApp, slug)), planif: a.estado === 'planificada', onAbrir: () => setDetAplic(a) }))}
-            />
       ) : (
         vista === 'lista'
           ? <ListaManejo
               labores={laboresAnio}
+              aplicaciones={aplicAnio}
+              prodPorAplic={prodPorAplic}
               lluvias={lluviasAnio}
-              info={infoLabor}
+              infoLabor={infoLabor}
+              infoApp={infoApp}
               onAbrirLabor={setDetLabor}
+              onAbrirAplic={setDetAplic}
               onAbrirLluvia={setDetLluvia}
             />
           : <GrillaEventos
               anio={anio}
               mmPorMes={mmPorMes}
-              eventos={laboresAnio.map((l) => ({ id: l.id, fecha: l.fecha, colores: [colorDe(infoLabor, l.tipo_labor)], planif: l.estado === 'planificada', onAbrir: () => setDetLabor(l) }))}
+              eventos={[
+                ...aplicAnio.map((a) => ({ id: `a${a.id}`, fecha: a.fecha, colores: [...new Set((prodPorAplic.get(a.id) ?? []).map((p) => p.categoria))].map((slug) => colorDe(infoApp, slug)), planif: a.estado === 'planificada', onAbrir: () => setDetAplic(a) })),
+                ...laboresAnio.map((l) => ({ id: `l${l.id}`, fecha: l.fecha, colores: [colorDe(infoLabor, l.tipo_labor)], planif: l.estado === 'planificada', onAbrir: () => setDetLabor(l) })),
+              ]}
             />
       )}
 
@@ -521,8 +522,11 @@ export function Campo() {
 
       {verLeyenda && (
         <LeyendaInfoDialog
-          cats={activasActual}
-          titulo={ambito === 'aplicacion' ? '¿Qué es cada categoría?' : '¿Qué es cada tipo de labor?'}
+          grupos={[
+            { titulo: 'Aplicaciones (productos)', ambito: 'aplicacion', cats: activasApp },
+            { titulo: 'Labores', ambito: 'labor', cats: activasLabor },
+          ]}
+          onEditar={puedeEscribir ? (a) => { setVerLeyenda(false); setEditorAmbito(a) } : undefined}
           onCerrar={() => setVerLeyenda(false)}
         />
       )}
@@ -635,21 +639,38 @@ function Leyenda({ cats, onInfo, onEditar }: { cats: CategoriaCampo[]; onInfo?: 
   )
 }
 
-// Diccionario de la leyenda: que es cada categoria (fungicida, fertilizante...).
-function LeyendaInfoDialog({ cats, titulo, onCerrar }: { cats: CategoriaCampo[]; titulo: string; onCerrar: () => void }) {
+// Diccionario de la leyenda: que es cada categoria (fungicida, fertilizante,
+// labores...), agrupado por ambito y con acceso a editar cada grupo.
+function LeyendaInfoDialog({ grupos, onEditar, onCerrar }: {
+  grupos: { titulo: string; ambito: AmbitoCategoria; cats: CategoriaCampo[] }[]
+  onEditar?: (a: AmbitoCategoria) => void
+  onCerrar: () => void
+}) {
   return (
-    <Dialog abierto onCerrar={onCerrar} titulo={titulo} ancho="md">
-      <div className="space-y-2.5">
-        {cats.map((c) => (
-          <div key={c.id} className="flex gap-2.5">
-            <span className="h-3 w-3 rounded-full shrink-0 mt-0.5" style={{ background: c.color }} />
-            <div className="min-w-0">
-              <div className="text-sm font-medium text-oliva-900">{c.nombre}</div>
-              <p className="text-sm text-oliva-600">{c.descripcion?.trim() || 'Sin descripción. Agregala desde «Editar».'}</p>
+    <Dialog abierto onCerrar={onCerrar} titulo="¿Qué es cada categoría?" ancho="md">
+      <div className="space-y-4">
+        {grupos.map((g) => (
+          <div key={g.ambito}>
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="text-xs font-medium uppercase tracking-wide text-oliva-400">{g.titulo}</div>
+              {onEditar && (
+                <button onClick={() => onEditar(g.ambito)} className="text-xs font-medium text-oliva-600 hover:text-oliva-900 underline decoration-dotted">Editar</button>
+              )}
+            </div>
+            <div className="space-y-2.5">
+              {g.cats.map((c) => (
+                <div key={c.id} className="flex gap-2.5">
+                  <span className="h-3 w-3 rounded-full shrink-0 mt-0.5" style={{ background: c.color }} />
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-oliva-900">{c.nombre}</div>
+                    <p className="text-sm text-oliva-600">{c.descripcion?.trim() || 'Sin descripción. Agregala desde «Editar».'}</p>
+                  </div>
+                </div>
+              ))}
+              {g.cats.length === 0 && <p className="text-sm text-oliva-400">Sin categorías.</p>}
             </div>
           </div>
         ))}
-        {cats.length === 0 && <p className="text-sm text-oliva-400">Sin categorías.</p>}
       </div>
     </Dialog>
   )
@@ -679,49 +700,37 @@ function agruparPorMes<T extends { fecha: string }>(items: T[]): [string, T[]][]
   return grupos
 }
 
-function ListaAplicaciones({ items, prodPorAplic, info, onAbrir }: {
-  items: Aplicacion[]; prodPorAplic: Map<number, AplicacionProducto[]>; info: Map<string, CategoriaCampo>; onAbrir: (a: Aplicacion) => void
+// Fila de aplicacion en la lista del cronograma de Manejo.
+function FilaAplicLista({ a, prods, info, onAbrir }: {
+  a: Aplicacion; prods: AplicacionProducto[]; info: Map<string, CategoriaCampo>; onAbrir: (a: Aplicacion) => void
 }) {
-  if (items.length === 0) return <VacioMsg texto="No hay aplicaciones en este año." />
+  const dia = a.fecha.slice(8, 10)
   return (
-    <div>
-      {agruparPorMes(items).map(([mes, grupo]) => (
-        <div key={mes}>
-          <div className="text-xs font-medium uppercase tracking-wide text-oliva-400 mt-4 mb-2">{mes}</div>
-          {grupo.map((a) => {
-            const prods = prodPorAplic.get(a.id) ?? []
-            const dia = a.fecha.slice(8, 10)
-            return (
-              <button
-                key={a.id}
-                onClick={() => onAbrir(a)}
-                className="w-full text-left flex gap-3 items-start bg-white border border-oliva-100 rounded-xl px-3.5 py-3 mb-2 hover:border-oliva-300 transition"
-              >
-                <div className="w-8 text-center shrink-0">
-                  <div className="text-xl font-semibold text-oliva-900 leading-none">{dia}</div>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-2">
-                    <BadgeSectores sectores={a.sectores} />
-                    {a.estado === 'planificada' && <BadgePlanif />}
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {prods.length === 0 && <span className="text-xs text-oliva-400">sin productos</span>}
-                    {prods.map((p) => (
-                      <span key={p.id} className="inline-flex items-center gap-1.5 bg-oliva-50 border border-oliva-100 rounded-full px-2.5 py-1 text-xs text-oliva-800">
-                        <span className="h-2 w-2 rounded-full shrink-0" style={{ background: info.get(p.categoria)?.color ?? COLOR_FALLBACK }} />
-                        {p.producto_comercial}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                <span className="text-oliva-300 shrink-0">›</span>
-              </button>
-            )
-          })}
+    <button
+      onClick={() => onAbrir(a)}
+      className="w-full text-left flex gap-3 items-start bg-white border border-oliva-100 rounded-xl px-3.5 py-3 mb-2 hover:border-oliva-300 transition"
+    >
+      <div className="w-8 text-center shrink-0">
+        <div className="text-xl font-semibold text-oliva-900 leading-none">{dia}</div>
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-[11px] font-medium text-oliva-500 bg-oliva-50 border border-oliva-100 rounded px-1.5 py-0.5">Aplicación</span>
+          <BadgeSectores sectores={a.sectores} />
+          {a.estado === 'planificada' && <BadgePlanif />}
         </div>
-      ))}
-    </div>
+        <div className="flex flex-wrap gap-1.5">
+          {prods.length === 0 && <span className="text-xs text-oliva-400">sin productos</span>}
+          {prods.map((p) => (
+            <span key={p.id} className="inline-flex items-center gap-1.5 bg-oliva-50 border border-oliva-100 rounded-full px-2.5 py-1 text-xs text-oliva-800">
+              <span className="h-2 w-2 rounded-full shrink-0" style={{ background: info.get(p.categoria)?.color ?? COLOR_FALLBACK }} />
+              {p.producto_comercial}
+            </span>
+          ))}
+        </div>
+      </div>
+      <span className="text-oliva-300 shrink-0">›</span>
+    </button>
   )
 }
 
@@ -773,19 +782,29 @@ function FilaLluviaLista({ r, onAbrir }: { r: Lluvia; onAbrir: (r: Lluvia) => vo
   )
 }
 
-// Cronograma de Manejo: labores + lluvias intercaladas por fecha, con mm por mes.
-function ListaManejo({ labores, lluvias, info, onAbrirLabor, onAbrirLluvia }: {
-  labores: LaborCampo[]; lluvias: Lluvia[]; info: Map<string, CategoriaCampo>
-  onAbrirLabor: (l: LaborCampo) => void; onAbrirLluvia: (r: Lluvia) => void
+// Cronograma de Manejo unificado: labores + aplicaciones + lluvias intercaladas
+// por fecha, con mm por mes.
+function ListaManejo({ labores, aplicaciones, prodPorAplic, lluvias, infoLabor, infoApp, onAbrirLabor, onAbrirAplic, onAbrirLluvia }: {
+  labores: LaborCampo[]
+  aplicaciones: Aplicacion[]
+  prodPorAplic: Map<number, AplicacionProducto[]>
+  lluvias: Lluvia[]
+  infoLabor: Map<string, CategoriaCampo>
+  infoApp: Map<string, CategoriaCampo>
+  onAbrirLabor: (l: LaborCampo) => void
+  onAbrirAplic: (a: Aplicacion) => void
+  onAbrirLluvia: (r: Lluvia) => void
 }) {
   type Item =
     | { kind: 'labor'; fecha: string; labor: LaborCampo }
+    | { kind: 'aplic'; fecha: string; aplic: Aplicacion }
     | { kind: 'lluvia'; fecha: string; lluvia: Lluvia }
   const items: Item[] = [
     ...labores.map((l): Item => ({ kind: 'labor', fecha: l.fecha, labor: l })),
+    ...aplicaciones.map((a): Item => ({ kind: 'aplic', fecha: a.fecha, aplic: a })),
     ...lluvias.map((r): Item => ({ kind: 'lluvia', fecha: r.fecha, lluvia: r })),
   ].sort((a, b) => a.fecha.localeCompare(b.fecha))
-  if (items.length === 0) return <VacioMsg texto="No hay labores ni lluvias en este año." />
+  if (items.length === 0) return <VacioMsg texto="No hay labores, aplicaciones ni lluvias en este año." />
   return (
     <div>
       {agruparPorMes(items).map(([mes, grupo]) => {
@@ -797,8 +816,10 @@ function ListaManejo({ labores, lluvias, info, onAbrirLabor, onAbrirLluvia }: {
               {mmMes > 0 && <span className="text-[11px] font-medium text-sky-600">💧 {Math.round(mmMes)} mm</span>}
             </div>
             {grupo.map((it) => it.kind === 'labor'
-              ? <FilaLaborLista key={`l${it.labor.id}`} l={it.labor} info={info} onAbrir={onAbrirLabor} />
-              : <FilaLluviaLista key={`r${it.lluvia.id}`} r={it.lluvia} onAbrir={onAbrirLluvia} />)}
+              ? <FilaLaborLista key={`l${it.labor.id}`} l={it.labor} info={infoLabor} onAbrir={onAbrirLabor} />
+              : it.kind === 'aplic'
+                ? <FilaAplicLista key={`a${it.aplic.id}`} a={it.aplic} prods={prodPorAplic.get(it.aplic.id) ?? []} info={infoApp} onAbrir={onAbrirAplic} />
+                : <FilaLluviaLista key={`r${it.lluvia.id}`} r={it.lluvia} onAbrir={onAbrirLluvia} />)}
           </div>
         )
       })}
@@ -841,7 +862,7 @@ function ListaInformes({ items, onAbrir }: { items: InformeTecnico[]; onAbrir: (
   )
 }
 
-interface EventoGrilla { id: number; fecha: string; colores: string[]; planif: boolean; onAbrir: () => void }
+interface EventoGrilla { id: string; fecha: string; colores: string[]; planif: boolean; onAbrir: () => void }
 
 // Fondo de una marca de la grilla: un color, o varios en franjas verticales
 // (para ver de un golpe que se aplico mas de una categoria el mismo evento).

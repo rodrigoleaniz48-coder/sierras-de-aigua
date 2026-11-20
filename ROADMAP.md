@@ -64,9 +64,9 @@ Pendientes por área. El contexto de proyecto (stack, roles, comandos, convencio
 
 ## Campo (cuaderno de campo)
 
-Módulo con 4 sub-vistas (pestañas scrolleables): Aplicaciones, Manejo de cultivo, Cosecha, Informes.
+Módulo con 3 sub-vistas (pestañas): Cosecha, Manejo de cultivo, Informes. "Manejo de cultivo" unifica labores + aplicaciones + clima (lluvia) en un solo cronograma (lista/grilla).
 
-- [x] Cronogramas de Aplicaciones y Manejo (lista/grilla, categorías de color editables).
+- [x] Cronograma unificado de Manejo (labores + aplicaciones + lluvias, lista/grilla). Categorías de color editables con descripción (se ve al tocar la leyenda). Grilla multicolor por categoría.
 - [x] Cosecha (resumen por variedad y sector, export Excel, editor de sectores).
 - [x] **Clima = solo lluvia**, integrado al cronograma de Manejo (día + mm, total mm por mes/año). Histórico 2017–2025 importado (356 eventos; ver `migracion_campo_clima.sql`).
 - [x] **Informes técnicos**: pestaña propia con las 27 visitas de Marcelo Cabrera + alta/edición.
