@@ -43,9 +43,9 @@ export function PendientesCard() {
   useEffect(() => { cargar() }, [])
 
   const hoy = hoyLocalStr()
-  // En Inicio cada uno ve solo lo que le corresponde: asignado a el o creado por el.
+  // En Inicio cada uno ve solo lo asignado a el (no lo que creo para otro).
   const mios = (p: Pendiente) =>
-    (p.asignados_a?.includes(soyYo) ?? false) || p.asignado_a === soyYo || p.creado_por === soyYo
+    (p.asignados_a?.includes(soyYo) ?? false) || p.asignado_a === soyYo
   const misItems = useMemo(() => items.filter(mios), [items, soyYo]) // eslint-disable-line react-hooks/exhaustive-deps
   // Orden: mas nuevo primero (id crece con cada alta), asi en Inicio se ven los recien agregados.
   const proximos = useMemo(() => {

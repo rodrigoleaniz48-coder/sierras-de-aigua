@@ -177,7 +177,8 @@ export function Pendientes() {
     if (error) { alert('No se pudo guardar: ' + error.message); cargar() }
   }
 
-  const mios = (p: Pendiente) => asignadosDe(p).includes(soyYo) || p.creado_por === soyYo
+  // "Mios" = asignado a mi. No incluye lo que yo cree para otro (eso es tarea del asignado).
+  const mios = (p: Pendiente) => asignadosDe(p).includes(soyYo)
 
   const pendientes = useMemo(() => {
     return items
