@@ -139,6 +139,7 @@ export function Campo() {
   const [editAplic, setEditAplic] = useState<Aplicacion | null>(null)
   const [editLabor, setEditLabor] = useState<LaborCampo | null>(null)
   const [editorAmbito, setEditorAmbito] = useState<AmbitoCategoria | null>(null)
+  const [verLeyenda, setVerLeyenda] = useState(false)
   // Clima (lluvia) e informes tecnicos
   const [nuevaLluvia, setNuevaLluvia] = useState(false)
   const [editLluvia, setEditLluvia] = useState<Lluvia | null>(null)
@@ -416,6 +417,7 @@ export function Campo() {
       {(cronograma === 'aplicaciones' || cronograma === 'manejo') && (
         <Leyenda
           cats={activasActual}
+          onInfo={() => setVerLeyenda(true)}
           onEditar={puedeEscribir ? () => setEditorAmbito(ambito) : undefined}
         />
       )}
@@ -431,7 +433,7 @@ export function Campo() {
           ? <ListaAplicaciones items={aplicAnio} prodPorAplic={prodPorAplic} info={infoApp} onAbrir={setDetAplic} />
           : <GrillaEventos
               anio={anio}
-              eventos={aplicAnio.map((a) => ({ id: a.id, fecha: a.fecha, color: colorDe(infoApp, prodPorAplic.get(a.id)?.[0]?.categoria ?? ''), planif: a.estado === 'planificada', onAbrir: () => setDetAplic(a) }))}
+              eventos={aplicAnio.map((a) => ({ id: a.id, fecha: a.fecha, colores: [...new Set((prodPorAplic.get(a.id) ?? []).map((p) => p.categoria))].map((slug) => colorDe(infoApp, slug)), planif: a.estado === 'planificada', onAbrir: () => setDetAplic(a) }))}
             />
       ) : (
         vista === 'lista'
@@ -445,7 +447,7 @@ export function Campo() {
           : <GrillaEventos
               anio={anio}
               mmPorMes={mmPorMes}
-              eventos={laboresAnio.map((l) => ({ id: l.id, fecha: l.fecha, color: colorDe(infoLabor, l.tipo_labor), planif: l.estado === 'planificada', onAbrir: () => setDetLabor(l) }))}
+              eventos={laboresAnio.map((l) => ({ id: l.id, fecha: l.fecha, colores: [colorDe(infoLabor, l.tipo_labor)], planif: l.estado === 'planificada', onAbrir: () => setDetLabor(l) }))}
             />
       )}
 
@@ -514,6 +516,14 @@ export function Campo() {
           ambito={editorAmbito}
           onCerrar={() => setEditorAmbito(null)}
           onCambio={cargarCats}
+        />
+      )}
+
+      {verLeyenda && (
+        <LeyendaInfoDialog
+          cats={activasActual}
+          titulo={ambito === 'aplicacion' ? '¿Qué es cada categoría?' : '¿Qué es cada tipo de labor?'}
+          onCerrar={() => setVerLeyenda(false)}
         />
       )}
 
@@ -596,23 +606,52 @@ function Segmento({ valor, onChange, opciones, pequeno }: {
   )
 }
 
-function Leyenda({ cats, onEditar }: { cats: CategoriaCampo[]; onEditar?: () => void }) {
+function Leyenda({ cats, onInfo, onEditar }: { cats: CategoriaCampo[]; onInfo?: () => void; onEditar?: () => void }) {
   return (
     <div className="flex items-center gap-2 rounded-lg bg-oliva-50 border border-oliva-100 px-3 py-2 mb-4">
-      <div className="flex flex-wrap gap-x-4 gap-y-1.5 flex-1">
+      <div className="flex flex-wrap gap-x-3 gap-y-1.5 flex-1">
         {cats.map((c) => (
-          <span key={c.id} className="flex items-center gap-1.5 text-xs text-oliva-600">
+          <button
+            key={c.id}
+            onClick={onInfo}
+            disabled={!onInfo}
+            title={onInfo ? `Qué es ${c.nombre}` : undefined}
+            className="flex items-center gap-1.5 text-xs text-oliva-600 enabled:hover:text-oliva-900 enabled:cursor-pointer"
+          >
             <span className="h-2.5 w-2.5 rounded-full" style={{ background: c.color }} />{c.nombre}
-          </span>
+          </button>
         ))}
         {cats.length === 0 && <span className="text-xs text-oliva-400">Sin categorías.</span>}
       </div>
+      {onInfo && cats.length > 0 && (
+        <button onClick={onInfo} title="Qué es cada categoría" aria-label="Qué es cada categoría" className="shrink-0 h-6 w-6 rounded-full bg-white border border-oliva-200 text-oliva-500 text-xs leading-none hover:text-oliva-900 hover:border-oliva-400">ⓘ</button>
+      )}
       {onEditar && (
         <button onClick={onEditar} className="shrink-0 text-xs font-medium text-oliva-600 hover:text-oliva-900 underline decoration-dotted">
           Editar
         </button>
       )}
     </div>
+  )
+}
+
+// Diccionario de la leyenda: que es cada categoria (fungicida, fertilizante...).
+function LeyendaInfoDialog({ cats, titulo, onCerrar }: { cats: CategoriaCampo[]; titulo: string; onCerrar: () => void }) {
+  return (
+    <Dialog abierto onCerrar={onCerrar} titulo={titulo} ancho="md">
+      <div className="space-y-2.5">
+        {cats.map((c) => (
+          <div key={c.id} className="flex gap-2.5">
+            <span className="h-3 w-3 rounded-full shrink-0 mt-0.5" style={{ background: c.color }} />
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-oliva-900">{c.nombre}</div>
+              <p className="text-sm text-oliva-600">{c.descripcion?.trim() || 'Sin descripción. Agregala desde «Editar».'}</p>
+            </div>
+          </div>
+        ))}
+        {cats.length === 0 && <p className="text-sm text-oliva-400">Sin categorías.</p>}
+      </div>
+    </Dialog>
   )
 }
 
@@ -802,7 +841,17 @@ function ListaInformes({ items, onAbrir }: { items: InformeTecnico[]; onAbrir: (
   )
 }
 
-interface EventoGrilla { id: number; fecha: string; color: string; planif: boolean; onAbrir: () => void }
+interface EventoGrilla { id: number; fecha: string; colores: string[]; planif: boolean; onAbrir: () => void }
+
+// Fondo de una marca de la grilla: un color, o varios en franjas verticales
+// (para ver de un golpe que se aplico mas de una categoria el mismo evento).
+function fondoSegmentos(colores: string[]): string {
+  const cs = colores.length ? colores : [COLOR_FALLBACK]
+  if (cs.length === 1) return cs[0]
+  const n = cs.length
+  const tramos = cs.map((c, i) => `${c} ${((i / n) * 100).toFixed(2)}% ${(((i + 1) / n) * 100).toFixed(2)}%`).join(', ')
+  return `linear-gradient(90deg, ${tramos})`
+}
 
 function GrillaEventos({ anio, eventos, mmPorMes }: { anio: string; eventos: EventoGrilla[]; mmPorMes?: Record<number, number> }) {
   const anioNum = Number(anio) || new Date().getFullYear()
@@ -825,8 +874,8 @@ function GrillaEventos({ anio, eventos, mmPorMes }: { anio: string; eventos: Eve
                   key={e.id}
                   onClick={e.onAbrir}
                   title={fFecha(e.fecha)}
-                  className={`inline-flex items-center justify-center h-6 min-w-[22px] px-1 rounded text-[11px] font-medium text-white ${e.planif ? 'opacity-60 ring-1 ring-blue-400' : ''}`}
-                  style={{ background: e.color }}
+                  className={`inline-flex items-center justify-center h-6 min-w-[22px] px-1 rounded text-[11px] font-medium text-white [text-shadow:0_1px_1.5px_rgba(0,0,0,0.45)] ${e.planif ? 'opacity-60 ring-1 ring-blue-400' : ''}`}
+                  style={{ background: fondoSegmentos(e.colores) }}
                 >
                   {e.fecha.slice(8, 10)}
                 </button>
@@ -1270,7 +1319,7 @@ function CategoriasEditorDialog({ ambito, onCerrar, onCambio }: {
         ) : (
           <div className="space-y-1.5 max-h-[55vh] overflow-y-auto">
             {items.map((c) => (
-              <FilaCategoria key={c.id} c={c} onColor={(color) => patch(c, { color })} onNombre={(nombre) => patch(c, { nombre })} onToggle={() => patch(c, { activo: !c.activo })} onDel={() => eliminar(c)} />
+              <FilaCategoria key={c.id} c={c} onColor={(color) => patch(c, { color })} onNombre={(nombre) => patch(c, { nombre })} onDesc={(descripcion) => patch(c, { descripcion })} onToggle={() => patch(c, { activo: !c.activo })} onDel={() => eliminar(c)} />
             ))}
             {items.length === 0 && <p className="text-xs text-oliva-400 italic">Sin categorías.</p>}
           </div>
@@ -1281,23 +1330,35 @@ function CategoriasEditorDialog({ ambito, onCerrar, onCambio }: {
   )
 }
 
-function FilaCategoria({ c, onColor, onNombre, onToggle, onDel }: {
-  c: CategoriaCampo; onColor: (color: string) => void; onNombre: (nombre: string) => void; onToggle: () => void; onDel: () => void
+function FilaCategoria({ c, onColor, onNombre, onDesc, onToggle, onDel }: {
+  c: CategoriaCampo; onColor: (color: string) => void; onNombre: (nombre: string) => void; onDesc: (descripcion: string) => void; onToggle: () => void; onDel: () => void
 }) {
   const [nombre, setNombre] = useState(c.nombre)
+  const [desc, setDesc] = useState(c.descripcion ?? '')
   useEffect(() => { setNombre(c.nombre) }, [c.nombre])
+  useEffect(() => { setDesc(c.descripcion ?? '') }, [c.descripcion])
   return (
-    <div className={`flex items-center gap-2 rounded-lg border px-2 py-1.5 ${c.activo ? 'bg-white border-oliva-100' : 'bg-oliva-50/60 border-oliva-100 opacity-70'}`}>
-      <input type="color" value={c.color} onChange={(e) => onColor(e.target.value)} className="h-8 w-9 rounded border border-oliva-200 bg-white p-0.5 cursor-pointer shrink-0" aria-label={`Color ${c.nombre}`} />
-      <input
-        value={nombre}
-        onChange={(e) => setNombre(e.target.value)}
-        onBlur={() => { if (nombre.trim() && nombre !== c.nombre) onNombre(nombre.trim()) }}
-        onKeyDown={(e) => { if (e.key === 'Enter') { (e.target as HTMLInputElement).blur() } }}
-        className="flex-1 min-w-0 rounded-lg border border-transparent hover:border-oliva-200 focus:border-oliva-300 px-2 py-1 text-sm focus:outline-none"
+    <div className={`rounded-lg border px-2 py-1.5 ${c.activo ? 'bg-white border-oliva-100' : 'bg-oliva-50/60 border-oliva-100 opacity-70'}`}>
+      <div className="flex items-center gap-2">
+        <input type="color" value={c.color} onChange={(e) => onColor(e.target.value)} className="h-8 w-9 rounded border border-oliva-200 bg-white p-0.5 cursor-pointer shrink-0" aria-label={`Color ${c.nombre}`} />
+        <input
+          value={nombre}
+          onChange={(e) => setNombre(e.target.value)}
+          onBlur={() => { if (nombre.trim() && nombre !== c.nombre) onNombre(nombre.trim()) }}
+          onKeyDown={(e) => { if (e.key === 'Enter') { (e.target as HTMLInputElement).blur() } }}
+          className="flex-1 min-w-0 rounded-lg border border-transparent hover:border-oliva-200 focus:border-oliva-300 px-2 py-1 text-sm focus:outline-none"
+        />
+        <button onClick={onToggle} title={c.activo ? 'Desactivar' : 'Activar'} className="shrink-0 h-8 w-8 rounded-md bg-oliva-50 hover:bg-oliva-100 text-sm">{c.activo ? '👁' : '↻'}</button>
+        <button onClick={onDel} title="Eliminar" className="shrink-0 h-8 w-8 rounded-md bg-red-50 hover:bg-red-100 text-red-700 text-sm">🗑</button>
+      </div>
+      <textarea
+        value={desc}
+        onChange={(e) => setDesc(e.target.value)}
+        onBlur={() => { if (desc.trim() !== (c.descripcion ?? '').trim()) onDesc(desc.trim()) }}
+        rows={2}
+        placeholder="Descripción: qué es / cuándo se usa (se ve al tocar la leyenda)"
+        className="mt-1.5 w-full rounded-lg border border-oliva-100 focus:border-oliva-300 px-2 py-1 text-xs text-oliva-700 focus:outline-none resize-y"
       />
-      <button onClick={onToggle} title={c.activo ? 'Desactivar' : 'Activar'} className="shrink-0 h-8 w-8 rounded-md bg-oliva-50 hover:bg-oliva-100 text-sm">{c.activo ? '👁' : '↻'}</button>
-      <button onClick={onDel} title="Eliminar" className="shrink-0 h-8 w-8 rounded-md bg-red-50 hover:bg-red-100 text-red-700 text-sm">🗑</button>
     </div>
   )
 }

@@ -45,6 +45,7 @@ export interface CategoriaCampo {
   slug: string
   nombre: string
   color: string
+  descripcion: string | null
   orden: number
   activo: boolean
 }

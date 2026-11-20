@@ -661,6 +661,7 @@ create table if not exists public.categorias_campo (
   slug text not null,
   nombre text not null,
   color text not null default '#5F5E5A',
+  descripcion text,                     -- que es la categoria (se ve al tocar la leyenda)
   orden int not null default 0,
   activo boolean not null default true,
   unique (ambito, slug)
