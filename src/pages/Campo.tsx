@@ -665,25 +665,38 @@ function LeyendaInfoDialog({ grupos, productosPorCat, onEditar, onCerrar }: {
 }) {
   return (
     <Dialog abierto onCerrar={onCerrar} titulo="Categorías y productos" ancho="md">
-      <div className="space-y-4">
-        {grupos.map((g) => (
-          <div key={g.ambito}>
-            <div className="flex items-center justify-between mb-1.5">
-              <div className="text-xs font-medium uppercase tracking-wide text-oliva-400">{g.titulo}</div>
+      <div className="space-y-5">
+        {grupos.map((g, gi) => (
+          <div key={g.ambito} className={gi > 0 ? 'pt-4 border-t border-oliva-100' : ''}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-xs font-medium uppercase tracking-wide text-oliva-500">{g.titulo}</div>
               {onEditar && (
                 <button onClick={() => onEditar(g.ambito)} className="text-xs font-medium text-oliva-600 hover:text-oliva-900 underline decoration-dotted">Editar</button>
               )}
             </div>
-            <div className="space-y-2.5">
-              {g.cats.map((c) => {
-                const prods = g.ambito === 'aplicacion' ? (productosPorCat.get(c.slug) ?? []) : null
-                return (
-                  <div key={c.id} className="flex gap-2.5">
-                    <span className="h-3 w-3 rounded-full shrink-0 mt-0.5" style={{ background: c.color }} />
-                    <div className="min-w-0">
-                      <div className="text-sm font-medium text-oliva-900">{c.nombre}</div>
-                      {prods !== null ? (
-                        prods.length ? (
+            {g.cats.length === 0 ? (
+              <p className="text-sm text-oliva-400">Sin categorías.</p>
+            ) : g.ambito === 'labor' ? (
+              // Labores: solo el nombre y su color (no llevan descripcion).
+              <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                {g.cats.map((c) => (
+                  <span key={c.id} className="inline-flex items-center gap-1.5 text-sm text-oliva-800">
+                    <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: c.color }} />
+                    {c.nombre}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              // Aplicaciones: cada categoria con los productos que aplicamos en ella.
+              <div className="space-y-2.5">
+                {g.cats.map((c) => {
+                  const prods = productosPorCat.get(c.slug) ?? []
+                  return (
+                    <div key={c.id} className="flex gap-2.5">
+                      <span className="h-3 w-3 rounded-full shrink-0 mt-0.5" style={{ background: c.color }} />
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium text-oliva-900">{c.nombre}</div>
+                        {prods.length ? (
                           <div className="flex flex-wrap gap-1.5 mt-1">
                             {prods.map((nombre) => (
                               <span key={nombre} className="inline-flex items-center rounded-full bg-oliva-50 border border-oliva-100 px-2.5 py-0.5 text-xs text-oliva-800">{nombre}</span>
@@ -691,16 +704,13 @@ function LeyendaInfoDialog({ grupos, productosPorCat, onEditar, onCerrar }: {
                           </div>
                         ) : (
                           <p className="text-sm text-oliva-400">Sin productos cargados todavía.</p>
-                        )
-                      ) : (
-                        <p className="text-sm text-oliva-600">{c.descripcion?.trim() || 'Sin descripción.'}</p>
-                      )}
+                        )}
+                      </div>
                     </div>
-                  </div>
-                )
-              })}
-              {g.cats.length === 0 && <p className="text-sm text-oliva-400">Sin categorías.</p>}
-            </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -1372,7 +1382,7 @@ function CategoriasEditorDialog({ ambito, onCerrar, onCambio }: {
         ) : (
           <div className="space-y-1.5 max-h-[55vh] overflow-y-auto">
             {items.map((c) => (
-              <FilaCategoria key={c.id} c={c} onColor={(color) => patch(c, { color })} onNombre={(nombre) => patch(c, { nombre })} onDesc={(descripcion) => patch(c, { descripcion })} onToggle={() => patch(c, { activo: !c.activo })} onDel={() => eliminar(c)} />
+              <FilaCategoria key={c.id} c={c} onColor={(color) => patch(c, { color })} onNombre={(nombre) => patch(c, { nombre })} onToggle={() => patch(c, { activo: !c.activo })} onDel={() => eliminar(c)} />
             ))}
             {items.length === 0 && <p className="text-xs text-oliva-400 italic">Sin categorías.</p>}
           </div>
@@ -1383,35 +1393,23 @@ function CategoriasEditorDialog({ ambito, onCerrar, onCambio }: {
   )
 }
 
-function FilaCategoria({ c, onColor, onNombre, onDesc, onToggle, onDel }: {
-  c: CategoriaCampo; onColor: (color: string) => void; onNombre: (nombre: string) => void; onDesc: (descripcion: string) => void; onToggle: () => void; onDel: () => void
+function FilaCategoria({ c, onColor, onNombre, onToggle, onDel }: {
+  c: CategoriaCampo; onColor: (color: string) => void; onNombre: (nombre: string) => void; onToggle: () => void; onDel: () => void
 }) {
   const [nombre, setNombre] = useState(c.nombre)
-  const [desc, setDesc] = useState(c.descripcion ?? '')
   useEffect(() => { setNombre(c.nombre) }, [c.nombre])
-  useEffect(() => { setDesc(c.descripcion ?? '') }, [c.descripcion])
   return (
-    <div className={`rounded-lg border px-2 py-1.5 ${c.activo ? 'bg-white border-oliva-100' : 'bg-oliva-50/60 border-oliva-100 opacity-70'}`}>
-      <div className="flex items-center gap-2">
-        <input type="color" value={c.color} onChange={(e) => onColor(e.target.value)} className="h-8 w-9 rounded border border-oliva-200 bg-white p-0.5 cursor-pointer shrink-0" aria-label={`Color ${c.nombre}`} />
-        <input
-          value={nombre}
-          onChange={(e) => setNombre(e.target.value)}
-          onBlur={() => { if (nombre.trim() && nombre !== c.nombre) onNombre(nombre.trim()) }}
-          onKeyDown={(e) => { if (e.key === 'Enter') { (e.target as HTMLInputElement).blur() } }}
-          className="flex-1 min-w-0 rounded-lg border border-transparent hover:border-oliva-200 focus:border-oliva-300 px-2 py-1 text-sm focus:outline-none"
-        />
-        <button onClick={onToggle} title={c.activo ? 'Desactivar' : 'Activar'} className="shrink-0 h-8 w-8 rounded-md bg-oliva-50 hover:bg-oliva-100 text-sm">{c.activo ? '👁' : '↻'}</button>
-        <button onClick={onDel} title="Eliminar" className="shrink-0 h-8 w-8 rounded-md bg-red-50 hover:bg-red-100 text-red-700 text-sm">🗑</button>
-      </div>
-      <textarea
-        value={desc}
-        onChange={(e) => setDesc(e.target.value)}
-        onBlur={() => { if (desc.trim() !== (c.descripcion ?? '').trim()) onDesc(desc.trim()) }}
-        rows={2}
-        placeholder="Descripción: qué es / cuándo se usa (se ve al tocar la leyenda)"
-        className="mt-1.5 w-full rounded-lg border border-oliva-100 focus:border-oliva-300 px-2 py-1 text-xs text-oliva-700 focus:outline-none resize-y"
+    <div className={`flex items-center gap-2 rounded-lg border px-2 py-1.5 ${c.activo ? 'bg-white border-oliva-100' : 'bg-oliva-50/60 border-oliva-100 opacity-70'}`}>
+      <input type="color" value={c.color} onChange={(e) => onColor(e.target.value)} className="h-8 w-9 rounded border border-oliva-200 bg-white p-0.5 cursor-pointer shrink-0" aria-label={`Color ${c.nombre}`} />
+      <input
+        value={nombre}
+        onChange={(e) => setNombre(e.target.value)}
+        onBlur={() => { if (nombre.trim() && nombre !== c.nombre) onNombre(nombre.trim()) }}
+        onKeyDown={(e) => { if (e.key === 'Enter') { (e.target as HTMLInputElement).blur() } }}
+        className="flex-1 min-w-0 rounded-lg border border-transparent hover:border-oliva-200 focus:border-oliva-300 px-2 py-1 text-sm focus:outline-none"
       />
+      <button onClick={onToggle} title={c.activo ? 'Desactivar' : 'Activar'} className="shrink-0 h-8 w-8 rounded-md bg-oliva-50 hover:bg-oliva-100 text-sm">{c.activo ? '👁' : '↻'}</button>
+      <button onClick={onDel} title="Eliminar" className="shrink-0 h-8 w-8 rounded-md bg-red-50 hover:bg-red-100 text-red-700 text-sm">🗑</button>
     </div>
   )
 }
