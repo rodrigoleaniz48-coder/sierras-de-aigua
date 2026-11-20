@@ -73,6 +73,8 @@ export interface AnioExport {
   liquidacion: { nombre: string; bruto: number; descuento: number; pagable: number }[]
   precioKg: number | null
   totKgCosecha: number
+  totExcesoHojas?: number
+  totKgProcesar?: number
   totLitros: number
   totAceite: number
   rendTotal: number
@@ -116,10 +118,16 @@ export async function descargarCosechaAnio(d: AnioExport) {
   encabezado(res, ['Indicador', 'Valor'])
   const tiles: [string, number, string][] = [
     ['Kg cosechados', kgCos, FMT_KG],
+  ]
+  if (hayDetalle && (d.totExcesoHojas ?? 0) > 0) {
+    tiles.push(['Hojas descartadas', -(d.totExcesoHojas ?? 0), FMT_KG])
+    tiles.push(['Kg a procesar', d.totKgProcesar ?? kgCos, FMT_KG])
+  }
+  tiles.push(
     ['Litros de aceite', litros, FMT_KG],
     ['Kg de aceite', aceite, FMT_KG],
     ['Rendimiento', rend, FMT_PCT],
-  ]
+  )
   for (const [k, v, fmt] of tiles) {
     const r = res.addRow([k, v])
     r.getCell(2).numFmt = fmt
@@ -165,8 +173,8 @@ export async function descargarCosechaAnio(d: AnioExport) {
   res.addRow([])
 
   // Rendimiento por variedad (o solo kg por variedad si viene del historico)
-  tituloSeccion(res, 'Kg por variedad' + (d.rendPorVariedad.length ? ' y rendimiento (aceite / cosecha)' : ''), 5)
-  encabezado(res, ['Variedad', 'Kg cosechados', 'Litros', 'Kg aceite', 'Rend. %'])
+  tituloSeccion(res, 'Kg por variedad' + (d.rendPorVariedad.length ? ' y rendimiento (aceite / procesado)' : ''), 5)
+  encabezado(res, ['Variedad', 'Kg a procesar', 'Litros', 'Kg aceite', 'Rend. %'])
   for (const rv of rendVar) {
     const fila = res.addRow([rv.variedad, rv.kg || null, rv.litros || null, rv.aceite || null, rv.rend || null])
     fila.getCell(2).numFmt = FMT_KG; fila.getCell(3).numFmt = FMT_KG

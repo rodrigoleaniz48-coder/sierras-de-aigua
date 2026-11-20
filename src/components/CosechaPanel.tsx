@@ -48,6 +48,21 @@ function aceiteKgDeLinea(v: CosechaProcesoVariedad): number {
   return v.kg_aceite ?? (v.litros != null ? v.litros * KG_POR_LITRO : 0)
 }
 
+// Hojas que se descartan de una carga: lo que supera la tolerancia del ano. El
+// operario no cobra por ellas y tampoco entran a la almazara (se tiran).
+function excesoHojasCarga(c: CosechaCarga, ops: CosechaCargaOperario[], tolPct: number): number {
+  const sumOp = ops.reduce((s, l) => s + (l.kg || 0), 0)
+  const base = c.kg_balanza || sumOp
+  const tolKg = base * (tolPct / 100)
+  return Math.max(0, (c.kg_hojas || 0) - tolKg)
+}
+
+// Kg que realmente se procesan en la almazara: lo cosechado menos las hojas
+// descartadas. La hoja dentro de la tolerancia (2%) se procesa con la fruta.
+function kgProcesarCarga(c: CosechaCarga, ops: CosechaCargaOperario[], tolPct: number): number {
+  return (c.kg_balanza || 0) - excesoHojasCarga(c, ops, tolPct)
+}
+
 // ---------------------------------------------------------------------------
 // Forms
 // ---------------------------------------------------------------------------
@@ -119,9 +134,7 @@ function liquidar(
   for (const c of cargas) {
     const lineas = opsPorCarga.get(c.id) ?? []
     const sumOp = lineas.reduce((s, l) => s + (l.kg || 0), 0)
-    const base = c.kg_balanza || sumOp
-    const tolKg = base * (tolPct / 100)
-    const exceso = Math.max(0, (c.kg_hojas || 0) - tolKg)
+    const exceso = excesoHojasCarga(c, lineas, tolPct)
     for (const l of lineas) {
       const kg = l.kg || 0
       const share = sumOp > 0 ? kg / sumOp : 0
@@ -142,6 +155,7 @@ function liquidar(
 // ---------------------------------------------------------------------------
 export function CosechaPanel({ puedeEscribir }: { puedeEscribir: boolean }) {
   const [anio, setAnio] = useState<string>(String(new Date().getFullYear()))
+  const [aniosManual, setAniosManual] = useState<number[]>([])
   const [cargas, setCargas] = useState<CosechaCarga[]>([])
   const [cargaOps, setCargaOps] = useState<CosechaCargaOperario[]>([])
   const [procesos, setProcesos] = useState<CosechaProceso[]>([])
@@ -206,10 +220,21 @@ export function CosechaPanel({ puedeEscribir }: { puedeEscribir: boolean }) {
     const s = new Set<number>()
     for (const r of resumen) s.add(r.anio)
     for (const t of tarifas) s.add(t.anio)
+    for (const y of aniosManual) s.add(y)
     s.add(new Date().getFullYear())
     s.add(anioNum)
     return [...s].filter((a) => a >= 2000).sort((a, b) => b - a)
-  }, [resumen, tarifas, anioNum])
+  }, [resumen, tarifas, aniosManual, anioNum])
+
+  function agregarAnio() {
+    const sugerido = String(Math.max(new Date().getFullYear(), ...aniosCosecha) + 1)
+    const v = window.prompt('¿Qué año de cosecha querés agregar?', sugerido)
+    if (!v) return
+    const y = parseInt(v.trim(), 10)
+    if (!Number.isFinite(y) || y < 2000 || y > 2100) { alert('Año inválido.'); return }
+    setAniosManual((prev) => (prev.includes(y) ? prev : [...prev, y]))
+    setAnio(String(y))
+  }
 
   const nombreOp = useMemo(() => {
     const m = new Map(operarios.map((o) => [o.id, o.nombre]))
@@ -257,10 +282,14 @@ export function CosechaPanel({ puedeEscribir }: { puedeEscribir: boolean }) {
     [procesos, procVarsPorProceso],
   )
 
-  // Rendimiento = aceite que salio (lineas de pasaje) / kg que entraron (cargas), por variedad.
+  // Rendimiento = aceite que salio (lineas de pasaje) / kg que se procesaron,
+  // por variedad. Los kg a procesar son lo cosechado menos las hojas descartadas.
   const rendPorVariedad = useMemo(() => {
     const kgIn = new Map<string, number>()
-    for (const c of cargas) kgIn.set(c.variedad, (kgIn.get(c.variedad) ?? 0) + (c.kg_balanza || 0))
+    for (const c of cargas) {
+      const kg = kgProcesarCarga(c, opsPorCarga.get(c.id) ?? [], tolPct)
+      kgIn.set(c.variedad, (kgIn.get(c.variedad) ?? 0) + kg)
+    }
     const litrosM = new Map<string, number>()
     const aceiteM = new Map<string, number>()
     for (const v of lineasAnio) {
@@ -272,12 +301,17 @@ export function CosechaPanel({ puedeEscribir }: { puedeEscribir: boolean }) {
       const kg = kgIn.get(v) ?? 0, litros = litrosM.get(v) ?? 0, aceite = aceiteM.get(v) ?? 0
       return { variedad: v, kg, litros, aceite, rend: kg > 0 ? (aceite / kg) * 100 : 0 }
     }).sort((a, b) => b.kg - a.kg)
-  }, [cargas, lineasAnio])
+  }, [cargas, opsPorCarga, tolPct, lineasAnio])
 
   const totKgCosecha = useMemo(() => cargas.reduce((s, c) => s + (c.kg_balanza || 0), 0), [cargas])
+  const totExcesoHojas = useMemo(
+    () => cargas.reduce((s, c) => s + excesoHojasCarga(c, opsPorCarga.get(c.id) ?? [], tolPct), 0),
+    [cargas, opsPorCarga, tolPct],
+  )
+  const totKgProcesar = Math.max(0, totKgCosecha - totExcesoHojas)
   const totLitros = useMemo(() => lineasAnio.reduce((s, v) => s + (v.litros || 0), 0), [lineasAnio])
   const totAceite = useMemo(() => lineasAnio.reduce((s, v) => s + aceiteKgDeLinea(v), 0), [lineasAnio])
-  const rendTotal = totKgCosecha > 0 ? (totAceite / totKgCosecha) * 100 : 0
+  const rendTotal = totKgProcesar > 0 ? (totAceite / totKgProcesar) * 100 : 0
   const totPagable = useMemo(() => liquidacion.reduce((s, f) => s + f.pagable, 0), [liquidacion])
 
   // Historial por ano: historico importado (cosecha_resumen) + ano vivo (cargas/pasajes).
@@ -388,7 +422,7 @@ export function CosechaPanel({ puedeEscribir }: { puedeEscribir: boolean }) {
       const resumenAnio = historial.find((h) => h.anio === anioNum) ?? null
       await descargarCosechaAnio({
         anio: anioNum, cargas, opsPorCarga, operarios, procesos, procVarsPorProceso, liquidacion,
-        precioKg, totKgCosecha, totLitros, totAceite, rendTotal, kgPorSector: kgSecView, rendPorVariedad,
+        precioKg, totKgCosecha, totExcesoHojas, totKgProcesar, totLitros, totAceite, rendTotal, kgPorSector: kgSecView, rendPorVariedad,
         resumenAnio,
       })
     } catch (e) { console.error(e); alert('No se pudo generar el Excel del ano.') }
@@ -430,6 +464,9 @@ export function CosechaPanel({ puedeEscribir }: { puedeEscribir: boolean }) {
             {aniosCosecha.map((a) => <option key={a} value={String(a)}>{a}</option>)}
           </select>
         </label>
+        {puedeEscribir && (
+          <button onClick={agregarAnio} className="text-xs text-oliva-600 hover:text-oliva-900 underline decoration-dotted">+ Año</button>
+        )}
         <button onClick={descargarAnio} disabled={bajando} className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-white border border-oliva-200 text-oliva-700 px-3 py-1.5 text-xs font-medium hover:border-oliva-400 disabled:opacity-50">
           <span className="leading-none">↓</span> Descargar año (Excel)
         </button>
@@ -445,6 +482,13 @@ export function CosechaPanel({ puedeEscribir }: { puedeEscribir: boolean }) {
             <Tile label="Litros de aceite" valor={fmtKg(litrosView)} />
             <Tile label="Rendimiento" valor={rendView > 0 ? `${fmtKg1(rendView)}%` : '—'} />
           </div>
+
+          {hayDetalle && totExcesoHojas > 0 && (
+            <p className="text-xs text-oliva-600 bg-oliva-50 rounded-lg px-3 py-2">
+              Hojas descartadas (sobre la tolerancia del {fmtKg1(tolPct)}%): <strong className="text-red-600">−{fmtKg(totExcesoHojas)} kg</strong> · Kg a procesar: <strong>{fmtKg(totKgProcesar)} kg</strong>.
+              <span className="text-oliva-400"> El {fmtKg1(tolPct)}% de hoja va con la fruta; el resto se tira y no se paga. El rendimiento se calcula sobre lo que se procesa.</span>
+            </p>
+          )}
 
           {!hayDetalle && resAnio && (
             <p className="text-xs text-oliva-600 bg-oliva-50 rounded-lg px-3 py-2">
@@ -509,14 +553,14 @@ export function CosechaPanel({ puedeEscribir }: { puedeEscribir: boolean }) {
           </div>
 
           {/* Rendimiento por variedad */}
-          <Seccion titulo="Rendimiento por variedad (aceite ÷ cosecha)">
+          <Seccion titulo="Rendimiento por variedad (aceite ÷ procesado)">
             {rendPorVariedad.length === 0 ? <VacioMini texto="Sin datos este año." /> : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-xs text-oliva-500 border-b border-oliva-100">
                       <th className="text-left font-medium py-1.5">Variedad</th>
-                      <th className="text-right font-medium">Kg cosechados</th>
+                      <th className="text-right font-medium">Kg a procesar</th>
                       <th className="text-right font-medium">Litros</th>
                       <th className="text-right font-medium">Rendimiento</th>
                     </tr>
