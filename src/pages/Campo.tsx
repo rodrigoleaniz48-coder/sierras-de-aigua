@@ -791,7 +791,7 @@ function ListaInformes({ items, onAbrir }: { items: InformeTecnico[]; onAbrir: (
               <span className="shrink-0 text-base">🧑‍🌾</span>
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-medium text-oliva-900">{fFecha(i.fecha)}</div>
-                <div className="text-xs text-oliva-500">{i.tecnico}{i.notas ? ` · ${i.notas}` : ''}</div>
+                <div className="text-xs text-oliva-500">{i.tecnico}</div>
               </div>
               <span className="text-oliva-300 shrink-0">›</span>
             </button>
