@@ -11,6 +11,9 @@ interface Pendiente {
   titulo: string
   estado: string
   fecha_vence: string | null
+  asignado_a: string | null
+  asignados_a: string[] | null
+  creado_por: string | null
 }
 
 function hoyLocalStr(): string {
@@ -33,22 +36,26 @@ export function PendientesCard() {
   async function cargar() {
     const { data } = await supabase
       .from('tareas')
-      .select('id,titulo,estado,fecha_vence')
+      .select('id,titulo,estado,fecha_vence,asignado_a,asignados_a,creado_por')
       .in('estado', ['pendiente', 'en_progreso'])
     setItems((data as Pendiente[]) ?? [])
   }
   useEffect(() => { cargar() }, [])
 
   const hoy = hoyLocalStr()
+  // En Inicio cada uno ve solo lo que le corresponde: asignado a el o creado por el.
+  const mios = (p: Pendiente) =>
+    (p.asignados_a?.includes(soyYo) ?? false) || p.asignado_a === soyYo || p.creado_por === soyYo
+  const misItems = useMemo(() => items.filter(mios), [items, soyYo]) // eslint-disable-line react-hooks/exhaustive-deps
   const proximos = useMemo(() => {
-    return [...items].sort((a, b) => {
+    return [...misItems].sort((a, b) => {
       const fa = a.fecha_vence, fb = b.fecha_vence
       if (fa && fb) return fa.localeCompare(fb)
       if (fa && !fb) return -1
       if (!fa && fb) return 1
       return b.id - a.id
     }).slice(0, 5)
-  }, [items])
+  }, [misItems])
 
   async function agregar(e: React.FormEvent) {
     e.preventDefault()
@@ -77,7 +84,7 @@ export function PendientesCard() {
     <div className="card p-4 space-y-3">
       <div className="flex items-center justify-between">
         <div className="text-sm font-bold text-oliva-900">
-          Pendientes {items.length > 0 && <span className="text-oliva-400 font-normal">· {items.length}</span>}
+          Pendientes {misItems.length > 0 && <span className="text-oliva-400 font-normal">· {misItems.length}</span>}
         </div>
         <button onClick={() => navigate('/pendientes')} className="text-xs text-oliva-600 hover:text-oliva-900">Ver todos →</button>
       </div>

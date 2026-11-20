@@ -76,7 +76,9 @@ export function Pendientes() {
   const [fecha, setFecha] = useState('')
   const [asignados, setAsignados] = useState<string[]>([])
   const [guardando, setGuardando] = useState(false)
-  const [filtro, setFiltro] = useState<'todos' | 'mios'>('todos')
+  // Por defecto cada uno ve lo que le corresponde (asignado a el o creado por el).
+  // El toggle "Todos" sigue disponible para ver la lista completa.
+  const [filtro, setFiltro] = useState<'todos' | 'mios'>('mios')
   const [verHechas, setVerHechas] = useState(false)
   const tituloRef = useRef<HTMLInputElement>(null)
   // Edicion en linea: al tocar un pendiente se puede cambiar titulo, fecha y a quienes.
