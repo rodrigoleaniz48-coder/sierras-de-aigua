@@ -210,6 +210,21 @@ export function Campo() {
     return m
   }, [productos])
 
+  // Productos (nombres comerciales distintos) que aplicamos en cada categoria.
+  // Se muestra al tocar la leyenda: que productos entran en fungicida, etc.
+  const productosPorCat = useMemo(() => {
+    const m = new Map<string, string[]>()
+    for (const p of productos) {
+      const nombre = p.producto_comercial?.trim()
+      if (!nombre) continue
+      const arr = m.get(p.categoria) ?? []
+      if (!arr.some((x) => x.toLowerCase() === nombre.toLowerCase())) arr.push(nombre)
+      m.set(p.categoria, arr)
+    }
+    for (const arr of m.values()) arr.sort((a, b) => a.localeCompare(b, 'es'))
+    return m
+  }, [productos])
+
   // Anos presentes (derivados de la fecha real del evento, ascendente -> se invierte)
   const anios = useMemo(() => {
     const s = new Set<string>()
@@ -526,6 +541,7 @@ export function Campo() {
             { titulo: 'Aplicaciones (productos)', ambito: 'aplicacion', cats: activasApp },
             { titulo: 'Labores', ambito: 'labor', cats: activasLabor },
           ]}
+          productosPorCat={productosPorCat}
           onEditar={puedeEscribir ? (a) => { setVerLeyenda(false); setEditorAmbito(a) } : undefined}
           onCerrar={() => setVerLeyenda(false)}
         />
@@ -641,13 +657,14 @@ function Leyenda({ cats, onInfo, onEditar }: { cats: CategoriaCampo[]; onInfo?: 
 
 // Diccionario de la leyenda: que es cada categoria (fungicida, fertilizante,
 // labores...), agrupado por ambito y con acceso a editar cada grupo.
-function LeyendaInfoDialog({ grupos, onEditar, onCerrar }: {
+function LeyendaInfoDialog({ grupos, productosPorCat, onEditar, onCerrar }: {
   grupos: { titulo: string; ambito: AmbitoCategoria; cats: CategoriaCampo[] }[]
+  productosPorCat: Map<string, string[]>
   onEditar?: (a: AmbitoCategoria) => void
   onCerrar: () => void
 }) {
   return (
-    <Dialog abierto onCerrar={onCerrar} titulo="¿Qué es cada categoría?" ancho="md">
+    <Dialog abierto onCerrar={onCerrar} titulo="Categorías y productos" ancho="md">
       <div className="space-y-4">
         {grupos.map((g) => (
           <div key={g.ambito}>
@@ -658,15 +675,30 @@ function LeyendaInfoDialog({ grupos, onEditar, onCerrar }: {
               )}
             </div>
             <div className="space-y-2.5">
-              {g.cats.map((c) => (
-                <div key={c.id} className="flex gap-2.5">
-                  <span className="h-3 w-3 rounded-full shrink-0 mt-0.5" style={{ background: c.color }} />
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium text-oliva-900">{c.nombre}</div>
-                    <p className="text-sm text-oliva-600">{c.descripcion?.trim() || 'Sin descripción. Agregala desde «Editar».'}</p>
+              {g.cats.map((c) => {
+                const prods = g.ambito === 'aplicacion' ? (productosPorCat.get(c.slug) ?? []) : null
+                return (
+                  <div key={c.id} className="flex gap-2.5">
+                    <span className="h-3 w-3 rounded-full shrink-0 mt-0.5" style={{ background: c.color }} />
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium text-oliva-900">{c.nombre}</div>
+                      {prods !== null ? (
+                        prods.length ? (
+                          <div className="flex flex-wrap gap-1.5 mt-1">
+                            {prods.map((nombre) => (
+                              <span key={nombre} className="inline-flex items-center rounded-full bg-oliva-50 border border-oliva-100 px-2.5 py-0.5 text-xs text-oliva-800">{nombre}</span>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-oliva-400">Sin productos cargados todavía.</p>
+                        )
+                      ) : (
+                        <p className="text-sm text-oliva-600">{c.descripcion?.trim() || 'Sin descripción.'}</p>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
               {g.cats.length === 0 && <p className="text-sm text-oliva-400">Sin categorías.</p>}
             </div>
           </div>
