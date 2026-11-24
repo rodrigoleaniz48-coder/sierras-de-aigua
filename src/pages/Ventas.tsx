@@ -198,7 +198,8 @@ export function Ventas() {
       if (v.estado === 'cancelado') return false
       if (filtroSocio !== 'todos' && v.socio_id !== filtroSocio) return false
       if (v.a_confirmar) return true
-      if (v.promocion_comercial) return !v.entregado
+      // Promo, o regalo total (todos los items regalo → total 0): no hay nada que cobrar, solo entrega.
+      if (v.promocion_comercial || Number(v.total) <= 0) return !v.entregado
       // Distribuidores/mayoristas: el cobro se gestiona por cuenta corriente, no por venta.
       const cli = v.cliente_id ? clientePorId.get(v.cliente_id) : null
       const esCC = cli?.tipo === 'distribuidor' || cli?.tipo === 'mayorista'
@@ -579,7 +580,7 @@ function TablaVentas({
                   </span>
                 </td>
                 <td className="py-2 px-4 text-center">
-                  {v.promocion_comercial ? (
+                  {(v.promocion_comercial || Number(v.total) <= 0) ? (
                     <span className="text-[11px] text-oliva-400">—</span>
                   ) : v.cobrado ? (
                     <span className="text-[11px] uppercase tracking-wide rounded-full px-2 py-[1px] bg-aceite-500/20 text-aceite-600">💰 cobrado</span>
@@ -1133,9 +1134,12 @@ async function guardar(e: React.FormEvent) {
       : null
     // Promoción comercial = regalo: no genera ingreso ni cobro (su costo real queda como
     // gasto automatico en 'promociones_comerciales'). Totales en 0 para no inflar ingresos.
-    const cobradoFinal = promocion ? false : cobrado
-    const estadoFinal = promocion ? (entregado ? 'entregado' : 'pendiente') : estadoSync
-    const fechaCobroFinal = promocion ? null : fechaCobroSync
+    // Sin cobro: promo, o regalo total (todos los items regalo → total 0). No se marca cobrada
+    // ni lleva fecha de cobro: no hay monto que cobrar, solo importa la entrega.
+    const sinCobro = promocion || totalUyu <= 0
+    const cobradoFinal = sinCobro ? false : cobrado
+    const estadoFinal = sinCobro ? (entregado ? 'entregado' : 'pendiente') : estadoSync
+    const fechaCobroFinal = sinCobro ? null : fechaCobroSync
     const subtotalFinal = promocion ? 0 : subtotalUyu
     const ivaFinal = promocion ? 0 : ivaUyu
     const totalFinal = promocion ? 0 : totalUyu
@@ -1329,7 +1333,7 @@ async function guardar(e: React.FormEvent) {
 
     // Cobro en efectivo → adelanto del socio (idempotente). Si no es efectivo/cobrado, limpia uno previo.
     let adelantoPend: AdelantoInfo | null = null
-    if (cobrado && formaPago === 'efectivo' && !aConfirmar && !promocion) {
+    if (cobrado && formaPago === 'efectivo' && !aConfirmar && !sinCobro) {
       const esUSD = monedaVenta === 'USD' && cotVenta > 0
       const montoAdel = Math.round((esUSD ? totalUyu / cotVenta : totalUyu) * 100) / 100
       const monedaAdel: 'UYU' | 'USD' = esUSD ? 'USD' : 'UYU'
@@ -1529,7 +1533,7 @@ async function guardar(e: React.FormEvent) {
               <input type="checkbox" checked={entregado} onChange={(e) => setEntregado(e.target.checked)} className="h-4 w-4 accent-oliva-700" />
               <span className="text-sm text-oliva-800">🚚 Ya entregado</span>
             </label>
-            {!promocion && (
+            {!promocion && total > 0 && (
               <label className="flex items-center gap-2 cursor-pointer">
                 <input type="checkbox" checked={cobrado} onChange={(e) => setCobrado(e.target.checked)} className="h-4 w-4 accent-oliva-700" />
                 <span className="text-sm text-oliva-800">💰 Ya cobrado</span>
@@ -2319,8 +2323,9 @@ function VentaDetalleDialog({
           </div>
         )}
 
-        {/* Entrega y cobro — toggles grandes clickeables (cobro oculto si es promoción) */}
-        <div className={`grid grid-cols-1 gap-3 ${venta.promocion_comercial ? '' : 'sm:grid-cols-2'}`}>
+        {/* Entrega y cobro — toggles grandes clickeables (cobro oculto si es promo o regalo total) */}
+        {(() => { const sinCobro = venta.promocion_comercial || Number(venta.total) <= 0; return (
+        <div className={`grid grid-cols-1 gap-3 ${sinCobro ? '' : 'sm:grid-cols-2'}`}>
           <button
             type="button"
             disabled={!puedeEditar || anulada || guardando}
@@ -2334,7 +2339,7 @@ function VentaDetalleDialog({
             <div className="text-lg font-semibold">{entregado ? '🚚 Entregado' : '⏳ Pendiente de entrega'}</div>
             <div className="text-xs mt-1 opacity-80">Clic para {entregado ? 'marcar como pendiente' : 'marcar como entregado'}</div>
           </button>
-          {!venta.promocion_comercial && (
+          {!sinCobro && (
             <button
               type="button"
               disabled={!puedeEditar || anulada || guardando}
@@ -2350,6 +2355,7 @@ function VentaDetalleDialog({
             </button>
           )}
         </div>
+        )})()}
 
         {/* Cabecera editable */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

@@ -129,9 +129,12 @@ export function Dashboard() {
         // Los distribuidores/mayoristas NO cuentan como "pendiente de cobro" (se saldan por cuenta
         // corriente), pero SÍ como "pendiente de entrega". Las promos no requieren cobro.
         const esCC = (v: { cliente_id?: number | null }) => !!(v.cliente_id && ccSet.has(v.cliente_id))
-        const realmentePendientes = pendientes.filter((v) => !v.entregado || (!v.cobrado && !v.promocion_comercial && !esCC(v)))
+        // Requiere cobro solo si hay monto a cobrar: ni promo, ni cuenta corriente, ni regalo total (total 0).
+        const requiereCobro = (v: { cobrado?: boolean; promocion_comercial?: boolean; total?: number | null; cliente_id?: number | null }) =>
+          !v.cobrado && !v.promocion_comercial && !esCC(v) && Number(v.total ?? 0) > 0
+        const realmentePendientes = pendientes.filter((v) => !v.entregado || requiereCobro(v))
         const pendEntrega = realmentePendientes.filter((v) => !v.entregado).length
-        const pendCobroList = realmentePendientes.filter((v) => !v.cobrado && !v.promocion_comercial && !esCC(v))
+        const pendCobroList = realmentePendientes.filter((v) => requiereCobro(v))
         const pendCobro = pendCobroList.length
         const pendCobroMonto = pendCobroList.reduce((s, v) => s + Number(v.total ?? 0), 0)
         // Union: una venta puede estar pendiente por ambos motivos, pero se cuenta 1 sola vez
