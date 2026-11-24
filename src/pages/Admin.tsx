@@ -215,8 +215,8 @@ export function Admin() {
 
       {/* Dialog config costo del aceite */}
       {puedeEditarMargenes && (
-        <Dialog abierto={configAceiteAbierto} onCerrar={() => setConfigAceiteAbierto(false)} titulo="Costo del aceite" ancho="sm">
-          <div className="space-y-3">
+        <Dialog abierto={configAceiteAbierto} onCerrar={() => setConfigAceiteAbierto(false)} titulo="Costo del aceite" ancho="md">
+          <div className="space-y-4">
             <div>
               <label className="label">Costo aceite USD/L</label>
               <input
@@ -230,6 +230,12 @@ export function Admin() {
                 Actualizalo cuando cambie el costo de producción del año.
               </div>
             </div>
+
+            {/* Cierre de campaña: calcula el costo real USD/L del año y permite usarlo arriba */}
+            {configAceiteAbierto && (
+              <CierreCampanaPanel cotBcu={cotBcu} onUsarCosto={(usdL) => setCostoAceiteUsd(String(usdL))} />
+            )}
+
             <div className="flex justify-end gap-2 pt-2 border-t border-oliva-100">
               <button className="btn-secondary" onClick={() => setConfigAceiteAbierto(false)}>Cerrar</button>
               <button className="btn-primary" onClick={() => { guardarConfigAceite(); setConfigAceiteAbierto(false) }}>Guardar</button>
@@ -935,5 +941,119 @@ function EditorListasDialog({ abierto, onCerrar, onOk, onRecargar, listas, lista
         </div>
       </div>
     </Dialog>
+  )
+}
+
+// ── Cierre de campaña: costo real USD/L del año ──────────────────────────────
+// Suma los gastos operativos elegidos de un año y los divide por los litros
+// producidos de esa cosecha, para derivar el costo real por litro y cargarlo
+// arriba en "Costo aceite USD/L". Es solo un cálculo: NO crea ningún gasto.
+const CATS_OPERATIVAS_ACEITE = [
+  'olivos_poda', 'olivos_cultivos', 'olivos_cosecha',
+  'olivos_procesamiento', 'almazara_-_gastos_y_mo_habilitacion_arre',
+]
+
+function CierreCampanaPanel({ cotBcu, onUsarCosto }: { cotBcu: number; onUsarCosto: (usdL: number) => void }) {
+  const [cats, setCats] = useState<{ slug: string; nombre: string; activo: boolean }[]>([])
+  const [anios, setAnios] = useState<{ anio: number; litros: number | null }[]>([])
+  const [anio, setAnio] = useState<number | ''>('')
+  const [sel, setSel] = useState<Set<string>>(new Set())
+  const [litros, setLitros] = useState<string>('')
+  const [gastos, setGastos] = useState<{ categoria: string; monto: number; moneda: string }[]>([])
+  const [cargando, setCargando] = useState(true)
+
+  useEffect(() => {
+    ;(async () => {
+      const [c, r] = await Promise.all([
+        supabase.from('categorias_gasto').select('slug,nombre,activo').order('orden'),
+        supabase.from('cosecha_resumen').select('anio,litros').eq('variedad', 'TOTAL').order('anio'),
+      ])
+      const cs = (c.data ?? []) as { slug: string; nombre: string; activo: boolean }[]
+      const rs = (r.data ?? []) as { anio: number; litros: number | null }[]
+      setCats(cs)
+      setAnios(rs)
+      setSel(new Set(CATS_OPERATIVAS_ACEITE.filter((s) => cs.some((x) => x.slug === s))))
+      const conL = rs.filter((x) => x.litros != null)
+      const def = (conL.length ? conL[conL.length - 1] : rs[rs.length - 1])?.anio
+      if (def != null) setAnio(def)
+      setCargando(false)
+    })()
+  }, [])
+
+  useEffect(() => {
+    if (anio === '') return
+    ;(async () => {
+      const { data } = await supabase.from('gastos')
+        .select('categoria,monto,moneda')
+        .gte('fecha', `${anio}-01-01`).lte('fecha', `${anio}-12-31`)
+      setGastos((data ?? []) as { categoria: string; monto: number; moneda: string }[])
+      const l = anios.find((x) => x.anio === anio)?.litros
+      setLitros(l != null ? String(l) : '')
+    })()
+  }, [anio, anios])
+
+  const montoPorCat = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const g of gastos) {
+      const uyu = g.moneda === 'USD' ? Number(g.monto) * cotBcu : Number(g.monto)
+      m.set(g.categoria, (m.get(g.categoria) ?? 0) + uyu)
+    }
+    return m
+  }, [gastos, cotBcu])
+
+  const totalUyu = useMemo(
+    () => [...sel].reduce((s, slug) => s + (montoPorCat.get(slug) ?? 0), 0),
+    [sel, montoPorCat],
+  )
+  const L = Number(litros) || 0
+  const usdL = L > 0 && cotBcu > 0 ? totalUyu / cotBcu / L : 0
+
+  const toggle = (slug: string) => setSel((prev) => {
+    const n = new Set(prev)
+    if (n.has(slug)) n.delete(slug); else n.add(slug)
+    return n
+  })
+
+  if (cargando) return <div className="border-t border-oliva-100 pt-3 text-sm text-oliva-500">Cargando cierre…</div>
+
+  return (
+    <div className="border-t border-oliva-100 pt-3 space-y-3">
+      <div className="font-medium text-oliva-900 text-sm">Cierre de campaña — costo real USD/L</div>
+      <div className="flex items-center gap-2 flex-wrap">
+        <label className="text-sm text-oliva-700">Año</label>
+        <select className="input w-auto" value={anio} onChange={(e) => setAnio(e.target.value ? Number(e.target.value) : '')}>
+          {anios.map((a) => <option key={a.anio} value={a.anio}>{a.anio}</option>)}
+        </select>
+        <label className="text-sm text-oliva-700 ml-2">Litros producidos</label>
+        <input className="input w-28 tabular-nums" type="number" min="0" step="1" value={litros} onChange={(e) => setLitros(e.target.value)} />
+      </div>
+      <div className="text-xs text-oliva-500">Elegí qué categorías de gasto incluir (operativas marcadas; las de inversión no van):</div>
+      <div className="max-h-48 overflow-y-auto rounded-lg border border-oliva-100 divide-y divide-oliva-50">
+        {cats.map((c) => {
+          const monto = montoPorCat.get(c.slug) ?? 0
+          return (
+            <label key={c.slug} className="flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer hover:bg-oliva-50">
+              <input type="checkbox" checked={sel.has(c.slug)} onChange={() => toggle(c.slug)} className="h-4 w-4 accent-oliva-700" />
+              <span className="flex-1 text-oliva-800">{c.nombre}{!c.activo && <span className="text-[10px] text-oliva-400 ml-1">(inactiva)</span>}</span>
+              <span className={`tabular-nums text-xs ${monto > 0 ? 'text-oliva-700' : 'text-oliva-300'}`}>{money(monto)}</span>
+            </label>
+          )
+        })}
+      </div>
+      <div className="rounded-lg bg-oliva-50 p-3 text-sm space-y-1">
+        <div className="flex justify-between"><span className="text-oliva-600">Total gastos incluidos</span><b className="tabular-nums">{money(totalUyu)}</b></div>
+        <div className="flex justify-between"><span className="text-oliva-600">÷ {L || '—'} L · ÷ {cotBcu} $/USD</span><b className="tabular-nums">{usdL > 0 ? usdL.toFixed(2) : '—'} USD/L</b></div>
+      </div>
+      <div className="flex justify-end">
+        <button
+          type="button"
+          className="btn-secondary text-sm disabled:opacity-50"
+          disabled={!(usdL > 0)}
+          onClick={() => onUsarCosto(Math.round(usdL * 100) / 100)}
+        >
+          Usar {usdL > 0 ? usdL.toFixed(2) : ''} USD/L arriba
+        </button>
+      </div>
+    </div>
   )
 }

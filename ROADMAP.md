@@ -52,6 +52,19 @@ Pendientes por área. El contexto de proyecto (stack, roles, comandos, convencio
 - [ ] Cálculo de IVA aportado / recibido separado.
 - [ ] Categorías predefinidas de gastos con auto-sugerencia por texto.
 
+### Costeo del aceite (en curso, nov-2026)
+
+Modelo acordado: contabilidad por **criterio caja**. Los costos de producir el aceite se gastan al pagarlos (categorías Olivos/Almazara), NO se descuentan por unidad en cada venta. El "Costo aceite USD/L" (config `costo_aceite_por_litro_usd`, hoy 9) es solo para la **tabla de márgenes** (costo de reposición) — no es contabilidad.
+
+- [ ] **Panel "cierre de campaña"** en Admin, dentro del diálogo "Costo del aceite", al lado del campo Costo aceite USD/L:
+  - Elegir campaña/año + **seleccionar qué categorías de gasto incluir** (operativas marcadas por defecto: Olivos poda, Olivos cultivos y MO, Olivos cosecha —aunque esté inactiva—, Almazara envasado, Almazara gastos y MO; las de Inversión NO).
+  - Suma de esas categorías ÷ litros producidos de la cosecha → **costo real USD/L**.
+  - Botón "usar este valor" que carga el resultado en `costo_aceite_por_litro_usd`.
+- [ ] **Ajuste único de inventario inicial pre-app**: los costos de la cosecha 2025 y anteriores no se cargaron (la app no existía). Cargar UNA vez el costo del inventario inicial = litros totales incorporados al inicio × 9 USD/L × cotización, como gasto histórico (categoría Almazara). Necesito los litros iniciales (de la carga inicial de la app).
+- [ ] **Revertir costos nocionales (doble conteo)**: bajo caja, un regalo/promo/merma es ingreso $0 SIN costo aparte (el costo del aceite ya se gastó en producción). Hay que borrar los gastos nocionales ya creados (promociones_comerciales de regalos + merma #26 = gasto #208) y dejar de generarlos (quitar la creación automática en Ventas regalo/promo y en Stock merma/retiro).
+
+Notas: la categoría `olivos_cosecha` se activa estacionalmente (otoño); el cálculo debe sumarla aunque esté inactiva. Convención: egreso nocional de granel llevaba descripción "Retiro granel #..." y se excluía de conciliación — al revertir ya no se genera.
+
 ---
 
 ## Dashboard / Usuarios
