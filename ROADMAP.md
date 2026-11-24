@@ -52,18 +52,16 @@ Pendientes por área. El contexto de proyecto (stack, roles, comandos, convencio
 - [ ] Cálculo de IVA aportado / recibido separado.
 - [ ] Categorías predefinidas de gastos con auto-sugerencia por texto.
 
-### Costeo del aceite (en curso, nov-2026)
+### Costeo del aceite (listo, nov-2026)
 
 Modelo acordado: contabilidad por **criterio caja**. Los costos de producir el aceite se gastan al pagarlos (categorías Olivos/Almazara), NO se descuentan por unidad en cada venta. El "Costo aceite USD/L" (config `costo_aceite_por_litro_usd`, hoy 9) es solo para la **tabla de márgenes** (costo de reposición) — no es contabilidad.
 
-- [ ] **Panel "cierre de campaña"** en Admin, dentro del diálogo "Costo del aceite", al lado del campo Costo aceite USD/L:
-  - Elegir campaña/año + **seleccionar qué categorías de gasto incluir** (operativas marcadas por defecto: Olivos poda, Olivos cultivos y MO, Olivos cosecha —aunque esté inactiva—, Almazara envasado, Almazara gastos y MO; las de Inversión NO).
-  - Suma de esas categorías ÷ litros producidos de la cosecha → **costo real USD/L**.
-  - Botón "usar este valor" que carga el resultado en `costo_aceite_por_litro_usd`.
-- [ ] **Ajuste único de inventario inicial pre-app**: los costos de la cosecha 2025 y anteriores no se cargaron (la app no existía). Cargar UNA vez el costo del inventario inicial = litros totales incorporados al inicio × 9 USD/L × cotización, como gasto histórico (categoría Almazara). Necesito los litros iniciales (de la carga inicial de la app).
-- [ ] **Revertir costos nocionales (doble conteo)**: bajo caja, un regalo/promo/merma es ingreso $0 SIN costo aparte (el costo del aceite ya se gastó en producción). Hay que borrar los gastos nocionales ya creados (promociones_comerciales de regalos + merma #26 = gasto #208) y dejar de generarlos (quitar la creación automática en Ventas regalo/promo y en Stock merma/retiro).
-
-Notas: la categoría `olivos_cosecha` se activa estacionalmente (otoño); el cálculo debe sumarla aunque esté inactiva. Convención: egreso nocional de granel llevaba descripción "Retiro granel #..." y se excluía de conciliación — al revertir ya no se genera.
+- [x] **Panel "cierre de campaña"** en Admin, dentro del diálogo "Costo del aceite", al lado del campo Costo aceite USD/L. Elegir año + **seleccionar qué categorías incluir** → suma ÷ litros producidos = costo real USD/L, con botón "usar este valor".
+  - Preseleccionadas: Olivos poda, Olivos cultivos y MO, Olivos cosecha (inactiva, estacional), Almazara cosecha, Almazara gastos y MO. **Inversión NO.**
+  - **Envasado FUERA del USD/L**: "Almazara - envasado" (slug `olivos_procesamiento`) es empaque por unidad que se paga durante todo el año, no parte del costo del litro a granel. Queda en la lista por si algún año se quiere incluir a mano.
+- [x] **Ajuste único de inventario inicial pre-app** → gasto **#210** (Almazara - cosecha, 2026-08-21, **84.456 USD**, sin método de pago, no conciliable). = 9.384 L incorporados al arranque (granel 6.994 L T1–T6 incl. Viña Eden + envasado 2.390 L ago-2026) × 9 USD/L. Desde la cosecha 2027 los costos reales se cargan bien y este ajuste ya no se repite.
+  - **Viña Eden es aceite propio** (reservado para ese cliente, se cobra al envasar; el envasado lo paga el cliente aparte) → se incluye en el inventario.
+- [x] **Revertir costos nocionales (doble conteo)**: bajo caja, regalo/promo/merma es ingreso $0 SIN costo aparte (ya se gastó en producción). Borrados los gastos nocionales y quitada su creación automática (Ventas regalo/promo, Stock merma/retiro). Convención vieja: egreso "Retiro granel #..." excluido de conciliación — ya no se genera.
 
 ---
 
