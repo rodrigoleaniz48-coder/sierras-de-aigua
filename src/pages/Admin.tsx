@@ -948,9 +948,14 @@ function EditorListasDialog({ abierto, onCerrar, onOk, onRecargar, listas, lista
 // Suma los gastos operativos elegidos de un año y los divide por los litros
 // producidos de esa cosecha, para derivar el costo real por litro y cargarlo
 // arriba en "Costo aceite USD/L". Es solo un cálculo: NO crea ningún gasto.
+// Costo del aceite a GRANEL = agro (poda, cultivos, cosecha) + molienda
+// (almazara cosecha + gastos y MO). El envasado (slug olivos_procesamiento,
+// "Almazara - envasado") NO va: es un costo de empaque por unidad que se
+// paga durante todo el ano, no parte del costo del litro a granel. Igual
+// queda en la lista por si se quiere incluir manualmente algun ano.
 const CATS_OPERATIVAS_ACEITE = [
   'olivos_poda', 'olivos_cultivos', 'olivos_cosecha',
-  'olivos_procesamiento', 'almazara_-_gastos_y_mo_habilitacion_arre',
+  'almazara_-_cosehca', 'almazara_-_gastos_y_mo_habilitacion_arre',
 ]
 
 function CierreCampanaPanel({ cotBcu, onUsarCosto }: { cotBcu: number; onUsarCosto: (usdL: number) => void }) {
