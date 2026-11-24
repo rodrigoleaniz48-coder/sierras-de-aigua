@@ -684,7 +684,7 @@ function MovimientosView({
               <td className="py-2 px-4 tabular-nums text-oliva-600 whitespace-nowrap">{new Date(r.fecha).toLocaleString('es-UY')}</td>
               <td className="py-2 px-4 text-xs text-oliva-600 uppercase">{r.scope}</td>
               <td className="py-2 px-4">
-                <span className={`text-[11px] uppercase tracking-wide rounded-full px-2 py-[1px] ${badgeTipo(r.tipo)}`}>{r.tipo}</span>
+                <span className={`text-[11px] uppercase tracking-wide rounded-full px-2 py-[1px] ${badgeTipo(r.tipo)}`}>{labelTipo(r.tipo)}</span>
               </td>
               <td className="py-2 px-4 text-oliva-800">{r.detalle}</td>
               <td className={`py-2 px-4 text-right tabular-nums font-medium ${r.cantidad.startsWith('-') ? 'text-red-700' : 'text-oliva-900'}`}>{r.cantidad}</td>
@@ -698,6 +698,18 @@ function MovimientosView({
   )
 }
 
+// Tipos de retiro de granel que descuentan aceite sin venta (todos registran costo de elaboracion).
+type TipoRetiro = 'merma' | 'muestra' | 'degustacion' | 'consumo_interno'
+
+// Etiqueta legible del tipo de movimiento (el valor crudo puede tener guion bajo/sin acento).
+function labelTipo(t: string): string {
+  switch (t) {
+    case 'consumo_interno': return 'consumo interno'
+    case 'degustacion':     return 'degustación'
+    default:                return t
+  }
+}
+
 function badgeTipo(t: string) {
   switch (t) {
     case 'envasado':
@@ -707,7 +719,9 @@ function badgeTipo(t: string) {
     case 'traslado':  return 'bg-blue-100 text-blue-800'
     case 'venta':     return 'bg-aceite-500/10 text-aceite-600'
     case 'merma':     return 'bg-red-100 text-red-800'
-    case 'muestra':   return 'bg-oliva-200 text-oliva-800'
+    case 'muestra':
+    case 'degustacion': return 'bg-oliva-200 text-oliva-800'
+    case 'consumo_interno': return 'bg-tierra-100 text-tierra-800'
     case 'ajuste':    return 'bg-tierra-100 text-tierra-800'
     default:          return 'bg-oliva-100 text-oliva-700'
   }
@@ -1310,7 +1324,7 @@ function MermaMuestraDialog({
   onOk: () => void
 }) {
   const [tanqueId, setTanqueId] = useState<string>('')
-  const [tipo, setTipo] = useState<'merma' | 'muestra'>('merma')
+  const [tipo, setTipo] = useState<TipoRetiro>('merma')
   const [litros, setLitros] = useState<string>('')
   const [nota, setNota] = useState('')
   const [guardando, setGuardando] = useState(false)
@@ -1339,24 +1353,59 @@ function MermaMuestraDialog({
       .eq('id', tanque.id)
     if (e1) { setError(e1.message); setGuardando(false); return }
 
-    const { error: e2 } = await supabase.from('movimientos_granel').insert({
+    const { data: movData, error: e2 } = await supabase.from('movimientos_granel').insert({
       tipo, tanque_origen_id: tanque.id, litros: L,
       usuario_id: user?.id ?? null, nota: nota.trim() || null,
-    })
+    }).select('id').single()
     if (e2) { setError(e2.message); setGuardando(false); return }
+
+    // Costo del retiro: el aceite sale sin venta, asi que se registra su costo de elaboracion
+    // (USD/L x litros x cotizacion BCU) como egreso en "Varios". Solo tanques de aceite y sin
+    // envasado (es a granel). Si falla, no se corta el retiro: el movimiento ya quedo registrado.
+    const prod = tanque.producto_id ? prodPorId.get(tanque.producto_id) : null
+    if (prod?.categoria === 'aceite' && user?.id) {
+      try {
+        const { data: cfg } = await supabase.from('config_global').select('value').eq('key', 'costo_aceite_por_litro_usd').maybeSingle()
+        const costoUsdL = Number(cfg?.value ?? 0)
+        if (costoUsdL > 0) {
+          const { fetchCotizacionBCU } = await import('../lib/bcu')
+          const cot = (await fetchCotizacionBCU())?.cotizacion ?? 42
+          const monto = Math.round(L * costoUsdL * cot * 100) / 100
+          if (monto > 0) {
+            await supabase.from('gastos').insert({
+              socio_id: user.id,
+              categoria: 'varios',
+              monto,
+              moneda: 'UYU',
+              descripcion: `Retiro granel #${movData.id} · ${labelTipo(tipo)} · ${num(L)} L ${prod.nombre} (costo elaboracion)`,
+              metodo_pago: null,
+              reembolsable: false,
+              reembolsado: false,
+              es_adelanto: false,
+              actualizado_en: new Date().toISOString(),
+            })
+          }
+        }
+      } catch { /* el costo es secundario: no bloquear el retiro si BCU/gasto falla */ }
+    }
 
     setGuardando(false); onOk()
   }
 
   return (
-    <Dialog abierto={abierto} onCerrar={onCerrar} titulo="Merma o muestra de granel">
+    <Dialog abierto={abierto} onCerrar={onCerrar} titulo="Retiro de granel (merma, muestra, etc.)">
       <form onSubmit={guardar} className="space-y-4">
         <div>
           <label className="label">Tipo</label>
-          <select className="input" value={tipo} onChange={(e) => setTipo(e.target.value as 'merma' | 'muestra')}>
+          <select className="input" value={tipo} onChange={(e) => setTipo(e.target.value as TipoRetiro)}>
             <option value="merma">Merma (pérdida)</option>
-            <option value="muestra">Muestra / análisis / degustación</option>
+            <option value="muestra">Muestra / análisis</option>
+            <option value="degustacion">Degustación</option>
+            <option value="consumo_interno">Consumo interno</option>
           </select>
+          <p className="text-[11px] text-oliva-500 mt-1">
+            Descuenta litros del tanque y, si es aceite, registra su costo de elaboración como egreso (Varios). No incluye envasado.
+          </p>
         </div>
         <div>
           <label className="label">Tanque</label>
