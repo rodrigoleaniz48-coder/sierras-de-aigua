@@ -1207,6 +1207,7 @@ function Conciliacion() {
         // Egreso bancario → buscar gasto (adelantos/reembolsables van en el sueldo; promos no mueven dinero)
         const cand = gastos.find((g) => {
           if (g.es_adelanto || g.reembolsable || g.categoria === 'promociones_comerciales') return false
+          if ((g.descripcion ?? '').startsWith('Retiro granel')) return false // costo nocional de granel, no mueve dinero
           if (g.moneda !== cuenta?.moneda) return false
           if (Math.abs(Number(g.monto) - monto) > 0.01) return false
           const diff = Math.abs(new Date(g.fecha).getTime() - fechaM) / 86400000
@@ -1648,10 +1649,11 @@ async function fetchCandidatosConc(esEgreso: boolean, monedaCta: string, cliente
     if (r.conciliado_pago_id) pRef.add(r.conciliado_pago_id)
   }
   if (esEgreso) {
-    // No se concilian: promociones comerciales (regalos, sin movimiento real), ni adelantos ni
-    // reembolsables (se liquidan dentro del sueldo, no por un movimiento puntual del banco).
+    // No se concilian: promociones comerciales (regalos, sin movimiento real), adelantos ni
+    // reembolsables (se liquidan dentro del sueldo), ni los costos de retiro de granel
+    // (merma/muestra/etc.: costo nocional de elaboracion, no mueve dinero).
     const { data } = await supabase.from('gastos').select('id,fecha,monto,moneda,descripcion,categoria,conciliado_mov_id').eq('es_adelanto', false).eq('reembolsable', false).neq('categoria', 'promociones_comerciales').is('conciliado_mov_id', null).eq('moneda', monedaCta).gte('fecha', piso).order('fecha', { ascending: false })
-    return ((data ?? []) as Record<string, any>[]).filter((g) => !gRef.has(g.id)).map((g) => ({ tipo: 'gasto' as const, id: g.id, fecha: g.fecha, monto: Number(g.monto), etiqueta: g.descripcion ?? g.categoria }))
+    return ((data ?? []) as Record<string, any>[]).filter((g) => !gRef.has(g.id) && !(g.descripcion ?? '').startsWith('Retiro granel')).map((g) => ({ tipo: 'gasto' as const, id: g.id, fecha: g.fecha, monto: Number(g.monto), etiqueta: g.descripcion ?? g.categoria }))
   }
   const [vR, iR] = await Promise.all([
     // Ventas no-efectivo (las de efectivo se llevan como adelanto, no van al banco).
