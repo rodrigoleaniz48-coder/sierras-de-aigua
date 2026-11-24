@@ -1265,70 +1265,16 @@ async function guardar(e: React.FormEvent) {
       }
     }
 
-    // 4) Gasto automático por promoción comercial o items regalo (a costo real, no precio de venta)
-    //    Al editar, se borra el gasto anterior y se recrea con el monto actualizado.
+    // 4) Regalo / promoción comercial: bajo criterio caja NO lleva un costo aparte.
+    //    El costo del aceite ya se gasta al pagar la producción (categorías Olivos/Almazara),
+    //    así que registrarlo de nuevo sería doble conteo. El regalo/promo es simplemente una
+    //    venta con ingreso $0. Ya no se genera el gasto nocional; al re-guardar se limpia uno
+    //    viejo si quedó de la versión anterior.
     if (!aConfirmar) {
       await supabase.from('gastos')
         .delete()
         .eq('categoria', 'promociones_comerciales')
         .ilike('descripcion', `Venta #${ventaId} %`)
-
-      const itemsPromo = promocion
-        ? filasValidas
-        : filasValidas.filter(f => f.it.es_regalo)
-      if (itemsPromo.length > 0) {
-        const { data: cfgCosto } = await supabase.from('config_global').select('value').eq('key', 'costo_aceite_por_litro_usd').maybeSingle()
-        const costoAceiteUsdL = Number(cfgCosto?.value ?? 0)
-        const { fetchCotizacionBCU } = await import('../lib/bcu')
-        const cotBcu = await fetchCotizacionBCU()
-        const tipoCambio = cotBcu?.cotizacion ?? 42
-        // Costo real de una presentacion = envasado propio + aceite proporcional (si el producto
-        // es aceite) + costo de sus componentes (recursivo, para packs). Mismo criterio que la
-        // tabla de margenes de Admin: un pack suma la caja + cada botella con su aceite.
-        const presPorIdCosto = new Map(presentaciones.map((p) => [p.id, p]))
-        const costoEnvasadoUyu = (pres: Presentacion): number =>
-          pres.costo_envasado_usd != null && Number(pres.costo_envasado_usd) > 0
-            ? Number(pres.costo_envasado_usd) * tipoCambio
-            : Number(pres.costo_envasado ?? 0)
-        const costoUnitPres = (pres: Presentacion, visto = new Set<number>()): number => {
-          if (visto.has(pres.id)) return 0 // guarda contra ciclos
-          visto.add(pres.id)
-          const prod = prodPorId.get(pres.producto_id)
-          let c = costoEnvasadoUyu(pres)
-          if (prod?.categoria === 'aceite') c += costoAceiteUsdL * tipoCambio * ((pres.volumen_ml ?? 0) / 1000)
-          if (pres.es_pack) {
-            for (const cp of componentes.filter((x) => x.presentacion_pack_id === pres.id)) {
-              const comp = presPorIdCosto.get(cp.presentacion_componente_id)
-              if (comp) c += costoUnitPres(comp, visto) * Number(cp.unidades)
-            }
-          }
-          return c
-        }
-        let montoPromo = 0
-        const detalle: string[] = []
-        for (const f of itemsPromo) {
-          if (!f.p) continue
-          const prod = prodPorId.get(f.p.producto_id)
-          montoPromo += costoUnitPres(f.p) * Number(f.it.unidades)
-          detalle.push(`${f.it.unidades}× ${prod?.nombre ?? ''} ${f.p.nombre} (${promocion ? 'promo' : 'regalo'})`)
-        }
-        if (montoPromo > 0) {
-          const clienteNombre = clienteId ? clientes.find(c => c.id === Number(clienteId))?.nombre : null
-          await supabase.from('gastos').insert({
-            fecha,
-            socio_id: socioId,
-            categoria: 'promociones_comerciales',
-            monto: Math.round(montoPromo * 100) / 100,
-            moneda: 'UYU',
-            descripcion: `Venta #${ventaId}${clienteNombre ? ` · ${clienteNombre}` : ''} — ${detalle.join(', ')}`,
-            metodo_pago: 'transferencia',
-            reembolsable: false,
-            reembolsado: false,
-            es_adelanto: false,
-            actualizado_en: new Date().toISOString(),
-          })
-        }
-      }
     }
 
     // Cobro en efectivo → adelanto del socio (idempotente). Si no es efectivo/cobrado, limpia uno previo.

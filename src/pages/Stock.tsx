@@ -1353,41 +1353,14 @@ function MermaMuestraDialog({
       .eq('id', tanque.id)
     if (e1) { setError(e1.message); setGuardando(false); return }
 
-    const { data: movData, error: e2 } = await supabase.from('movimientos_granel').insert({
+    const { error: e2 } = await supabase.from('movimientos_granel').insert({
       tipo, tanque_origen_id: tanque.id, litros: L,
       usuario_id: user?.id ?? null, nota: nota.trim() || null,
-    }).select('id').single()
+    })
     if (e2) { setError(e2.message); setGuardando(false); return }
 
-    // Costo del retiro: el aceite sale sin venta, asi que se registra su costo de elaboracion
-    // (USD/L x litros x cotizacion BCU) como egreso en "Varios". Solo tanques de aceite y sin
-    // envasado (es a granel). Si falla, no se corta el retiro: el movimiento ya quedo registrado.
-    const prod = tanque.producto_id ? prodPorId.get(tanque.producto_id) : null
-    if (prod?.categoria === 'aceite' && user?.id) {
-      try {
-        const { data: cfg } = await supabase.from('config_global').select('value').eq('key', 'costo_aceite_por_litro_usd').maybeSingle()
-        const costoUsdL = Number(cfg?.value ?? 0)
-        if (costoUsdL > 0) {
-          const { fetchCotizacionBCU } = await import('../lib/bcu')
-          const cot = (await fetchCotizacionBCU())?.cotizacion ?? 42
-          const monto = Math.round(L * costoUsdL * cot * 100) / 100
-          if (monto > 0) {
-            await supabase.from('gastos').insert({
-              socio_id: user.id,
-              categoria: 'varios',
-              monto,
-              moneda: 'UYU',
-              descripcion: `Retiro granel #${movData.id} · ${labelTipo(tipo)} · ${num(L)} L ${prod.nombre} (costo elaboracion)`,
-              metodo_pago: null,
-              reembolsable: false,
-              reembolsado: false,
-              es_adelanto: false,
-              actualizado_en: new Date().toISOString(),
-            })
-          }
-        }
-      } catch { /* el costo es secundario: no bloquear el retiro si BCU/gasto falla */ }
-    }
+    // Nota: el retiro NO registra un costo aparte. Bajo criterio caja el costo del aceite ya
+    // se gastó al pagar la producción, así que contabilizarlo de nuevo sería doble conteo.
 
     setGuardando(false); onOk()
   }
@@ -1404,7 +1377,7 @@ function MermaMuestraDialog({
             <option value="consumo_interno">Consumo interno</option>
           </select>
           <p className="text-[11px] text-oliva-500 mt-1">
-            Descuenta litros del tanque y, si es aceite, registra su costo de elaboración como egreso (Varios). No incluye envasado.
+            Descuenta litros del tanque y registra el movimiento. No genera un gasto: el costo del aceite ya está en los gastos de producción.
           </p>
         </div>
         <div>
