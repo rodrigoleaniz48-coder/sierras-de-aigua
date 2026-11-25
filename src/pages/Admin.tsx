@@ -279,13 +279,14 @@ export function Admin() {
                     {ps.length === 0 && <div className="text-sm text-oliva-600">Sin presentaciones. Agregá una.</div>}
                     {ps.length > 0 && (
                       <div className="overflow-x-auto">
-                        <table className={`w-full text-sm ${puedeEditarMargenes ? 'min-w-[720px]' : 'min-w-[560px]'}`}>
+                        <table className={`w-full text-sm ${puedeEditarMargenes ? (p.categoria === 'aceite' ? 'min-w-[720px]' : 'min-w-[560px]') : 'min-w-[560px]'}`}>
                           <thead>
                             <tr className="text-left text-[10px] uppercase tracking-wide text-oliva-600 border-b border-oliva-100">
                               <th className="py-2 pr-2">Presentación</th>
-                              {puedeEditarMargenes && <th className="py-2 pr-2 text-right">Costo env.</th>}
-                              {puedeEditarMargenes && <th className="py-2 pr-2 text-right">Costo aceite</th>}
-                              {puedeEditarMargenes && <th className="py-2 pr-2 text-right">Costo total</th>}
+                              {puedeEditarMargenes && p.categoria === 'aceite' && <th className="py-2 pr-2 text-right">Costo env.</th>}
+                              {puedeEditarMargenes && p.categoria === 'aceite' && <th className="py-2 pr-2 text-right">Costo aceite</th>}
+                              {puedeEditarMargenes && p.categoria === 'aceite' && <th className="py-2 pr-2 text-right">Costo total</th>}
+                              {puedeEditarMargenes && p.categoria !== 'aceite' && <th className="py-2 pr-2 text-right">Costo prod.</th>}
                               <th className="py-2 pr-2 text-right">Consumidor</th>
                               {puedeEditarMargenes && <th className="py-2 pr-2 text-right">Marg. consum. %</th>}
                               <th className="py-2 pr-2 text-right">IVA %</th>
@@ -302,9 +303,10 @@ export function Admin() {
                                     <div className="font-medium">{x.nombre}</div>
                                     <div className="text-[11px] text-oliva-500">{x.unidad}</div>
                                   </td>
-                                  {puedeEditarMargenes && <td className="py-2 pr-2 text-right tabular-nums">{m.costoEnvasado > 0 ? money(m.costoEnvasado) : <span className="text-red-600">—</span>}</td>}
-                                  {puedeEditarMargenes && <td className="py-2 pr-2 text-right tabular-nums">{m.esAceite && m.costoAceite > 0 ? money(m.costoAceite) : '—'}</td>}
-                                  {puedeEditarMargenes && <td className="py-2 pr-2 text-right tabular-nums font-medium">{m.costoTotal > 0 ? money(m.costoTotal) : <span className="text-red-600">—</span>}</td>}
+                                  {puedeEditarMargenes && p.categoria === 'aceite' && <td className="py-2 pr-2 text-right tabular-nums">{m.costoEnvasado > 0 ? money(m.costoEnvasado) : <span className="text-red-600">—</span>}</td>}
+                                  {puedeEditarMargenes && p.categoria === 'aceite' && <td className="py-2 pr-2 text-right tabular-nums">{m.esAceite && m.costoAceite > 0 ? money(m.costoAceite) : '—'}</td>}
+                                  {puedeEditarMargenes && p.categoria === 'aceite' && <td className="py-2 pr-2 text-right tabular-nums font-medium">{m.costoTotal > 0 ? money(m.costoTotal) : <span className="text-red-600">—</span>}</td>}
+                                  {puedeEditarMargenes && p.categoria !== 'aceite' && <td className="py-2 pr-2 text-right tabular-nums font-medium">{m.costoTotal > 0 ? money(m.costoTotal) : <span className="text-red-600">—</span>}</td>}
                                   <td className="py-2 pr-2 text-right tabular-nums">{money(m.precioMin)}</td>
                                   {puedeEditarMargenes && <td className={`py-2 pr-2 text-right tabular-nums ${m.margenMinPct < 20 ? 'text-red-700' : m.margenMinPct < 30 ? 'text-amber-700' : 'text-green-700'}`}>{m.margenMinPct.toFixed(0)}%</td>}
                                   <td className="py-2 pr-2 text-right tabular-nums">{Number(x.iva_pct)}%</td>
