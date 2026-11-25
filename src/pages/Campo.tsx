@@ -361,6 +361,7 @@ export function Campo() {
   // ------------------------------------------------------------------ render
   return (
     <div className="pb-24 lg:pb-6">
+      <h1 className="text-2xl font-semibold text-oliva-900 mb-3">Cuaderno de campo</h1>
       {/* Fila 1: cronograma (scrollable en mobile) + botones de alta */}
       <div className="mb-3 space-y-2">
         <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">

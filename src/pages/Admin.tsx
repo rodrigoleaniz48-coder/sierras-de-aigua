@@ -279,18 +279,15 @@ export function Admin() {
                     {ps.length === 0 && <div className="text-sm text-oliva-600">Sin presentaciones. Agregá una.</div>}
                     {ps.length > 0 && (
                       <div className="overflow-x-auto">
-                        <table className={`w-full text-sm ${puedeEditarMargenes ? 'min-w-[1060px]' : 'min-w-[560px]'}`}>
+                        <table className={`w-full text-sm ${puedeEditarMargenes ? 'min-w-[720px]' : 'min-w-[560px]'}`}>
                           <thead>
                             <tr className="text-left text-[10px] uppercase tracking-wide text-oliva-600 border-b border-oliva-100">
                               <th className="py-2 pr-2">Presentación</th>
                               {puedeEditarMargenes && <th className="py-2 pr-2 text-right">Costo env.</th>}
                               {puedeEditarMargenes && <th className="py-2 pr-2 text-right">Costo aceite</th>}
-                              {puedeEditarMargenes && <th className="py-2 pr-2 text-right">Costo final</th>}
+                              {puedeEditarMargenes && <th className="py-2 pr-2 text-right">Costo total</th>}
                               <th className="py-2 pr-2 text-right">Consumidor</th>
-                              {puedeEditarMargenes && <th className="py-2 pr-2 text-right">Distribuidor</th>}
                               {puedeEditarMargenes && <th className="py-2 pr-2 text-right">Marg. consum. %</th>}
-                              {puedeEditarMargenes && <th className="py-2 pr-2 text-right">Marg. distr. %</th>}
-                              {puedeEditarMargenes && <th className="py-2 pr-2 text-right">Marg. aceite USD/L (consum · distr)</th>}
                               <th className="py-2 pr-2 text-right">IVA %</th>
                               <th className="py-2 pr-2 text-right">Stock mín.</th>
                               <th className="py-2 pr-1"></th>
@@ -309,19 +306,7 @@ export function Admin() {
                                   {puedeEditarMargenes && <td className="py-2 pr-2 text-right tabular-nums">{m.esAceite && m.costoAceite > 0 ? money(m.costoAceite) : '—'}</td>}
                                   {puedeEditarMargenes && <td className="py-2 pr-2 text-right tabular-nums font-medium">{m.costoTotal > 0 ? money(m.costoTotal) : <span className="text-red-600">—</span>}</td>}
                                   <td className="py-2 pr-2 text-right tabular-nums">{money(m.precioMin)}</td>
-                                  {puedeEditarMargenes && <td className="py-2 pr-2 text-right tabular-nums">{m.precioDistUyu > 0 ? money(m.precioDistUyu) : '—'}</td>}
                                   {puedeEditarMargenes && <td className={`py-2 pr-2 text-right tabular-nums ${m.margenMinPct < 20 ? 'text-red-700' : m.margenMinPct < 30 ? 'text-amber-700' : 'text-green-700'}`}>{m.margenMinPct.toFixed(0)}%</td>}
-                                  {puedeEditarMargenes && <td className={`py-2 pr-2 text-right tabular-nums ${m.margenDistPct < 15 ? 'text-red-700' : m.margenDistPct < 25 ? 'text-amber-700' : 'text-green-700'}`}>{m.margenDistPct > 0 ? m.margenDistPct.toFixed(0) + '%' : '—'}</td>}
-                                  {puedeEditarMargenes && (
-                                    <td className="py-2 pr-2 text-right tabular-nums text-xs">
-                                      {m.esAceite ? (
-                                        <span>
-                                          <b>{m.margenAceiteMinUsdL.toFixed(1)}</b>
-                                          {m.margenAceiteDistUsdL > 0 && <> · {m.margenAceiteDistUsdL.toFixed(1)}</>}
-                                        </span>
-                                      ) : '—'}
-                                    </td>
-                                  )}
                                   <td className="py-2 pr-2 text-right tabular-nums">{Number(x.iva_pct)}%</td>
                                   <td className="py-2 pr-2 text-right tabular-nums">{x.stock_minimo}</td>
                                   <td className="py-2 pr-1 text-right">
