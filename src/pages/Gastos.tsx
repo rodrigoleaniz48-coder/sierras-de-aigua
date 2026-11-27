@@ -26,6 +26,8 @@ interface Gasto {
   es_adelanto: boolean
   comprobante_url: string | null
   jornalero_id?: number | null
+  amortiza_anios?: number | null
+  amortiza_residual_pct?: number | null
 }
 
 type TipoGasto = 'normal' | 'reembolsable' | 'adelanto'
@@ -48,6 +50,10 @@ const GRUPOS_GASTO: [string, string[]][] = [
   ['Otros', ['varios']],
 ]
 const SLUGS_AGRUPADOS = new Set(GRUPOS_GASTO.flatMap(([, slugs]) => slugs))
+
+// Categorias de inversion (CAPEX): activos que pueden amortizarse en varios anios.
+// Debe coincidir con GASTO_CAPEX_SLUGS de Contabilidad.tsx.
+const CAPEX_SLUGS = new Set(GRUPOS_GASTO.find(([g]) => g === 'Inversiones')?.[1] ?? [])
 
 // Etiqueta corta para el <option>: quita el prefijo redundante del grupo
 // (Olivos/Almazara/Ovinos) y abrevia "Inversión" a "Inv.", para que en el
@@ -1066,6 +1072,10 @@ function GastoDialog({
   const [metodoPago, setMetodoPago] = useState<string>('efectivo')
   const [tipo, setTipo] = useState<TipoGasto>('normal')
   const [reembolsado, setReembolsado] = useState(false)
+  // Amortizacion (solo categorias de inversion / capex)
+  const [amortizar, setAmortizar] = useState(false)
+  const [amortAnios, setAmortAnios] = useState<string>('5')
+  const [amortResidual, setAmortResidual] = useState<string>('')
   const [cuentaId, setCuentaId] = useState<string>('')
   const [correoId, setCorreoId] = useState<number | null>(null)
   const [cuentas, setCuentas] = useState<CuentaBancariaBase[]>([])
@@ -1178,20 +1188,25 @@ function GastoDialog({
       setReembolsado(editar.reembolsado)
       setCuentaId((editar as Gasto & { cuenta_id?: number | null }).cuenta_id ? String((editar as Gasto & { cuenta_id?: number | null }).cuenta_id) : '')
       setSocioSel(editar.socio_id)
+      setAmortizar(editar.amortiza_anios != null)
+      setAmortAnios(editar.amortiza_anios != null ? String(editar.amortiza_anios) : '5')
+      setAmortResidual(editar.amortiza_residual_pct ? String(editar.amortiza_residual_pct) : '')
     } else {
-      const b = leerObj<{ fecha: string; categoria: string; monto: string; moneda: 'UYU' | 'USD'; descripcion: string; metodoPago: string; tipo?: TipoGasto; reembolsado: boolean; cuentaId?: string; correoId?: number }>('borrador:nuevo-gasto')
+      const b = leerObj<{ fecha: string; categoria: string; monto: string; moneda: 'UYU' | 'USD'; descripcion: string; metodoPago: string; tipo?: TipoGasto; reembolsado: boolean; cuentaId?: string; correoId?: number; amortizar?: boolean; amortAnios?: string; amortResidual?: string }>('borrador:nuevo-gasto')
       if (b) {
         setFecha(b.fecha); setCategoria(b.categoria); setMonto(b.monto); setMoneda(b.moneda)
         setDescripcion(b.descripcion); setMetodoPago(b.metodoPago)
         setTipo(b.tipo ?? 'normal'); setReembolsado(b.reembolsado)
         if (b.cuentaId) setCuentaId(b.cuentaId)
         setCorreoId(b.correoId ?? null)
+        setAmortizar(b.amortizar ?? false); setAmortAnios(b.amortAnios ?? '5'); setAmortResidual(b.amortResidual ?? '')
       } else {
         setFecha(new Date().toISOString().slice(0, 10))
         setCategoria('varios'); setMonto(''); setMoneda('UYU')
         setDescripcion(''); setMetodoPago('efectivo')
         setTipo('normal'); setReembolsado(false)
         setCorreoId(null)
+        setAmortizar(false); setAmortAnios('5'); setAmortResidual('')
       }
       setSocioSel(socioId)
     }
@@ -1201,11 +1216,20 @@ function GastoDialog({
   // Guardar borrador al escribir (solo en modo nuevo)
   useEffect(() => {
     if (!abierto || editar) return
-    guardarObj('borrador:nuevo-gasto', { fecha, categoria, monto, moneda, descripcion, metodoPago, tipo, reembolsado })
-  }, [abierto, editar, fecha, categoria, monto, moneda, descripcion, metodoPago, tipo, reembolsado])
+    guardarObj('borrador:nuevo-gasto', { fecha, categoria, monto, moneda, descripcion, metodoPago, tipo, reembolsado, amortizar, amortAnios, amortResidual })
+  }, [abierto, editar, fecha, categoria, monto, moneda, descripcion, metodoPago, tipo, reembolsado, amortizar, amortAnios, amortResidual])
 
   const propio = !editar || editar.socio_id === socioId
   const soloLectura = editar !== null && editar !== undefined && !propio && !veTodos
+
+  // Inversion amortizable: solo categorias capex y no-adelanto.
+  const esCapex = tipo !== 'adelanto' && CAPEX_SLUGS.has(categoria)
+  const montoNum = Number(monto) || 0
+  const aniosNum = Math.max(1, Math.floor(Number(amortAnios) || 0))
+  const residualNum = Math.min(99, Math.max(0, Number(amortResidual) || 0))
+  const baseAmortizable = montoNum * (1 - residualNum / 100)
+  const amortPorAnio = aniosNum > 0 ? baseAmortizable / aniosNum : 0
+  const amortPorMes = amortPorAnio / 12
 
   // Adelanto de un jornalero: se edita con una vista propia (no la de adelanto de socio).
   const esAdelantoJornal = !!(editar && editar.jornalero_id && editar.es_adelanto)
@@ -1241,6 +1265,9 @@ function GastoDialog({
       reembolsado: descCC ? false : (tipo === 'reembolsable' ? reembolsado : false),
       es_adelanto: tipo === 'adelanto',
       cuenta_id: cuentaId ? Number(cuentaId) : null,
+      // Amortizacion: solo para inversiones (capex) con la opcion activada; si no, se limpia.
+      amortiza_anios: esCapex && amortizar && aniosNum > 0 ? aniosNum : null,
+      amortiza_residual_pct: esCapex && amortizar ? residualNum : 0,
       actualizado_en: new Date().toISOString(),
     }
     if (editar) {
@@ -1409,6 +1436,40 @@ function GastoDialog({
             </select>
           </div>
         </div>
+        {/* Amortizacion: solo cuando la categoria es una inversion (capex). */}
+        {esCapex && (
+          <div className="rounded-xl border border-aceite-500/30 bg-aceite-500/5 p-3 space-y-2">
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input type="checkbox" className="h-4 w-4 mt-0.5 accent-oliva-700" checked={amortizar} onChange={(e) => setAmortizar(e.target.checked)} disabled={soloLectura} />
+              <div>
+                <div className="text-sm text-oliva-800 font-medium">Amortizar esta inversión</div>
+                <div className="text-[11px] text-oliva-600">Repartir el costo en varios años (depreciación) en vez de contarlo entero el mes del pago. Si no la marcás, se cuenta entera ese mes.</div>
+              </div>
+            </label>
+            {amortizar && (
+              <>
+                <div className="grid grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <label className="label">Años de amortización</label>
+                    <input className="input tabular-nums" type="number" min="1" step="1" value={amortAnios} onChange={(e) => setAmortAnios(e.target.value)} disabled={soloLectura} />
+                  </div>
+                  <div>
+                    <label className="label">Valor residual (%) <span className="text-oliva-400 font-normal">· opcional</span></label>
+                    <input className="input tabular-nums" type="number" min="0" max="99" step="1" value={amortResidual} onChange={(e) => setAmortResidual(e.target.value)} placeholder="0" disabled={soloLectura} />
+                    <p className="text-[11px] text-oliva-500 mt-1">% del valor que conserva al final. Vacío = se amortiza por completo.</p>
+                  </div>
+                </div>
+                {montoNum > 0 && (
+                  <div className="rounded-lg bg-white/60 border border-oliva-100 p-2.5 text-[11px] text-oliva-700 space-y-0.5">
+                    <div>Se reparte <b>{formatMonto(baseAmortizable, moneda)}</b> en <b>{aniosNum} año{aniosNum === 1 ? '' : 's'}</b>{residualNum > 0 ? <> (conserva {residualNum}% = {formatMonto(montoNum - baseAmortizable, moneda)})</> : null}.</div>
+                    <div className="tabular-nums">≈ <b>{formatMonto(amortPorAnio, moneda)}</b> por año · <b>{formatMonto(amortPorMes, moneda)}</b> por mes.</div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
         <div>
           <label className="label">{tipo === 'adelanto' ? 'Notas (opcional)' : 'Descripción (opcional)'}</label>
           <input className="input" value={descripcion} onChange={(e) => setDescripcion(e.target.value)} placeholder={tipo === 'adelanto' ? 'ej: para comprar comida familia' : 'ej: gasoil Ancap Aiguá'} disabled={soloLectura} />

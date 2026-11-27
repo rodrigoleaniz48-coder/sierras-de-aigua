@@ -57,7 +57,7 @@ interface MovBancario {
   hash_unico: string
 }
 interface Venta { id: number; fecha: string; total: number; con_factura: boolean; ubicacion_id: number; cliente_id: number | null; moneda?: string | null; cotizacion?: number | null; forma_pago?: string | null; entregado?: boolean; fecha_entrega?: string | null; conciliado_mov_id?: number | null }
-interface Gasto { id: number; fecha: string; monto: number; moneda: 'UYU' | 'USD'; descripcion: string | null; categoria: string; socio_id: string; es_adelanto?: boolean; reembolsable?: boolean; conciliado_mov_id?: number | null }
+interface Gasto { id: number; fecha: string; monto: number; moneda: 'UYU' | 'USD'; descripcion: string | null; categoria: string; socio_id: string; es_adelanto?: boolean; reembolsable?: boolean; conciliado_mov_id?: number | null; amortiza_anios?: number | null; amortiza_residual_pct?: number | null }
 interface Ingreso { id: number; fecha: string; monto: number; moneda: string; descripcion: string | null; categoria_id: number | null; cuenta_id?: number | null; conciliado_mov_id?: number | null }
 interface Pago { id: number; cliente_id: number | null; fecha: string; monto: number; moneda: string; medio_pago: string | null; nota: string | null; cuenta_id?: number | null }
 interface CategoriaGasto { id: number; slug: string; nombre: string }
@@ -656,6 +656,9 @@ function EstadoResultados() {
   const [ventas, setVentas] = useState<VentaMon[]>([])
   const [ingresos, setIngresos] = useState<IngresoMan[]>([])
   const [gastos, setGastos] = useState<Gasto[]>([])
+  // Activos amortizables (inversiones con plan de amortizacion), de cualquier mes: la
+  // depreciacion de un activo comprado hace anios sigue impactando los meses actuales.
+  const [activos, setActivos] = useState<Gasto[]>([])
   const [ccIds, setCcIds] = useState<Set<number>>(new Set())
   const [pagos, setPagos] = useState<{ cliente_id: number | null; monto: number; moneda: string }[]>([])
   const [catIng, setCatIng] = useState<Map<number, { slug: string; nombre: string }>>(new Map())
@@ -674,15 +677,18 @@ function EstadoResultados() {
       // Reportes mensuales: las ventas cuentan en el mes de COBRO real (no de la fecha de venta).
       // Ventas "a confirmar" (potenciales) NO se incluyen.
       supabase.from('ventas').select('id,fecha,total,iva,con_factura,ubicacion_id,cliente_id,moneda,cotizacion').gte('fecha_cobro', desde).lte('fecha_cobro', hasta).neq('estado', 'cancelado').eq('promocion_comercial', false).eq('a_confirmar', false),
-      supabase.from('gastos').select('id,fecha,monto,moneda,descripcion,categoria,socio_id').gte('fecha', desde).lte('fecha', hasta).eq('es_adelanto', false),
+      supabase.from('gastos').select('id,fecha,monto,moneda,descripcion,categoria,socio_id,amortiza_anios,amortiza_residual_pct').gte('fecha', desde).lte('fecha', hasta).eq('es_adelanto', false),
       supabase.from('ingresos').select('id,fecha,monto,moneda,categoria_id,socio_id').gte('fecha', desde).lte('fecha', hasta),
       // Clientes de cuenta corriente: su ingreso se reconoce por el PAGO a cuenta, no por la venta.
       supabase.from('clientes').select('id').in('tipo', ['distribuidor', 'mayorista']),
       supabase.from('pagos').select('cliente_id,monto,moneda').gte('fecha', desde).lte('fecha', hasta),
       supabase.from('categorias_ingreso').select('id,slug,nombre'),
-    ]).then(([v, g, i, cc, p, ci]) => {
+      // Todos los activos con plan de amortizacion (cualquier fecha) para la depreciacion del mes.
+      supabase.from('gastos').select('id,fecha,monto,moneda,descripcion,categoria,socio_id,amortiza_anios,amortiza_residual_pct').not('amortiza_anios', 'is', null).eq('es_adelanto', false),
+    ]).then(([v, g, i, cc, p, ci, act]) => {
       setVentas((v.data as VentaMon[]) ?? [])
       setGastos((g.data as Gasto[]) ?? [])
+      setActivos((act.data as Gasto[]) ?? [])
       setIngresos((i.data as IngresoMan[]) ?? [])
       setCcIds(new Set(((cc.data as { id: number }[]) ?? []).map((c) => c.id)))
       setPagos((p.data as { cliente_id: number | null; monto: number; moneda: string }[]) ?? [])
@@ -784,17 +790,54 @@ function EstadoResultados() {
   const sum = (m: Map<string, Par>, k: 'uyu' | 'usd') => [...m.values()].reduce((s, v) => s + v[k], 0)
   const ingParaleloUYU = sum(paraleloPorCat, 'uyu'), ingParaleloUSD = sum(paraleloPorCat, 'usd')
   const ingExtraUYU = sum(extraPorCat, 'uyu'), ingExtraUSD = sum(extraPorCat, 'usd')
-  // Egresos: operativos vs inversiones (capex).
+  // Egresos: operativos vs inversiones (capex). Las inversiones con plan de amortizacion
+  // NO se cuentan enteras aca: se reparten como depreciacion mensual (ver mas abajo).
   let egCapexUYU = 0, egCapexUSD = 0, egOpexUYU = 0, egOpexUSD = 0
   for (const g of gastos) {
     const usd = g.moneda === 'USD', m = Number(g.monto), capex = GASTO_CAPEX_SLUGS.has(g.categoria)
-    if (capex) { if (usd) egCapexUSD += m; else egCapexUYU += m } else { if (usd) egOpexUSD += m; else egOpexUYU += m }
+    if (capex) {
+      if (g.amortiza_anios != null) continue // amortizable: va por depreciacion, no entero
+      if (usd) egCapexUSD += m; else egCapexUYU += m
+    } else { if (usd) egOpexUSD += m; else egOpexUYU += m }
+  }
+  // Depreciacion del mes: suma lineal de los activos cuyo plan de amortizacion esta activo
+  // este mes (idx de mes dentro de [0, anios*12)). Base = monto * (1 - residual%).
+  const selY = Number(anio), selM = Number(mes)
+  let depreUYU = 0, depreUSD = 0
+  for (const a of activos) {
+    const anios = Number(a.amortiza_anios) || 0
+    if (anios <= 0) continue
+    const fy = Number(a.fecha.slice(0, 4)), fm = Number(a.fecha.slice(5, 7))
+    const idx = (selY - fy) * 12 + (selM - fm)
+    if (idx < 0 || idx >= anios * 12) continue
+    const mensual = (Number(a.monto) * (1 - (Number(a.amortiza_residual_pct) || 0) / 100)) / (anios * 12)
+    if (a.moneda === 'USD') depreUSD += mensual; else depreUYU += mensual
   }
   const ingOperativoUYU = ingNegocioUYU + ingParaleloUYU, ingOperativoUSD = ingNegocioUSD + ingParaleloUSD
   const resultadoOperativoUYU = ingOperativoUYU - egOpexUYU
   const resultadoOperativoUSD = ingOperativoUSD - egOpexUSD
-  const hayNoOperativo = ingExtraUYU > 0 || ingExtraUSD > 0 || egCapexUYU > 0 || egCapexUSD > 0
-  const analisisUSD = ingNegocioUSD !== 0 || ingParaleloUSD !== 0 || ingExtraUSD !== 0 || egOpexUSD !== 0 || egCapexUSD !== 0
+  const hayNoOperativo = ingExtraUYU > 0 || ingExtraUSD > 0 || egCapexUYU > 0 || egCapexUSD > 0 || depreUYU > 0 || depreUSD > 0
+  const analisisUSD = ingNegocioUSD !== 0 || ingParaleloUSD !== 0 || ingExtraUSD !== 0 || egOpexUSD !== 0 || egCapexUSD !== 0 || depreUSD !== 0
+  // Resultado neto economico: reparte las inversiones amortizadas como depreciacion
+  // (en vez de contarlas enteras). Las headline del mes siguen en base caja.
+  const netoEcoUYU = resultadoOperativoUYU + ingExtraUYU - egCapexUYU - depreUYU
+  const netoEcoUSD = resultadoOperativoUSD + ingExtraUSD - egCapexUSD - depreUSD
+
+  // Registro de activos: valor en libros y depreciacion acumulada al mes seleccionado.
+  const activosCalc = activos.map((a) => {
+    const anios = Number(a.amortiza_anios) || 0
+    const residual = Number(a.amortiza_residual_pct) || 0
+    const totalMeses = anios * 12
+    const base = Number(a.monto) * (1 - residual / 100)
+    const mensual = totalMeses > 0 ? base / totalMeses : 0
+    const fy = Number(a.fecha.slice(0, 4)), fm = Number(a.fecha.slice(5, 7))
+    const idx = (selY - fy) * 12 + (selM - fm) // 0 = mes de compra (ya deprecia)
+    const mesesCorridos = idx < 0 ? 0 : Math.min(idx + 1, totalMeses)
+    const acumulada = mensual * mesesCorridos
+    const enLibros = Number(a.monto) - acumulada
+    const estado: 'futuro' | 'en_curso' | 'amortizado' = idx < 0 ? 'futuro' : mesesCorridos >= totalMeses ? 'amortizado' : 'en_curso'
+    return { a, anios, residual, mensual, anual: mensual * 12, acumulada, enLibros, estado }
+  }).sort((x, y) => (x.a.fecha < y.a.fecha ? 1 : -1))
   const paraleloArr = [...paraleloPorCat.entries()].sort((a, b) => (b[1].uyu + b[1].usd) - (a[1].uyu + a[1].usd))
   const extraArr = [...extraPorCat.entries()].sort((a, b) => (b[1].uyu + b[1].usd) - (a[1].uyu + a[1].usd))
   // Muestra "$pesos", "US$dolares" o "$pesos · US$dolares" segun corresponda.
@@ -874,7 +917,7 @@ function EstadoResultados() {
             <div className="font-semibold text-oliva-800">Egresos:</div>
             <ul className="list-disc pl-5 space-y-0.5 mt-1">
               <li><b>Operativos (opex):</b> gastos corrientes del mes.</li>
-              <li><b>Inversiones (capex):</b> mejoras fijas, maquinaria, obras en casas. Se muestran aparte, no restan al resultado operativo.</li>
+              <li><b>Inversiones (capex):</b> mejoras fijas, maquinaria, obras en casas. Se muestran aparte, no restan al resultado operativo. Si al cargarlas elegís <b>amortizarlas</b>, en vez de contarse enteras se reparten como <b>depreciación</b> mes a mes durante su vida útil.</li>
               <li>Los <b>adelantos de sueldo</b> no son gasto (se descuentan del sueldo del socio). Los <b>reembolsables</b> sí son gasto, una sola vez.</li>
               <li><b>Promociones/regalos:</b> ingreso $0; solo se registra su <b>costo</b> (envasado + aceite) como gasto.</li>
             </ul>
@@ -883,7 +926,7 @@ function EstadoResultados() {
             <div className="font-semibold text-oliva-800">Resultados que se muestran:</div>
             <ul className="list-disc pl-5 space-y-0.5 mt-1">
               <li><b>Resultado operativo</b> = (Negocio + Paralelos) − Egresos operativos. Es la métrica de si el negocio se sostiene.</li>
-              <li><b>Resultado neto</b> = incluye además lo no operativo (ventas de activos, aportes) y las inversiones.</li>
+              <li><b>Resultado neto económico</b> = incluye además lo no operativo (ventas de activos, aportes), las inversiones no amortizadas (enteras) y la <b>depreciación</b> del mes de las que sí se amortizan.</li>
             </ul>
           </div>
           <div>
@@ -1001,13 +1044,46 @@ function EstadoResultados() {
                 {extraArr.map(([nom, val]) => (
                   <div key={nom} className="flex justify-between gap-3"><span>+ {nom}</span><span className="tabular-nums text-right">{parMonto(val.uyu, val.usd)}</span></div>
                 ))}
-                {(egCapexUYU > 0 || egCapexUSD > 0) && <div className="flex justify-between gap-3"><span>− Inversiones (capex)</span><span className="tabular-nums text-right">{parMonto(egCapexUYU, egCapexUSD)}</span></div>}
-                <div className="flex justify-between gap-3 pt-1 border-t border-oliva-100"><span className="font-medium">Resultado neto del mes (incluye todo)</span><b className="tabular-nums text-right text-oliva-900">{parMonto(margenUYU, margenUSD)}</b></div>
+                {(egCapexUYU > 0 || egCapexUSD > 0) && <div className="flex justify-between gap-3"><span>− Inversiones (capex, enteras)</span><span className="tabular-nums text-right">{parMonto(egCapexUYU, egCapexUSD)}</span></div>}
+                {(depreUYU > 0 || depreUSD > 0) && <div className="flex justify-between gap-3"><span>− Depreciación/amortización del mes</span><span className="tabular-nums text-right">{parMonto(depreUYU, depreUSD)}</span></div>}
+                <div className="flex justify-between gap-3 pt-1 border-t border-oliva-100"><span className="font-medium">Resultado neto económico del mes</span><b className="tabular-nums text-right text-oliva-900">{parMonto(netoEcoUYU, netoEcoUSD)}</b></div>
+                {(depreUYU > 0 || depreUSD > 0) && <div className="text-[11px] text-oliva-500">Reparte las inversiones amortizadas como depreciación; la caja del mes (arriba) las cuenta enteras cuando se pagan.</div>}
               </div>
             )}
             </div>
           </details>
         </>
+      )}
+
+      {!cargando && activos.length > 0 && (
+        <details className="card p-0 overflow-hidden">
+          <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium text-oliva-800 hover:bg-oliva-50">
+            🏗️ Activos y amortizaciones ({activos.length})
+          </summary>
+          <div className="px-4 pb-4 pt-3 border-t border-oliva-100 space-y-2">
+            <p className="text-[11px] text-oliva-500">Valor en libros y depreciación acumulada al mes seleccionado ({mes}/{anio}). La depreciación de cada activo activo este mes suma al resultado neto económico de arriba.</p>
+            {activosCalc.map(({ a, anios, residual, anual, acumulada, enLibros, estado }) => (
+              <div key={a.id} className="rounded-lg border border-oliva-100 p-3 space-y-1">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-oliva-800 truncate">{a.descripcion || a.categoria.replace(/_/g, ' ')}</div>
+                    <div className="text-[11px] text-oliva-500">{fFecha(a.fecha)} · {anios} año{anios === 1 ? '' : 's'}{residual > 0 ? ` · residual ${residual}%` : ''}</div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="text-sm font-semibold tabular-nums text-oliva-900">{money(Number(a.monto), a.moneda)}</div>
+                    <span className={`text-[10px] uppercase tracking-wide ${estado === 'amortizado' ? 'text-oliva-400' : estado === 'futuro' ? 'text-aceite-600' : 'text-green-700'}`}>{estado === 'amortizado' ? 'amortizado' : estado === 'futuro' ? 'no empezó' : 'en curso'}</span>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-[11px] text-oliva-600 pt-1 border-t border-oliva-50">
+                  <div><div className="text-oliva-400">Deprec./año</div><div className="tabular-nums text-oliva-800">{money(anual, a.moneda)}</div></div>
+                  <div><div className="text-oliva-400">Acumulada</div><div className="tabular-nums text-oliva-800">{money(acumulada, a.moneda)}</div></div>
+                  <div><div className="text-oliva-400">En libros</div><div className="tabular-nums font-medium text-oliva-900">{money(enLibros, a.moneda)}</div></div>
+                </div>
+              </div>
+            ))}
+            <p className="text-[11px] text-oliva-400">Para cambiar el plan de amortización, editá la inversión desde Finanzas → Egresos.</p>
+          </div>
+        </details>
       )}
 
       {!cargando && (totalIngresosUYU > 0 || gastosUYU > 0 || hayUSD) && (

@@ -153,6 +153,7 @@ export function Manual() {
           'Tres tipos: Normal (gasto que paga la empresa), Reembolsable (lo pagaste de tu bolsillo y la empresa te lo debe), y Adelanto.',
           'Adelanto: efectivo que el socio se llevó de la caja/cobros. Se descuenta de su sueldo y NO cuenta como gasto operativo.',
           'Categorías agrupadas (Olivos, Almazara, Ovinos, Inversiones, Operativo, etc.) y "Cuenta con la empresa" por socio.',
+          'Inversiones (maquinaria, obras, mejoras): al cargarlas podés amortizarlas en N años (con valor residual % opcional). En vez de contarse enteras, se reparten como depreciación mes a mes en Contabilidad.',
         ]} />
         <p className="font-medium text-oliva-800 mt-2">Ingresos</p>
         <Lista items={[
@@ -165,6 +166,7 @@ export function Manual() {
         <p><b>Para qué sirve:</b> el estado financiero y las obligaciones. Solo administradores.</p>
         <Lista items={[
           'Estado de resultados (mensual): ingresos, egresos (sin adelantos), margen y desglose por categoría.',
+          'Inversiones y amortización: el resultado neto económico reparte las inversiones amortizadas como depreciación (las headline de caja las cuentan enteras cuando se pagan). Panel "Activos y amortizaciones" con el valor en libros de cada activo.',
           'Conciliación bancaria: pegás el extracto del BROU y la app lo interpreta y lo cruza con gastos/ventas.',
           'Mail / Obligaciones: sincroniza correos de DGI, BPS, BSE y proveedores (solo lectura), detecta montos y vencimientos, y te deja marcarlos pagados/pendientes y cargarlos como gasto.',
         ]} />
