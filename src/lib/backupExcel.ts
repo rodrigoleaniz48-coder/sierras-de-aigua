@@ -2,7 +2,7 @@ import ExcelJS from 'exceljs'
 import { supabase } from './supabase'
 
 // Datasets que el usuario puede elegir al descargar.
-export type BackupDataset = 'ventas' | 'gastos' | 'ingresos' | 'pagos' | 'movimientos' | 'clientes' | 'ctacte' | 'stock' | 'tareas'
+export type BackupDataset = 'ventas' | 'gastos' | 'ingresos' | 'pagos' | 'movimientos' | 'clientes' | 'ctacte' | 'stock' | 'tareas' | 'campo'
 export const BACKUP_DATASETS: { key: BackupDataset; label: string; grupo: 'mes' | 'foto' }[] = [
   { key: 'ventas', label: 'Ventas', grupo: 'mes' },
   { key: 'gastos', label: 'Gastos', grupo: 'mes' },
@@ -13,6 +13,7 @@ export const BACKUP_DATASETS: { key: BackupDataset; label: string; grupo: 'mes' 
   { key: 'ctacte', label: 'Cuentas corrientes', grupo: 'foto' },
   { key: 'stock', label: 'Stock actual', grupo: 'foto' },
   { key: 'tareas', label: 'Tareas', grupo: 'foto' },
+  { key: 'campo', label: 'Campo (cuaderno + cosecha)', grupo: 'foto' },
 ]
 
 interface ColSpec { header: string; key: string; width?: number }
@@ -421,6 +422,124 @@ export async function generarBackupExcel(datasets: Set<BackupDataset>): Promise<
       { header: 'Asignado', key: 'asignado', width: 12 }, { header: 'Creada', key: 'fecha_creada', width: 20 },
       { header: 'Vence', key: 'fecha_vence', width: 12 }, { header: 'Completada', key: 'fecha_completada', width: 20 },
       { header: 'Notas', key: 'notas', width: 30 },
+    ])
+  }
+
+  // --- Campo: cuaderno (labores, aplicaciones, lluvias, informes) + cosecha ---
+  if (quiere('campo')) {
+    const [laboresR, aplicR, aplicProdR, lluviasR, informesR, cosOperR, cosCargasR, cosCargaOpR, cosProcR, cosProcVarR, cosResR, cosSecR] = await Promise.all([
+      supabase.from('labores_campo').select('*').order('fecha', { ascending: false }),
+      supabase.from('aplicaciones').select('*').order('fecha', { ascending: false }),
+      supabase.from('aplicacion_productos').select('*'),
+      supabase.from('lluvias').select('*').order('fecha', { ascending: false }),
+      supabase.from('informes_tecnicos').select('*').order('fecha', { ascending: false }),
+      supabase.from('cosecha_operarios').select('id,nombre'),
+      supabase.from('cosecha_cargas').select('*').order('fecha', { ascending: false }),
+      supabase.from('cosecha_carga_operarios').select('*'),
+      supabase.from('cosecha_proceso').select('*').order('fecha', { ascending: false }),
+      supabase.from('cosecha_proceso_variedades').select('*'),
+      supabase.from('cosecha_resumen').select('*').order('anio', { ascending: false }),
+      supabase.from('cosecha_sector_resumen').select('*').order('anio', { ascending: false }),
+    ])
+    const cosOperNombre = new Map(((cosOperR.data ?? []) as Record<string, any>[]).map((o) => [o.id, o.nombre]))
+
+    // Resúmenes de hijos (una línea por cabecera)
+    const prodPorAplic = new Map<number, string[]>()
+    for (const ap of (aplicProdR.data ?? []) as Record<string, any>[]) {
+      const arr = prodPorAplic.get(ap.aplicacion_id) ?? []
+      arr.push(`${ap.producto_comercial}${ap.dosis_ha ? ` (${ap.dosis_ha}/ha)` : ''}`)
+      prodPorAplic.set(ap.aplicacion_id, arr)
+    }
+    const operPorCarga = new Map<number, string[]>()
+    for (const co of (cosCargaOpR.data ?? []) as Record<string, any>[]) {
+      const arr = operPorCarga.get(co.carga_id) ?? []
+      arr.push(`${cosOperNombre.get(co.operario_id) ?? '?'}: ${Number(co.kg)}`)
+      operPorCarga.set(co.carga_id, arr)
+    }
+    const varPorProc = new Map<number, string[]>()
+    for (const pv of (cosProcVarR.data ?? []) as Record<string, any>[]) {
+      const arr = varPorProc.get(pv.proceso_id) ?? []
+      arr.push(`${pv.variedad}${pv.litros ? ` ${Number(pv.litros)}L` : ''}`)
+      varPorProc.set(pv.proceso_id, arr)
+    }
+
+    addSheet(wb, 'Campo - Labores', ((laboresR.data ?? []) as Record<string, any>[]).map((l) => ({
+      id: l.id, fecha: l.fecha, zafra: l.zafra, sectores: l.sectores, tipo_labor: l.tipo_labor,
+      descripcion: l.descripcion, horas_tractor: l.horas_tractor, horas_hombre: l.horas_hombre,
+      jornales: l.jornales, operarios: l.operarios, estado: l.estado, observaciones: l.observaciones,
+    })), [
+      { header: 'ID', key: 'id', width: 6 }, { header: 'Fecha', key: 'fecha', width: 12 },
+      { header: 'Zafra', key: 'zafra', width: 10 }, { header: 'Sectores', key: 'sectores', width: 16 },
+      { header: 'Labor', key: 'tipo_labor', width: 18 }, { header: 'Descripción', key: 'descripcion', width: 30 },
+      { header: 'Hs tractor', key: 'horas_tractor', width: 10 }, { header: 'Hs hombre', key: 'horas_hombre', width: 10 },
+      { header: 'Jornales', key: 'jornales', width: 9 }, { header: 'Operarios', key: 'operarios', width: 20 },
+      { header: 'Estado', key: 'estado', width: 11 }, { header: 'Observaciones', key: 'observaciones', width: 30 },
+    ])
+
+    addSheet(wb, 'Campo - Aplicaciones', ((aplicR.data ?? []) as Record<string, any>[]).map((a) => ({
+      id: a.id, fecha: a.fecha, zafra: a.zafra, sectores: a.sectores, estado: a.estado,
+      forma: a.forma_aplicacion, productos: (prodPorAplic.get(a.id) ?? []).join(', '),
+      vol_total_l: a.vol_total_l, horas_tractor: a.horas_tractor, horas_hombre: a.horas_hombre,
+      operario: a.operario, observaciones: a.observaciones,
+    })), [
+      { header: 'ID', key: 'id', width: 6 }, { header: 'Fecha', key: 'fecha', width: 12 },
+      { header: 'Zafra', key: 'zafra', width: 10 }, { header: 'Sectores', key: 'sectores', width: 16 },
+      { header: 'Estado', key: 'estado', width: 11 }, { header: 'Forma', key: 'forma', width: 14 },
+      { header: 'Productos', key: 'productos', width: 40 }, { header: 'Vol total (L)', key: 'vol_total_l', width: 11 },
+      { header: 'Hs tractor', key: 'horas_tractor', width: 10 }, { header: 'Hs hombre', key: 'horas_hombre', width: 10 },
+      { header: 'Operario', key: 'operario', width: 14 }, { header: 'Observaciones', key: 'observaciones', width: 30 },
+    ])
+
+    addSheet(wb, 'Campo - Lluvias', ((lluviasR.data ?? []) as Record<string, any>[]).map((x) => ({
+      id: x.id, fecha: x.fecha, mm: x.mm, nota: x.nota,
+    })), [
+      { header: 'ID', key: 'id', width: 6 }, { header: 'Fecha', key: 'fecha', width: 12 },
+      { header: 'mm', key: 'mm', width: 8 }, { header: 'Nota', key: 'nota', width: 40 },
+    ])
+
+    addSheet(wb, 'Campo - Informes', ((informesR.data ?? []) as Record<string, any>[]).map((x) => ({
+      id: x.id, fecha: x.fecha, tecnico: x.tecnico, notas: x.notas,
+    })), [
+      { header: 'ID', key: 'id', width: 6 }, { header: 'Fecha', key: 'fecha', width: 12 },
+      { header: 'Técnico', key: 'tecnico', width: 18 }, { header: 'Notas', key: 'notas', width: 60 },
+    ])
+
+    addSheet(wb, 'Cosecha - Cargas', ((cosCargasR.data ?? []) as Record<string, any>[]).map((c) => ({
+      id: c.id, fecha: c.fecha, anio: c.anio, sector: c.sector, variedad: c.variedad,
+      kg_balanza: c.kg_balanza, kg_hojas: c.kg_hojas, operarios: (operPorCarga.get(c.id) ?? []).join(', '), notas: c.notas,
+    })), [
+      { header: 'ID', key: 'id', width: 6 }, { header: 'Fecha', key: 'fecha', width: 12 },
+      { header: 'Año', key: 'anio', width: 7 }, { header: 'Sector', key: 'sector', width: 14 },
+      { header: 'Variedad', key: 'variedad', width: 14 }, { header: 'Kg balanza', key: 'kg_balanza', width: 11 },
+      { header: 'Kg hojas', key: 'kg_hojas', width: 10 }, { header: 'Operarios (kg)', key: 'operarios', width: 30 },
+      { header: 'Notas', key: 'notas', width: 26 },
+    ])
+
+    addSheet(wb, 'Cosecha - Proceso', ((cosProcR.data ?? []) as Record<string, any>[]).map((p) => ({
+      id: p.id, fecha: p.fecha, anio: p.anio, variedades: (varPorProc.get(p.id) ?? []).join(', ') || p.variedad,
+      kg_balanza: p.kg_balanza, kg_procesado: p.kg_procesado, kg_aceite: p.kg_aceite, litros: p.litros,
+      destino: p.destino, notas: p.notas,
+    })), [
+      { header: 'ID', key: 'id', width: 6 }, { header: 'Fecha', key: 'fecha', width: 12 },
+      { header: 'Año', key: 'anio', width: 7 }, { header: 'Variedades', key: 'variedades', width: 24 },
+      { header: 'Kg balanza', key: 'kg_balanza', width: 11 }, { header: 'Kg procesado', key: 'kg_procesado', width: 12 },
+      { header: 'Kg aceite', key: 'kg_aceite', width: 10 }, { header: 'Litros', key: 'litros', width: 10 },
+      { header: 'Destino', key: 'destino', width: 14 }, { header: 'Notas', key: 'notas', width: 26 },
+    ])
+
+    addSheet(wb, 'Cosecha - Resumen', ((cosResR.data ?? []) as Record<string, any>[]).map((r) => ({
+      anio: r.anio, variedad: r.variedad, kg_cosecha: r.kg_cosecha, litros: r.litros, rendimiento_pct: r.rendimiento_pct,
+    })), [
+      { header: 'Año', key: 'anio', width: 7 }, { header: 'Variedad', key: 'variedad', width: 16 },
+      { header: 'Kg cosecha', key: 'kg_cosecha', width: 12 }, { header: 'Litros', key: 'litros', width: 10 },
+      { header: 'Rendimiento %', key: 'rendimiento_pct', width: 13 },
+    ])
+
+    addSheet(wb, 'Cosecha - Por sector', ((cosSecR.data ?? []) as Record<string, any>[]).map((r) => ({
+      anio: r.anio, sector: r.sector, kg_cosecha: r.kg_cosecha,
+    })), [
+      { header: 'Año', key: 'anio', width: 7 }, { header: 'Sector', key: 'sector', width: 18 },
+      { header: 'Kg cosecha', key: 'kg_cosecha', width: 12 },
     ])
   }
 

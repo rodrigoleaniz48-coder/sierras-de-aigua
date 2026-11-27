@@ -79,7 +79,7 @@ export function PendientesCard() {
     <div className="card p-4 space-y-3">
       <div className="flex items-center justify-between">
         <div className="text-sm font-bold text-oliva-900">
-          Pendientes {misItems.length > 0 && <span className="text-oliva-400 font-normal">· {misItems.length}</span>}
+          Tareas {misItems.length > 0 && <span className="text-oliva-400 font-normal">· {misItems.length}</span>}
         </div>
         <button onClick={() => navigate('/pendientes')} className="text-xs text-oliva-600 hover:text-oliva-900">Ver todos →</button>
       </div>

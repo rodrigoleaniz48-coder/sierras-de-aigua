@@ -29,7 +29,7 @@ export function Manual() {
             activo={rol === 'admin'}
             items={[
               'Acceso total a todos los módulos.',
-              'Ventas, Clientes, Stock, Ingresos/Egresos, Pendientes.',
+              'Ventas, Clientes, Stock, Ingresos/Egresos, Tareas.',
               'Contabilidad y Administración (precios, IVA, costos).',
               'Herramientas de márgenes, listas de precios y backup.',
             ]}
@@ -39,7 +39,7 @@ export function Manual() {
             rol="Ventas (Maldonado)"
             activo={rol === 'ventas'}
             items={[
-              'Inicio, Ventas y Pendientes.',
+              'Inicio, Ventas y Tareas.',
               'Clientes: solo los suyos.',
               'Stock: consulta y traslados (no ve Montevideo).',
               'Ingresos/Egresos: solo los propios. Sin Contabilidad ni Administración.',
@@ -50,7 +50,7 @@ export function Manual() {
             rol="Marketing (lectura)"
             activo={rol === 'marketing'}
             items={[
-              'Inicio, Clientes, Stock, Ingresos/Egresos, Pendientes.',
+              'Inicio, Clientes, Stock, Ingresos/Egresos, Tareas.',
               'Modo consulta (no modifica).',
               'Ideal para ver reportes y datos de clientes.',
             ]}
@@ -60,8 +60,8 @@ export function Manual() {
             rol="Campo"
             activo={rol === 'campo'}
             items={[
-              'Solo Pendientes (la app lo lleva directo ahí).',
-              'Ve y marca los pendientes que le asignan.',
+              'Solo Tareas (la app lo lleva directo ahí).',
+              'Ve y marca las tareas que le asignan.',
             ]}
           />
         </div>
@@ -79,10 +79,10 @@ export function Manual() {
           'Reporte semanal: tocá "Ver detalle" para ver ventas por socio, top clientes y top productos de la semana.',
           'Barra "Pendiente ventas": cuántas ventas quedan sin cobrar (y el monto). Tocala para ir a Ventas.',
           'Gráfica Ingresos vs Egresos de los últimos 6 meses (convierte dólares con la cotización del BCU).',
-          'Pendientes: los próximos del equipo, con alta rápida y marcar hecho.',
+          'Tareas: las próximas del equipo, con alta rápida y marcar hecho.',
           'Alertas: stock bajo y aviso para coordinar cadete con otro socio.',
         ]} />
-        <Nota>Emiliano (campo) no ve esta pantalla: la app lo lleva directo a Pendientes.</Nota>
+        <Nota>Emiliano (campo) no ve esta pantalla: la app lo lleva directo a Tareas.</Nota>
       </Seccion>
 
       <Seccion icono="🧾" titulo="Ventas">
@@ -134,14 +134,14 @@ export function Manual() {
         <Nota>Ubicaciones: Almazara, Maldonado, Montevideo, Posada. Gonzalo no ve Montevideo. Cada venta descuenta stock sola. Ayelén consulta sin modificar.</Nota>
       </Seccion>
 
-      <Seccion icono="✅" titulo="Pendientes">
-        <p><b>Para qué sirve:</b> una lista compartida de pendientes del equipo, simple y rápida.</p>
+      <Seccion icono="✅" titulo="Tareas">
+        <p><b>Para qué sirve:</b> una lista compartida de tareas del equipo, simple y rápida.</p>
         <Lista items={[
           'Agregar: escribí el pendiente y "Agregar" (o Enter). Solo el título es obligatorio.',
           'Opcionales: una fecha (las atrasadas salen en rojo) y "para quién".',
           'Marcar hecho: tocá el casillero. La "x" lo quita de la lista.',
           'Filtro Todos / Míos y una sección de "Hechas" por si querés revisar o desmarcar.',
-          'En el Inicio hay un bloque con los próximos pendientes y alta rápida.',
+          'En el Inicio hay un bloque con las próximas tareas y alta rápida.',
         ]} />
         <Nota>Está en el menú (y en "Más" en el teléfono), disponible para todos los roles.</Nota>
       </Seccion>

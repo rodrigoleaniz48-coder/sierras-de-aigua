@@ -213,8 +213,8 @@ export function Pendientes() {
   return (
     <div className="space-y-4 max-w-2xl">
       <div className="flex items-center justify-between gap-2">
-        <h1 className="text-xl font-extrabold text-oliva-900">Pendientes</h1>
-        <span className="text-sm text-oliva-500">{pendientes.length} pendiente{pendientes.length === 1 ? '' : 's'}</span>
+        <h1 className="text-xl font-extrabold text-oliva-900">Tareas</h1>
+        <span className="text-sm text-oliva-500">{pendientes.length} tarea{pendientes.length === 1 ? '' : 's'}</span>
       </div>
 
       {/* Alta rapida en una linea */}
