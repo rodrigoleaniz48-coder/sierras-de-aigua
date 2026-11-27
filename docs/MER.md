@@ -6,7 +6,7 @@ Diagrama entidad-relación de la base Supabase de Sierras de Aiguá (`ogtssmliif
 > `supabase/schema.sql`, que refleja un diseño anterior (tenía `lotes`, `gastos_personales`,
 > `movimientos_contables`). Este es el que corre hoy.
 
-- **55** tablas · **68** relaciones (FK) · **8** módulos
+- **54** tablas · **68** relaciones (FK) · **8** módulos
 - Notación pata de gallo: `uno ||--o{ muchos`. Cada caja lista **PK** (clave primaria) y **FK** (foránea).
 - Campos `uuid` (`socio_id`, `creado_por`, `usuario_id`, `autor_id`…) apuntan a `auth.users` de
   Supabase; `perfiles` es su 1:1 en el esquema público.
